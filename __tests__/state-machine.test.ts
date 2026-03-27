@@ -24,6 +24,7 @@ function makeAnalysis(overrides: Partial<FrameAnalysis> = {}): FrameAnalysis {
     foregroundRatio: 0.2,
     roiForegroundRatio: 0.15,
     roiLargestBlobRatio: 0.1,
+    roiLargestBlobDiagonalRatio: 0,
     motionScore: 0.02,
     skinRatio: 0.1,
     sharpnessScore: 500,

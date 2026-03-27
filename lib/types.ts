@@ -20,6 +20,20 @@ export interface FrameAnalysis {
    * than scattered noise that happens to exceed the ratio threshold.
    */
   roiLargestBlobRatio: number;
+  /**
+   * Diagonal span of the largest connected blob as a fraction of the
+   * ROI's own diagonal length. A round object (bottle cap) has a ratio
+   * close to its blob area. A thin elongated object (pen, straw, chopstick)
+   * has a ratio much larger than its blob area, enabling detection even
+   * when the blob area is below ROI_BLOB_THRESHOLD.
+   *
+   * Range: 0.0 (no blob) → 1.0+ (blob spans the full ROI diagonal).
+   * Typical values:
+   *   nothing present  → 0.00 – 0.10
+   *   pen / straw      → 0.35 – 0.70
+   *   bottle / cup     → 0.20 – 0.50
+   */
+  roiLargestBlobDiagonalRatio: number;
   motionScore: number;
   skinRatio: number;
   sharpnessScore: number;

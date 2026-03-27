@@ -96,6 +96,7 @@ export class FrameAnalyzer {
         foregroundRatio: 0,
         roiForegroundRatio: 0,
         roiLargestBlobRatio: 0,
+        roiLargestBlobDiagonalRatio: 0,
         motionScore: 0,
         skinRatio: 0,
         sharpnessScore: 0,
@@ -147,6 +148,10 @@ export class FrameAnalyzer {
     // coherent blob rather than many scattered patches that happen to sum above
     // the ratio threshold. Scattered noise → tiny blobs; real object → one large blob.
     let roiLargestBlobPixels = 0;
+    let largestBlobMinX = ROI_X1;
+    let largestBlobMaxX = ROI_X0;
+    let largestBlobMinY = ROI_Y1;
+    let largestBlobMaxY = ROI_Y0;
     const blobVisited = new Uint8Array(PIXEL_COUNT);
     for (let y = ROI_Y0; y < ROI_Y1; y++) {
       for (let x = ROI_X0; x < ROI_X1; x++) {
@@ -154,6 +159,10 @@ export class FrameAnalyzer {
         if (!roiErodedMask[startIdx] || blobVisited[startIdx]) continue;
         // DFS flood-fill — stack holds flat pixel indices
         let size = 0;
+        let blobMinX = ROI_X1;
+        let blobMaxX = ROI_X0;
+        let blobMinY = ROI_Y1;
+        let blobMaxY = ROI_Y0;
         const stack = [startIdx];
         blobVisited[startIdx] = 1;
         while (stack.length > 0) {
@@ -161,6 +170,10 @@ export class FrameAnalyzer {
           size++;
           const cx = idx % AW;
           const cy = (idx / AW) | 0;
+          if (cx < blobMinX) blobMinX = cx;
+          if (cx > blobMaxX) blobMaxX = cx;
+          if (cy < blobMinY) blobMinY = cy;
+          if (cy > blobMaxY) blobMaxY = cy;
           // Left
           if (cx > ROI_X0) {
             const n = idx - 1;
@@ -182,10 +195,31 @@ export class FrameAnalyzer {
             if (roiErodedMask[n] && !blobVisited[n]) { blobVisited[n] = 1; stack.push(n); }
           }
         }
-        if (size > roiLargestBlobPixels) roiLargestBlobPixels = size;
+        if (size > roiLargestBlobPixels) {
+          roiLargestBlobPixels = size;
+          largestBlobMinX = blobMinX;
+          largestBlobMaxX = blobMaxX;
+          largestBlobMinY = blobMinY;
+          largestBlobMaxY = blobMaxY;
+        }
       }
     }
     const roiLargestBlobRatio = roiLargestBlobPixels / ROI_PIXEL_COUNT;
+
+    // Euclidean diagonal of the largest blob's bounding box
+    const largestBlobDiagonal = Math.sqrt(
+      (largestBlobMaxX - largestBlobMinX) ** 2 +
+      (largestBlobMaxY - largestBlobMinY) ** 2
+    );
+
+    // ROI's own diagonal (constant for the fixed ROI dimensions)
+    const roiDiagonal = Math.sqrt(
+      (ROI_X1 - ROI_X0) ** 2 +
+      (ROI_Y1 - ROI_Y0) ** 2
+    );
+
+    const roiLargestBlobDiagonalRatio =
+      roiDiagonal > 0 ? largestBlobDiagonal / roiDiagonal : 0;
 
     // ── Inter-frame motion ──
     let motionCount = 0;
@@ -259,6 +293,7 @@ export class FrameAnalyzer {
       foregroundRatio,
       roiForegroundRatio,
       roiLargestBlobRatio,
+      roiLargestBlobDiagonalRatio,
       motionScore,
       skinRatio,
       sharpnessScore,

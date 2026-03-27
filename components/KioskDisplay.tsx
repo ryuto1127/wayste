@@ -52,6 +52,14 @@ const BG_RATE_FROZEN = 0;
 // Prevents scattered noise patches that sum above ROI_FG_THRESHOLD from triggering entry.
 const ROI_BLOB_THRESHOLD = 0.05;
 
+// ── Elongated-object gate ──
+// The largest blob's bounding-box diagonal as a fraction of the ROI diagonal.
+// Detects thin objects (pens, straws, chopsticks) whose pixel area is too
+// small to pass ROI_FG_THRESHOLD or ROI_BLOB_THRESHOLD.
+// 0.35 ≈ a pen held diagonally across ~35% of the ROI width+height.
+// Does NOT replace the area gates — it is an OR condition alongside them.
+const ROI_BLOB_DIAGONAL_THRESHOLD = 0.35;
+
 // ── Stabilizing motion gate ──
 // A frame only counts toward classification if inter-frame motion is below this value.
 // Slightly stricter than the idle isStable check (0.08) but not demanding perfect stillness.
@@ -166,9 +174,13 @@ export default function KioskDisplay() {
       // Both must pass: enough total eroded foreground AND a single large blob.
       // This prevents scattered noise patches that sum above the ratio threshold
       // from triggering entry — real objects form one coherent region.
+      // Thin/elongated objects (pen, straw, chopstick) have a small area but
+      // a large bounding-box diagonal — detect them even if area gates fail.
+      const elongated = analysis.roiLargestBlobDiagonalRatio > ROI_BLOB_DIAGONAL_THRESHOLD;
       const roiHasFg =
-        analysis.roiForegroundRatio >= ROI_FG_THRESHOLD &&
-        analysis.roiLargestBlobRatio >= ROI_BLOB_THRESHOLD;
+        (analysis.roiForegroundRatio >= ROI_FG_THRESHOLD &&
+         analysis.roiLargestBlobRatio >= ROI_BLOB_THRESHOLD) ||
+        elongated;
       const isStable = analysis.motionScore < MOTION_RATIO_THRESHOLD;
 
       // ────────────────────────────────────

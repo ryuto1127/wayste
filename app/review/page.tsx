@@ -11,7 +11,7 @@ const STREAMS = [
   { id: "needs_review", label: "Needs Review", color: "bg-purple-600 hover:bg-purple-500" },
 ];
 
-type ReviewEntry = FeedbackEntry & { actualStream: string | null };
+type ReviewEntry = FeedbackEntry & { actualStream: string | null; blobUploadFailed?: boolean };
 
 export default function ReviewPage() {
   const [entries, setEntries] = useState<ReviewEntry[]>([]);
@@ -144,7 +144,11 @@ function EntryCard({
         : "border-neutral-800 bg-neutral-900"
     }`}>
       {/* Image */}
-      {entry.imageUrl ? (
+      {entry.blobUploadFailed ? (
+        <div className="w-full h-48 rounded-lg bg-neutral-700 flex items-center justify-center text-neutral-400 text-sm text-center px-4">
+          Image unavailable (upload failed)
+        </div>
+      ) : entry.imageUrl ? (
         <img
           src={entry.imageUrl}
           alt={entry.itemName}

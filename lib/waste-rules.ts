@@ -6,7 +6,9 @@ import type {
   StreamDefinition,
   ClassificationResponse,
   ComponentPart,
+  ItemOverride,
 } from "./types";
+import { redis } from "./redis";
 
 const configCache = new Map<string, SiteConfig>();
 
@@ -31,6 +33,26 @@ export function loadSiteConfig(siteId: string = "default"): SiteConfig {
   }
 
   configCache.set(siteId, config);
+  return config;
+}
+
+export async function loadDynamicOverrides(siteId: string): Promise<ItemOverride[]> {
+  try {
+    const key = `recycling:dynamic-overrides:${siteId}`;
+    const raw = await redis.get(key);
+    if (!raw) return [];
+    return (typeof raw === "string" ? JSON.parse(raw) : raw) as ItemOverride[];
+  } catch {
+    return [];
+  }
+}
+
+export async function loadSiteConfigWithDynamic(siteId: string = "default"): Promise<SiteConfig> {
+  const config = { ...loadSiteConfig(siteId) };
+  const dynamicOverrides = await loadDynamicOverrides(siteId);
+  if (dynamicOverrides.length > 0) {
+    config.overrides = [...config.overrides, ...dynamicOverrides];
+  }
   return config;
 }
 

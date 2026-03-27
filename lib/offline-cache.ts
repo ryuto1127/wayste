@@ -6,6 +6,7 @@ const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 interface CacheEntry {
   result: ClassificationResponse;
+  originalItemName: string;
   timestamp: number;
   hitCount: number;
 }
@@ -14,8 +15,18 @@ interface CacheStore {
   entries: Record<string, CacheEntry>;
 }
 
-function normalizeKey(itemName: string): string {
-  return itemName.toLowerCase().trim();
+/**
+ * Normalize cache key for deduplication.
+ * - Lowercase, trim, collapse spaces, remove leading articles.
+ * - Does NOT remove descriptive adjectives like "empty" or "used" — they
+ *   meaningfully affect classification (e.g., "empty bottle" vs "bottle"
+ *   may route differently when contamination matters).
+ */
+export function normalizeKey(itemName: string): string {
+  let key = itemName.toLowerCase().trim();
+  key = key.replace(/\s+/g, " ");
+  key = key.replace(/^(a |an |the )/, "");
+  return key;
 }
 
 function loadCache(): CacheStore {
@@ -73,6 +84,7 @@ export function cacheResult(result: ClassificationResponse): void {
 
   store.entries[key] = {
     result,
+    originalItemName: result.itemName,
     timestamp: Date.now(),
     hitCount: 0,
   };

@@ -11,6 +11,8 @@ import {
 } from "@/lib/waste-rules";
 import { logPilotEntry } from "@/lib/pilot-log";
 import { uploadFrameToBlob } from "@/lib/blob-store";
+import { redis } from "@/lib/redis";
+import { generateRequestId } from "@/lib/request-id";
 
 // ── Request validation ──
 const RequestSchema = z.object({
@@ -26,9 +28,9 @@ const RequestSchema = z.object({
     .optional(),
 });
 
-// ── Rate limiting ──
-let lastRequestTime = 0;
-const MIN_INTERVAL_MS = 500;
+// ── Rate limiting (Redis-based) ──
+const RATE_LIMIT_MAX = 2;
+const RATE_LIMIT_TTL_S = 1;
 
 // ── Raw model response shape ──
 interface RawClassification {
@@ -102,14 +104,25 @@ function shouldEscalate(
 }
 
 export async function POST(request: Request) {
-  const now = Date.now();
-  if (now - lastRequestTime < MIN_INTERVAL_MS) {
-    return NextResponse.json(
-      { error: "Too many requests. Please wait." },
-      { status: 429 }
-    );
+  // ── Redis-based rate limiting ──
+  const forwarded = request.headers.get("x-forwarded-for");
+  const clientId = forwarded?.split(",")[0]?.trim() || "unknown";
+  const rlKey = `rl:classify:${clientId}`;
+  try {
+    const count = await redis.incr(rlKey);
+    if (count === 1) {
+      await redis.expire(rlKey, RATE_LIMIT_TTL_S);
+    }
+    if (count > RATE_LIMIT_MAX) {
+      return NextResponse.json(
+        { error: "rate_limited", retryAfterMs: 1000 },
+        { status: 429 }
+      );
+    }
+  } catch (err) {
+    console.warn("[classify] Redis rate-limit unavailable, allowing request:", err);
+    // requestId not yet generated at this point
   }
-  lastRequestTime = now;
 
   // ── Parse request ──
   let body: unknown;
@@ -134,6 +147,7 @@ export async function POST(request: Request) {
   const siteConfig = loadSiteConfig(siteId ?? process.env.SITE_ID ?? "default");
   const openai = new OpenAI();
   const startMs = Date.now();
+  const requestId = generateRequestId();
 
   try {
     // ── Step 1: Nano inference ──
@@ -173,15 +187,31 @@ export async function POST(request: Request) {
 
     // ── Step 4: Upload frame to Blob (synchronous — URL is returned to client) ──
     const logTimestamp = new Date().toISOString();
-    const imageUrl = await uploadFrameToBlob(
-      image,
-      result.itemName,
-      result.wasteStream,
-      logTimestamp
-    );
+    let blobUploadFailed = false;
+    let imageUrl: string | undefined;
+    try {
+      imageUrl = await uploadFrameToBlob(
+        image,
+        result.itemName,
+        result.wasteStream,
+        logTimestamp
+      );
+      if (!imageUrl) blobUploadFailed = true;
+    } catch {
+      blobUploadFailed = true;
+    }
     result.imageUrl = imageUrl;
 
     // ── Step 5: Log entry (fire-and-forget, non-blocking) ──
+    console.log(`[${requestId}] classified`, {
+      modelUsed,
+      escalated,
+      itemName: result.itemName,
+      confidence: result.confidence,
+      wasteStream: result.wasteStream,
+      latencyMs: Date.now() - startMs,
+    });
+
     waitUntil(logPilotEntry({
       timestamp: logTimestamp,
       modelUsed,
@@ -192,12 +222,14 @@ export async function POST(request: Request) {
       requiresVerification: result.needsReview,
       latencyMs: Date.now() - startMs,
       imageUrl,
+      blobUploadFailed,
+      requestId,
       meta: meta as ClassifyMeta | undefined,
     }));
 
-    return NextResponse.json(result);
+    return NextResponse.json({ ...result, requestId });
   } catch (err: unknown) {
-    console.error("Classification error:", err);
+    console.error(`[${requestId}] Classification error:`, err);
     // Surface quota exhaustion distinctly so the UI can show an actionable message
     if (
       err &&

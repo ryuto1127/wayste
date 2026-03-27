@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import type { FeedbackStats } from "@/lib/feedback-analysis";
 import type { Locale } from "@/lib/i18n";
 import { t } from "@/lib/i18n";
@@ -10,28 +10,57 @@ export default function DashboardPage() {
   const [stats, setStats] = useState<FeedbackStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [locale, setLocale] = useState<Locale>("en");
-
-  const fetchStats = useCallback(async () => {
-    try {
-      const res = await fetch("/api/feedback-stats");
-      if (res.ok) setStats(await res.json());
-    } catch {
-      // silent
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const [isLive, setIsLive] = useState(false);
+  const [applyingOverride, setApplyingOverride] = useState<string | null>(null);
+  const [appliedOverrides, setAppliedOverrides] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    fetchStats();
-    const interval = setInterval(fetchStats, 10000);
-    return () => clearInterval(interval);
-  }, [fetchStats]);
+    const es = new EventSource("/api/stats-stream");
+
+    es.onopen = () => setIsLive(true);
+
+    es.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data) as FeedbackStats;
+        setStats(data);
+        setLoading(false);
+      } catch {
+        // ignore parse errors
+      }
+    };
+
+    es.onerror = () => {
+      setIsLive(false);
+    };
+
+    return () => {
+      es.close();
+      setIsLive(false);
+    };
+  }, []);
 
   const T = useCallback(
     (key: Parameters<typeof t>[1]) => t(locale, key),
     [locale]
   );
+
+  const applyOverride = useCallback(async (pattern: string, stream: string) => {
+    setApplyingOverride(pattern);
+    try {
+      const res = await fetch("/api/overrides", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pattern, stream }),
+      });
+      if (res.ok) {
+        setAppliedOverrides((prev) => new Set(prev).add(pattern.toLowerCase()));
+      }
+    } catch {
+      // silent
+    } finally {
+      setApplyingOverride(null);
+    }
+  }, []);
 
   if (loading) {
     return (
@@ -46,7 +75,18 @@ export default function DashboardPage() {
       <div className="max-w-5xl mx-auto">
         {/* Header */}
         <div className="flex items-center justify-between mb-8">
-          <h1 className="text-3xl font-bold">{T("feedbackDashboard")}</h1>
+          <div className="flex items-center gap-3">
+            <h1 className="text-3xl font-bold">{T("feedbackDashboard")}</h1>
+            {isLive && (
+              <span className="flex items-center gap-1.5 text-xs text-emerald-400 font-medium">
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+                </span>
+                Live
+              </span>
+            )}
+          </div>
           <div className="flex items-center gap-3">
             <button
               onClick={() => setLocale(locale === "en" ? "ja" : "en")}
@@ -146,6 +186,17 @@ export default function DashboardPage() {
                           ({o.wrongCount} {T("timesWrong")})
                         </span>
                       </div>
+                      {appliedOverrides.has(o.pattern.toLowerCase()) ? (
+                        <span className="text-emerald-400 text-xs font-medium">Applied</span>
+                      ) : (
+                        <button
+                          onClick={() => applyOverride(o.pattern, o.suggestedStream)}
+                          disabled={applyingOverride === o.pattern}
+                          className="px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-medium transition-colors disabled:opacity-50"
+                        >
+                          {applyingOverride === o.pattern ? "..." : "Apply"}
+                        </button>
+                      )}
                     </div>
                   ))}
                 </div>

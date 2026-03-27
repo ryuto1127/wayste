@@ -10,6 +10,7 @@ const FeedbackSchema = z.object({
   actualStream: z.string().optional(),
   siteId: z.string().optional(),
   imageUrl: z.string().optional(),
+  requestId: z.string().optional(),
 });
 
 export async function POST(request: Request) {

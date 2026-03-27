@@ -49,6 +49,8 @@ export interface PilotLogEntry {
   requiresVerification: boolean;
   latencyMs: number;
   imageUrl?: string;   // Vercel Blob URL of the captured frame
+  blobUploadFailed?: boolean;
+  requestId?: string;
   meta?: ClassifyMeta;
 }
 
@@ -128,6 +130,7 @@ export interface FeedbackEntry {
   actualStream?: WasteStream;
   siteId: string;
   imageUrl?: string;  // Vercel Blob URL of the captured frame
+  requestId?: string;
 }
 
 export type KioskAction =

@@ -121,7 +121,11 @@ export default function KioskDisplay() {
             : (body as { error?: string }).error ?? `API error: ${res.status}`
         );
       }
-      return (await res.json()) as ClassificationResponse;
+      const data = (await res.json()) as ClassificationResponse & { requestId?: string };
+      if (data.requestId) {
+        console.log(`[classify] requestId=${data.requestId}`);
+      }
+      return data;
     },
     [locale]
   );
@@ -303,19 +307,51 @@ export default function KioskDisplay() {
     function triggerClassification(analysis: FrameAnalysis) {
       if (inFlightRef.current) return;
 
-      const frame = cameraRef.current?.captureFrame();
-      if (!frame) return;
+      const video = cameraRef.current?.getVideo();
+      if (!video) return;
 
-      inFlightRef.current = true;
-      transition("classifying");
+      /**
+       * Crop to ROI before sending to OpenAI:
+       * - Reduces payload size and API cost
+       * - Focuses the model on the object in the central region
+       * - Does NOT affect the local CV detection pipeline which runs
+       *   on its own downscaled canvas independently
+       */
+      const vw = video.videoWidth;
+      const vh = video.videoHeight;
+      const roiX = Math.round(vw * 0.20);
+      const roiY = Math.round(vh * 0.20);
+      const roiW = Math.round(vw * 0.60);
+      const roiH = Math.round(vh * 0.60);
 
-      const meta: ClassifyMeta = {
-        skinRatio: analysis.skinRatio,
-        sharpnessScore: analysis.sharpnessScore,
-        imageQuality: imageQualityBand(analysis),
-      };
+      // Scale down so longest dimension is at most 640px
+      const scale = Math.min(1, 640 / Math.max(roiW, roiH));
+      const outW = Math.round(roiW * scale);
+      const outH = Math.round(roiH * scale);
 
-      classify(frame, meta)
+      const cropCanvas = new OffscreenCanvas(outW, outH);
+      const cropCtx = cropCanvas.getContext("2d");
+      if (!cropCtx) return;
+      cropCtx.drawImage(video, roiX, roiY, roiW, roiH, 0, 0, outW, outH);
+
+      // Convert to blob then base64
+      cropCanvas.convertToBlob({ type: "image/jpeg", quality: 0.82 }).then((blob) => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const dataUrl = reader.result as string;
+          const frame = dataUrl.split(",")[1];
+          if (!frame) return;
+
+          inFlightRef.current = true;
+          transition("classifying");
+
+          const meta: ClassifyMeta = {
+            skinRatio: analysis.skinRatio,
+            sharpnessScore: analysis.sharpnessScore,
+            imageQuality: imageQualityBand(analysis),
+          };
+
+          classify(frame, meta)
         .then((result) => {
           // If "nothing detected" came back, go through cooldown before retrying.
           // Going straight to idle would immediately re-trigger the same false
@@ -349,6 +385,9 @@ export default function KioskDisplay() {
         .finally(() => {
           inFlightRef.current = false;
         });
+        };
+        reader.readAsDataURL(blob);
+      });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [classify, transition, T]);

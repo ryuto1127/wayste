@@ -28,8 +28,8 @@ const STABILITY_REQUIRED = 5;     // quality frames needed in stabilizing to tri
  * anyway with what we have. Prevents the user from being stuck in "stabilizing" forever.
  */
 const STABILIZING_MAX_FRAMES = 28; // ~4.2s at 7fps
-const COOLDOWN_MS = 1500;         // pause before re-scanning
-const OBJECT_GONE_FRAMES = 6;     // frames below ROI threshold before "gone"
+const COOLDOWN_MS = 2500;         // pause before re-scanning
+const OBJECT_GONE_FRAMES = 3;     // frames below ROI threshold before "gone" (~0.4s at 7fps)
 const FG_PERSIST_FRAMES = 4;      // consecutive ROI-blob frames required to leave idle
 const OBJECT_DETECTED_TIMEOUT = 8; // frames in object_detected before forcing to stabilizing
 /**
@@ -280,14 +280,9 @@ export default function KioskDisplay() {
             return;
           }
 
-          // If big motion spike while in result → new object likely
-          if (analysis.motionScore > 0.08) {
-            setStableResult(null);
-            stableCountRef.current = 0;
-            skinWaitRef.current = 0;
-            goneCountRef.current = 0;
-            transition("object_detected");
-          }
+          // Result stays until the object leaves frame (OBJECT_GONE_FRAMES) or
+          // the escape-hatch timeout fires (RESULT_TIMEOUT_MS). Motion while
+          // holding the item no longer resets the result.
         }
         return;
       }

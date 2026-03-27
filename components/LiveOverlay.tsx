@@ -3,7 +3,6 @@
 import { useState, useCallback } from "react";
 import type {
   ClassificationResponse,
-  WasteStream,
   PipelineState,
 } from "@/lib/types";
 import type { Locale, TranslationKey } from "@/lib/i18n";
@@ -298,14 +297,6 @@ function StreamBadge({ stream }: { stream: string }) {
   );
 }
 
-const FEEDBACK_STREAMS: { id: WasteStream; labelKey: TranslationKey }[] = [
-  { id: "recycling", labelKey: "recycling" },
-  { id: "compost", labelKey: "compost" },
-  { id: "landfill", labelKey: "landfill" },
-  { id: "special", labelKey: "special" },
-  { id: "ewaste", labelKey: "ewaste" },
-];
-
 function FeedbackButtons({
   result,
   onFeedbackGiven,
@@ -321,7 +312,7 @@ function FeedbackButtons({
   );
 
   const [state, setState] = useState<
-    "idle" | "picking_stream" | "sent" | "sending"
+    "idle" | "sent" | "sending"
   >("idle");
 
   const sendFeedback = useCallback(
@@ -368,33 +359,6 @@ function FeedbackButtons({
     );
   }
 
-  if (state === "picking_stream") {
-    return (
-      <div className="bg-neutral-800/50 rounded-xl p-3">
-        <p className="text-xs text-neutral-400 mb-2 font-medium">
-          {T("whatCorrectDisposal")}
-        </p>
-        <div className="flex flex-wrap gap-1.5">
-          {FEEDBACK_STREAMS.map((s) => (
-            <button
-              key={s.id}
-              onClick={() => sendFeedback("wrong", s.id)}
-              className="px-3 py-1.5 rounded-lg bg-neutral-700 hover:bg-neutral-600 text-neutral-200 text-xs font-medium transition-colors"
-            >
-              {T(s.labelKey)}
-            </button>
-          ))}
-          <button
-            onClick={() => setState("idle")}
-            className="px-3 py-1.5 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-neutral-500 text-xs transition-colors"
-          >
-            {T("cancel")}
-          </button>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="flex gap-2 mt-1">
       <button
@@ -404,7 +368,7 @@ function FeedbackButtons({
         {T("correct")}
       </button>
       <button
-        onClick={() => setState("picking_stream")}
+        onClick={() => sendFeedback("wrong")}
         className="flex-1 py-2.5 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-sm font-medium transition-colors"
       >
         {T("wrong")}

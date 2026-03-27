@@ -48,6 +48,7 @@ export interface PilotLogEntry {
   confidence: number;
   requiresVerification: boolean;
   latencyMs: number;
+  imageUrl?: string;   // Vercel Blob URL of the captured frame
   meta?: ClassifyMeta;
 }
 

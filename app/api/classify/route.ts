@@ -10,6 +10,7 @@ import {
   buildClassificationResult,
 } from "@/lib/waste-rules";
 import { logPilotEntry } from "@/lib/pilot-log";
+import { uploadFrameToBlob } from "@/lib/blob-store";
 
 // ── Request validation ──
 const RequestSchema = z.object({
@@ -172,18 +173,28 @@ export async function POST(request: Request) {
     const result = buildClassificationResult(raw, siteConfig);
     result.modelUsed = modelUsed;
 
-    // ── Step 4: Log for pilot evaluation (fire-and-forget, non-blocking) ──
-    waitUntil(logPilotEntry({
-      timestamp: new Date().toISOString(),
-      modelUsed,
-      escalated,
-      itemName: result.itemName,
-      wasteStream: result.wasteStream,
-      confidence: result.confidence,
-      requiresVerification: result.needsReview,
-      latencyMs: Date.now() - startMs,
-      meta: meta as ClassifyMeta | undefined,
-    }));
+    // ── Step 4: Upload frame + log entry (fire-and-forget, non-blocking) ──
+    const logTimestamp = new Date().toISOString();
+    waitUntil((async () => {
+      const imageUrl = await uploadFrameToBlob(
+        image,
+        result.itemName,
+        result.wasteStream,
+        logTimestamp
+      );
+      await logPilotEntry({
+        timestamp: logTimestamp,
+        modelUsed,
+        escalated,
+        itemName: result.itemName,
+        wasteStream: result.wasteStream,
+        confidence: result.confidence,
+        requiresVerification: result.needsReview,
+        latencyMs: Date.now() - startMs,
+        imageUrl,
+        meta: meta as ClassifyMeta | undefined,
+      });
+    })());
 
     return NextResponse.json(result);
   } catch (err: unknown) {

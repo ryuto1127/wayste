@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@upstash/redis": "^1.37.0",
+    "@vercel/blob": "^2.3.2",
     "@vercel/functions": "^3.4.3",
     "next": "16.2.1",
     "openai": "^6.33.0",

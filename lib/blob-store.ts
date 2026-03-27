@@ -19,7 +19,7 @@ export async function uploadFrameToBlob(
     const filename = `pilot-images/${timestamp.replace(/[:.]/g, "-")}-${safe(itemName)}-${safe(wasteStream)}.jpg`;
 
     const blob = await put(filename, buffer, {
-      access: "public",
+      access: "private",
       contentType: "image/jpeg",
     });
 

@@ -9,6 +9,7 @@ const FeedbackSchema = z.object({
   feedback: z.enum(["correct", "wrong"]),
   actualStream: z.string().optional(),
   siteId: z.string().optional(),
+  imageUrl: z.string().optional(),
 });
 
 export async function POST(request: Request) {

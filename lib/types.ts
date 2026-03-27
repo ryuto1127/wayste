@@ -84,6 +84,7 @@ export interface ClassificationResponse {
   components?: ComponentPart[];
   siteNote?: string;
   modelUsed?: "nano" | "mini";
+  imageUrl?: string;  // Vercel Blob URL of the captured frame
 }
 
 export interface SiteConfig {
@@ -126,6 +127,7 @@ export interface FeedbackEntry {
   feedback: "correct" | "wrong";
   actualStream?: WasteStream;
   siteId: string;
+  imageUrl?: string;  // Vercel Blob URL of the captured frame
 }
 
 export type KioskAction =

@@ -173,28 +173,29 @@ export async function POST(request: Request) {
     const result = buildClassificationResult(raw, siteConfig);
     result.modelUsed = modelUsed;
 
-    // ── Step 4: Upload frame + log entry (fire-and-forget, non-blocking) ──
+    // ── Step 4: Upload frame to Blob (synchronous — URL is returned to client) ──
     const logTimestamp = new Date().toISOString();
-    waitUntil((async () => {
-      const imageUrl = await uploadFrameToBlob(
-        image,
-        result.itemName,
-        result.wasteStream,
-        logTimestamp
-      );
-      await logPilotEntry({
-        timestamp: logTimestamp,
-        modelUsed,
-        escalated,
-        itemName: result.itemName,
-        wasteStream: result.wasteStream,
-        confidence: result.confidence,
-        requiresVerification: result.needsReview,
-        latencyMs: Date.now() - startMs,
-        imageUrl,
-        meta: meta as ClassifyMeta | undefined,
-      });
-    })());
+    const imageUrl = await uploadFrameToBlob(
+      image,
+      result.itemName,
+      result.wasteStream,
+      logTimestamp
+    );
+    result.imageUrl = imageUrl;
+
+    // ── Step 5: Log entry (fire-and-forget, non-blocking) ──
+    waitUntil(logPilotEntry({
+      timestamp: logTimestamp,
+      modelUsed,
+      escalated,
+      itemName: result.itemName,
+      wasteStream: result.wasteStream,
+      confidence: result.confidence,
+      requiresVerification: result.needsReview,
+      latencyMs: Date.now() - startMs,
+      imageUrl,
+      meta: meta as ClassifyMeta | undefined,
+    }));
 
     return NextResponse.json(result);
   } catch (err: unknown) {

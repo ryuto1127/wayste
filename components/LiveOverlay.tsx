@@ -337,6 +337,7 @@ function FeedbackButtons({
             confidence: result.confidence,
             feedback,
             actualStream,
+            imageUrl: result.imageUrl,
           }),
         });
       } catch {

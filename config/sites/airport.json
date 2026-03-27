@@ -1,0 +1,53 @@
+{
+  "siteId": "airport",
+  "siteName": "Airport Terminal — Recycling Buddy",
+  "streams": [
+    {
+      "id": "recycling",
+      "label": "Recycling",
+      "color": "#2563EB",
+      "description": "Plastic bottles, aluminum cans, clean paper, cardboard, glass bottles. Items must be empty."
+    },
+    {
+      "id": "compost",
+      "label": "Compost",
+      "color": "#16A34A",
+      "description": "Food scraps, napkins, paper towels, BPI-certified compostable serviceware."
+    },
+    {
+      "id": "landfill",
+      "label": "Garbage",
+      "color": "#525252",
+      "description": "Chip bags, candy wrappers, styrofoam, plastic wrap, straws, coffee cups, mixed packaging."
+    },
+    {
+      "id": "liquids",
+      "label": "Liquids Only",
+      "color": "#0891B2",
+      "description": "Pour remaining liquids here before recycling the container."
+    }
+  ],
+  "overrides": [
+    {
+      "pattern": "water bottle",
+      "stream": "recycling",
+      "note": "Empty the bottle first. Pour liquids into the Liquids bin."
+    },
+    {
+      "pattern": "coffee cup",
+      "stream": "landfill",
+      "note": "Paper coffee cups have a plastic lining and go in garbage. Lids go in garbage too."
+    },
+    {
+      "pattern": "newspaper",
+      "stream": "recycling",
+      "note": "Newspapers and magazines are recyclable."
+    },
+    {
+      "pattern": "food container",
+      "stream": "landfill",
+      "note": "Most airport food containers are mixed materials. If marked compostable, use Compost."
+    }
+  ],
+  "defaultStream": "landfill"
+}

@@ -1,0 +1,145 @@
+{
+  "siteId": "office-hq",
+  "siteName": "HQ Office — 4th Floor Kitchen",
+  "reviewThreshold": 0.55,
+  "streams": [
+    {
+      "id": "recycling",
+      "label": "Recycling",
+      "color": "#2563EB",
+      "description": "Clean paper, cardboard, plastic bottles (#1 and #2 only at this office), metal cans, glass."
+    },
+    {
+      "id": "compost",
+      "label": "Compost",
+      "color": "#16A34A",
+      "description": "Food scraps, coffee grounds, tea bags, soiled paper napkins, BPI-certified compostable cups and containers."
+    },
+    {
+      "id": "landfill",
+      "label": "Landfill",
+      "color": "#525252",
+      "description": "Chip bags, candy wrappers, styrofoam, plastic wrap, non-compostable cups, straws, mixed packaging."
+    },
+    {
+      "id": "ewaste",
+      "label": "E-Waste Bin",
+      "color": "#7C3AED",
+      "description": "Old cables, chargers, USB devices, small electronics, batteries, phone accessories. Drop in the purple e-waste bin by the elevator."
+    },
+    {
+      "id": "special",
+      "label": "Facilities Pickup",
+      "color": "#DC2626",
+      "description": "Toner cartridges, large electronics, fluorescent bulbs, chemicals. Email facilities@company.com or leave by the loading dock."
+    },
+    {
+      "id": "needs_review",
+      "label": "Needs Verification",
+      "color": "#D97706",
+      "description": "Items that cannot be confidently classified. Please ask facilities staff or check the posted signage near the bins."
+    }
+  ],
+  "overrides": [
+    {
+      "pattern": "coffee cup",
+      "stream": "compost",
+      "note": "This office uses BPI-certified compostable cups. Check for the green compostable logo on the bottom."
+    },
+    {
+      "pattern": "k-cup",
+      "stream": "landfill",
+      "note": "K-Cup pods are mixed materials. This office does not have a pod recycling program."
+    },
+    {
+      "pattern": "plastic bag",
+      "stream": "landfill",
+      "note": "Plastic bags jam sorting machinery. Use the bag collection box by reception instead."
+    },
+    {
+      "pattern": "cardboard",
+      "stream": "recycling",
+      "note": "Flatten cardboard and place next to the recycling bin if it doesn't fit inside."
+    },
+    {
+      "pattern": "battery",
+      "stream": "ewaste",
+      "note": "Drop batteries in the purple e-waste bin by the elevator. Never put batteries in regular bins."
+    },
+    {
+      "pattern": "cable",
+      "stream": "ewaste",
+      "note": "Old cables and chargers go in the purple e-waste bin by the elevator."
+    },
+    {
+      "pattern": "charger",
+      "stream": "ewaste",
+      "note": "Old chargers go in the purple e-waste bin by the elevator."
+    },
+    {
+      "pattern": "usb",
+      "stream": "ewaste",
+      "note": "USB devices and cables go in the purple e-waste bin."
+    },
+    {
+      "pattern": "headphone",
+      "stream": "ewaste",
+      "note": "Old headphones go in the purple e-waste bin by the elevator."
+    },
+    {
+      "pattern": "napkin",
+      "stream": "compost",
+      "note": "Used paper napkins and tissues are compostable."
+    },
+    {
+      "pattern": "utensil",
+      "stream": "compost",
+      "note": "This office uses compostable utensils. Check for the BPI logo."
+    }
+  ],
+  "siteRules": [
+    {
+      "pattern": "toner",
+      "instruction": "Toner cartridges are collected by facilities. Leave on the shelf by the copy room, do not put in any bin.",
+      "stream": "special",
+      "requiresStaff": true
+    },
+    {
+      "pattern": "printer cartridge",
+      "instruction": "Printer cartridges are collected by facilities. Leave on the shelf by the copy room.",
+      "stream": "special",
+      "requiresStaff": true
+    },
+    {
+      "pattern": "monitor",
+      "instruction": "Monitors and large electronics require a facilities pickup. Email facilities@company.com.",
+      "stream": "special",
+      "requiresStaff": true
+    },
+    {
+      "pattern": "laptop",
+      "instruction": "Laptops must go through IT asset disposal. Contact IT, do not place in any waste bin.",
+      "stream": "special",
+      "requiresStaff": true
+    },
+    {
+      "pattern": "plastic #5",
+      "instruction": "Plastic #5 (PP) is not accepted in recycling at this office. Place in landfill.",
+      "stream": "landfill"
+    },
+    {
+      "pattern": "polypropylene",
+      "instruction": "Polypropylene containers are not recyclable at this location. Place in landfill.",
+      "stream": "landfill"
+    }
+  ],
+  "staffHandlingItems": [
+    "fluorescent",
+    "chemical",
+    "paint",
+    "medication",
+    "sharps",
+    "needle"
+  ],
+  "defaultStream": "landfill"
+}

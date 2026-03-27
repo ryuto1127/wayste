@@ -1,0 +1,132 @@
+{
+  "siteId": "default",
+  "siteName": "Recycling Buddy",
+  "reviewThreshold": 0.55,
+  "streams": [
+    {
+      "id": "recycling",
+      "label": "Recycling",
+      "color": "#2563EB",
+      "description": "Clean paper, cardboard, plastic bottles and containers (#1-#5), metal cans, glass bottles and jars. Items must be empty and rinsed."
+    },
+    {
+      "id": "compost",
+      "label": "Compost",
+      "color": "#16A34A",
+      "description": "Food scraps, fruit and vegetable peels, coffee grounds, tea bags, soiled paper napkins, paper towels, yard waste, compostable containers marked BPI-certified."
+    },
+    {
+      "id": "landfill",
+      "label": "Landfill",
+      "color": "#525252",
+      "description": "Chip bags, candy wrappers, styrofoam, plastic wrap, plastic bags, lined coffee cups, straws, mixed-material packaging, broken ceramics, diapers."
+    },
+    {
+      "id": "special",
+      "label": "Special Disposal",
+      "color": "#DC2626",
+      "description": "Batteries, electronics, light bulbs, medications, paint, motor oil, hazardous chemicals. Do not place in regular bins."
+    },
+    {
+      "id": "needs_review",
+      "label": "Needs Verification",
+      "color": "#D97706",
+      "description": "Items that cannot be confidently classified. Please ask facilities staff or check the posted signage near the bins."
+    }
+  ],
+  "overrides": [
+    {
+      "pattern": "coffee cup",
+      "stream": "landfill",
+      "note": "Most paper coffee cups have a plastic lining and cannot be recycled. Remove the lid and sleeve first."
+    },
+    {
+      "pattern": "paper cup",
+      "stream": "landfill",
+      "note": "Lined paper cups are not recyclable in most facilities."
+    },
+    {
+      "pattern": "pizza box",
+      "stream": "compost",
+      "note": "Grease-soiled cardboard should go to compost, not recycling."
+    },
+    {
+      "pattern": "plastic bag",
+      "stream": "landfill",
+      "note": "Plastic bags jam sorting machinery. Some grocery stores accept them for separate recycling."
+    },
+    {
+      "pattern": "styrofoam",
+      "stream": "landfill",
+      "note": "Expanded polystyrene is not accepted in most curbside recycling programs."
+    },
+    {
+      "pattern": "battery",
+      "stream": "special",
+      "note": "Batteries require special disposal. Look for a battery collection bin or take to a hazardous waste facility."
+    },
+    {
+      "pattern": "light bulb",
+      "stream": "special",
+      "note": "Fluorescent and CFL bulbs contain mercury. LED and incandescent bulbs can go in landfill if no special collection is available."
+    },
+    {
+      "pattern": "napkin",
+      "stream": "compost",
+      "note": "Used paper napkins and tissues are compostable."
+    },
+    {
+      "pattern": "aluminum can",
+      "stream": "recycling",
+      "note": "Rinse before recycling. Crushing is optional."
+    },
+    {
+      "pattern": "glass bottle",
+      "stream": "recycling",
+      "note": "Rinse before recycling. Remove caps if they are a different material."
+    },
+    {
+      "pattern": "plastic wrap",
+      "stream": "landfill",
+      "note": "Cling wrap and plastic film are not recyclable in most curbside programs."
+    },
+    {
+      "pattern": "takeout container",
+      "stream": "landfill",
+      "note": "Most takeout containers are mixed materials or food-soiled. Check if the container is marked compostable."
+    },
+    {
+      "pattern": "cardboard",
+      "stream": "recycling",
+      "note": "Flatten cardboard boxes. Remove tape and labels if possible."
+    },
+    {
+      "pattern": "banana peel",
+      "stream": "compost",
+      "note": "All fruit and vegetable scraps are compostable."
+    },
+    {
+      "pattern": "apple core",
+      "stream": "compost",
+      "note": "All fruit and vegetable scraps are compostable."
+    },
+    {
+      "pattern": "chip bag",
+      "stream": "landfill",
+      "note": "Chip bags are made of mixed materials (plastic and metal foil) and are not recyclable."
+    },
+    {
+      "pattern": "straw",
+      "stream": "landfill",
+      "note": "Plastic straws are too small and light for recycling machinery."
+    },
+    {
+      "pattern": "utensil",
+      "stream": "landfill",
+      "note": "Plastic utensils are not recyclable. If marked compostable (BPI-certified), they go in compost."
+    }
+  ],
+  "siteRules": [],
+  "staffHandlingItems": [],
+  "defaultStream": "landfill"
+}

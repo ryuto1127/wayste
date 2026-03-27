@@ -30,7 +30,7 @@ const STABILITY_REQUIRED = 5;     // quality frames needed in stabilizing to tri
 const STABILIZING_MAX_FRAMES = 28; // ~4.2s at 7fps
 const COOLDOWN_MS = 1500;         // pause before re-scanning
 const OBJECT_GONE_FRAMES = 6;     // frames below ROI threshold before "gone"
-const FG_PERSIST_FRAMES = 3;      // consecutive ROI-blob frames required to leave idle
+const FG_PERSIST_FRAMES = 4;      // consecutive ROI-blob frames required to leave idle
 const OBJECT_DETECTED_TIMEOUT = 8; // frames in object_detected before forcing to stabilizing
 /**
  * If the result state persists for this long with the object still visible
@@ -41,7 +41,7 @@ const RESULT_TIMEOUT_MS = 10_000;
 
 // ── Background adaptation rates (passed to FrameAnalyzer per pipeline state) ──
 // idle / cooldown: full rate — continuously absorb drift and persistent leftovers
-const BG_RATE_IDLE = 0.005; // matches BG_LEARN_RATE in frame-analyzer — slow enough not to swallow new objects
+const BG_RATE_IDLE = 0.010; // matches BG_LEARN_RATE in frame-analyzer — fast enough to track camera drift
 // result: micro rate — slowly absorbs stuck items without corrupting live objects
 const BG_RATE_RESULT = 0.001;
 // object_detected / stabilizing / classifying: frozen — never absorb the held object

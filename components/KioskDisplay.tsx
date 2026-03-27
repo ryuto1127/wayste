@@ -58,7 +58,10 @@ const ROI_BLOB_THRESHOLD = 0.05;
 // small to pass ROI_FG_THRESHOLD or ROI_BLOB_THRESHOLD.
 // 0.35 ≈ a pen held diagonally across ~35% of the ROI width+height.
 // Does NOT replace the area gates — it is an OR condition alongside them.
+// Also requires a minimum blob area (ROI_BLOB_DIAGONAL_MIN_AREA) to prevent
+// diffuse noise patches from triggering detection via diagonal alone.
 const ROI_BLOB_DIAGONAL_THRESHOLD = 0.35;
+const ROI_BLOB_DIAGONAL_MIN_AREA = 0.01; // ~69 eroded pixels — filters noise, passes real thin objects
 
 // ── Stabilizing motion gate ──
 // A frame only counts toward classification if inter-frame motion is below this value.
@@ -176,7 +179,10 @@ export default function KioskDisplay() {
       // from triggering entry — real objects form one coherent region.
       // Thin/elongated objects (pen, straw, chopstick) have a small area but
       // a large bounding-box diagonal — detect them even if area gates fail.
-      const elongated = analysis.roiLargestBlobDiagonalRatio > ROI_BLOB_DIAGONAL_THRESHOLD;
+      // Require a minimum blob area to prevent noise from triggering this path.
+      const elongated =
+        analysis.roiLargestBlobDiagonalRatio > ROI_BLOB_DIAGONAL_THRESHOLD &&
+        analysis.roiLargestBlobRatio > ROI_BLOB_DIAGONAL_MIN_AREA;
       const roiHasFg =
         (analysis.roiForegroundRatio >= ROI_FG_THRESHOLD &&
          analysis.roiLargestBlobRatio >= ROI_BLOB_THRESHOLD) ||

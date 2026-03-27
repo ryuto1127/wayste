@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { waitUntil } from "@vercel/functions";
 import OpenAI from "openai";
 import { z } from "zod/v4";
 import type { ClassifyMeta, ComponentPart } from "@/lib/types";
@@ -171,8 +172,8 @@ export async function POST(request: Request) {
     const result = buildClassificationResult(raw, siteConfig);
     result.modelUsed = modelUsed;
 
-    // ── Step 4: Log for pilot evaluation ──
-    logPilotEntry({
+    // ── Step 4: Log for pilot evaluation (fire-and-forget, non-blocking) ──
+    waitUntil(logPilotEntry({
       timestamp: new Date().toISOString(),
       modelUsed,
       escalated,
@@ -182,7 +183,7 @@ export async function POST(request: Request) {
       requiresVerification: result.needsReview,
       latencyMs: Date.now() - startMs,
       meta: meta as ClassifyMeta | undefined,
-    });
+    }));
 
     return NextResponse.json(result);
   } catch (err: unknown) {

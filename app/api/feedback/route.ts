@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
-import { appendFileSync, existsSync, writeFileSync } from "fs";
-import { join } from "path";
 import { z } from "zod/v4";
+import { redis, KEYS, MAX_ENTRIES } from "@/lib/redis";
 
 const FeedbackSchema = z.object({
   itemName: z.string(),
@@ -11,8 +10,6 @@ const FeedbackSchema = z.object({
   actualStream: z.string().optional(),
   siteId: z.string().optional(),
 });
-
-const FEEDBACK_PATH = join(process.cwd(), "data", "feedback.jsonl");
 
 export async function POST(request: Request) {
   let body: unknown;
@@ -38,10 +35,8 @@ export async function POST(request: Request) {
   };
 
   try {
-    if (!existsSync(FEEDBACK_PATH)) {
-      writeFileSync(FEEDBACK_PATH, "");
-    }
-    appendFileSync(FEEDBACK_PATH, JSON.stringify(entry) + "\n");
+    await redis.rpush(KEYS.feedback, JSON.stringify(entry));
+    await redis.ltrim(KEYS.feedback, -MAX_ENTRIES, -1);
   } catch (err) {
     console.error("Failed to write feedback:", err);
     return NextResponse.json(

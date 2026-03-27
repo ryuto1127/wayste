@@ -5,6 +5,6 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const siteId = searchParams.get("siteId") ?? undefined;
 
-  const stats = analyzeFeedback(siteId);
+  const stats = await analyzeFeedback(siteId);
   return NextResponse.json(stats);
 }

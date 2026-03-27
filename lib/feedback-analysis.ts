@@ -1,27 +1,5 @@
-import { readFileSync, existsSync } from "fs";
-import { join } from "path";
+import { redis, KEYS } from "./redis";
 import type { FeedbackEntry, WasteStream } from "./types";
-
-const FEEDBACK_PATH = join(process.cwd(), "data", "feedback.jsonl");
-
-export function loadFeedback(): FeedbackEntry[] {
-  if (!existsSync(FEEDBACK_PATH)) return [];
-
-  const raw = readFileSync(FEEDBACK_PATH, "utf-8").trim();
-  if (!raw) return [];
-
-  return raw
-    .split("\n")
-    .filter(Boolean)
-    .map((line) => {
-      try {
-        return JSON.parse(line) as FeedbackEntry;
-      } catch {
-        return null;
-      }
-    })
-    .filter((e): e is FeedbackEntry => e !== null);
-}
 
 export interface FeedbackStats {
   total: number;
@@ -48,8 +26,25 @@ export interface SuggestedOverride {
   confidence: number;
 }
 
-export function analyzeFeedback(siteId?: string): FeedbackStats {
-  let entries = loadFeedback();
+export async function loadFeedback(): Promise<FeedbackEntry[]> {
+  try {
+    const raw = await redis.lrange(KEYS.feedback, 0, -1);
+    return raw
+      .map((item) => {
+        try {
+          return (typeof item === "string" ? JSON.parse(item) : item) as FeedbackEntry;
+        } catch {
+          return null;
+        }
+      })
+      .filter((e): e is FeedbackEntry => e !== null);
+  } catch {
+    return [];
+  }
+}
+
+export async function analyzeFeedback(siteId?: string): Promise<FeedbackStats> {
+  let entries = await loadFeedback();
 
   if (siteId) {
     entries = entries.filter((e) => e.siteId === siteId);
@@ -61,9 +56,6 @@ export function analyzeFeedback(siteId?: string): FeedbackStats {
   const accuracyRate = total > 0 ? correct / total : 0;
 
   // Find most corrected items
-  const wrongEntries = entries.filter(
-    (e) => e.feedback === "wrong" && e.actualStream
-  );
   const itemCounts = new Map<
     string,
     { wrongCount: number; totalCount: number; actuals: Map<string, number> }
@@ -99,7 +91,7 @@ export function analyzeFeedback(siteId?: string): FeedbackStats {
       for (const [stream, count] of data.actuals) {
         if (count > maxCount) {
           maxCount = count;
-          mostCommonActual = stream;
+          mostCommonActual = stream as WasteStream;
         }
       }
       return {
@@ -121,9 +113,7 @@ export function analyzeFeedback(siteId?: string): FeedbackStats {
     }));
 
   // Adaptive threshold suggestion
-  // If accuracy is high (>85%), we can lower the threshold to be less conservative
-  // If accuracy is low (<70%), raise it to trigger more review states
-  let suggestedThreshold = 0.55; // default
+  let suggestedThreshold = 0.55;
   if (total >= 20) {
     if (accuracyRate > 0.85) {
       suggestedThreshold = 0.45;
@@ -136,7 +126,7 @@ export function analyzeFeedback(siteId?: string): FeedbackStats {
     }
   }
 
-  // Recent feedback (last 20)
+  // Recent feedback (last 20, newest first)
   const recentFeedback = entries.slice(-20).reverse();
 
   return {

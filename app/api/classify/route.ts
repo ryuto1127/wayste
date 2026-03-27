@@ -78,26 +78,24 @@ async function callModel(
 }
 
 // ── Escalation policy: should we re-query with mini? ──
+// Keep this list short — every escalation adds ~2s latency.
+// Trust nano when it is confident; only escalate on genuine uncertainty.
 function shouldEscalate(
   raw: RawClassification,
   meta?: ClassifyMeta
 ): boolean {
   const name = raw.itemName.toLowerCase();
 
-  // Model is unsure
+  // No point re-asking for these
+  if (name === "nothing detected" || name === "unknown") return false;
+
+  // Model is genuinely unsure
   if (raw.confidence < 0.5) return true;
 
-  // Nothing detected / unknown
-  if (name === "nothing detected" || name === "unknown") return false; // no point re-asking
-
-  // Potentially hazardous — want higher-quality reasoning
-  if (raw.wasteStream === "special") return true;
-
-  // Nano flagged compound or review
-  if (raw.isCompound) return true;
+  // Model explicitly flagged it for review
   if (raw.wasteStream === "needs_review") return true;
 
-  // Client reported poor image quality
+  // Poor image quality — nano may have misread the item
   if (meta?.imageQuality === "poor") return true;
 
   return false;

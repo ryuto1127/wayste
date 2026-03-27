@@ -41,7 +41,7 @@ const RESULT_TIMEOUT_MS = 10_000;
 
 // ── Background adaptation rates (passed to FrameAnalyzer per pipeline state) ──
 // idle / cooldown: full rate — continuously absorb drift and persistent leftovers
-const BG_RATE_IDLE = 0.010; // matches BG_LEARN_RATE in frame-analyzer — fast enough to track camera drift
+const BG_RATE_IDLE = 0.015; // matches BG_LEARN_RATE in frame-analyzer
 // result: micro rate — slowly absorbs stuck items without corrupting live objects
 const BG_RATE_RESULT = 0.001;
 // object_detected / stabilizing / classifying: frozen — never absorb the held object
@@ -175,25 +175,19 @@ export default function KioskDisplay() {
         if (roiHasFg) {
           fgPersistRef.current++;
           if (fgPersistRef.current >= FG_PERSIST_FRAMES) {
-            // ROI blob present for FG_PERSIST_FRAMES consecutive frames — real object
+            // ROI blob confirmed for FG_PERSIST_FRAMES consecutive frames.
+            // BG keeps updating at BG_RATE_IDLE throughout — noise pixels (low
+            // contrast) erode below FG_PIXEL_THRESHOLD and the blob fails before
+            // reaching this count; real object pixels (higher contrast) survive.
             fgPersistRef.current = 0;
             stableCountRef.current = 0;
             skinWaitRef.current = 0;
             goneCountRef.current = 0;
             objectDetectedFrameRef.current = 0;
             transition("object_detected");
-          } else {
-            // Object entering but not yet confirmed — freeze BG for the next frame so the
-            // background model cannot absorb the new object and erode its pixel contrast
-            // before we finish counting confirmation frames.
-            // (Frame 1 already updated at BG_RATE_IDLE above; frames 2+ are frozen.)
-            analyzer.setBgRate(BG_RATE_FROZEN);
           }
         } else {
-          // No foreground — ensure BG resumes full-rate adaptation to absorb drift.
-          // This overrides any freeze that was set on a prior frame.
           fgPersistRef.current = 0;
-          analyzer.setBgRate(BG_RATE_IDLE);
         }
         return;
       }
@@ -328,12 +322,15 @@ export default function KioskDisplay() {
 
       classify(frame, meta)
         .then((result) => {
-          // If "nothing detected" came back, go to idle
+          // If "nothing detected" came back, go through cooldown before retrying.
+          // Going straight to idle would immediately re-trigger the same false
+          // foreground, creating a live→detect→identify loop.
           if (
             result.itemName.toLowerCase() === "nothing detected" ||
             result.confidence === 0
           ) {
-            transition("idle");
+            cooldownStartRef.current = Date.now();
+            transition("cooldown");
             return;
           }
 

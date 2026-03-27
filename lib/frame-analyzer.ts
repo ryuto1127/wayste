@@ -23,7 +23,7 @@ const ROI_Y1 = Math.round(AH * 0.80); // 96
 const ROI_PIXEL_COUNT = (ROI_X1 - ROI_X0) * (ROI_Y1 - ROI_Y0); // 6912
 
 // ── Background subtraction ──
-const BG_LEARN_RATE = 0.010; // absorbs camera drift in ~14s; freeze-during-entry protects new objects
+const BG_LEARN_RATE = 0.015; // absorbs camera drift in ~10s; BG continues during confirm window to erode noise
 const BG_INIT_RATE = 0.15;
 const BG_INIT_FRAMES = 30; // ~4.5s of init at 7fps
 const BG_SETTLE_FRAMES = 45; // detection blocked until this many frames

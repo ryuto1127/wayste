@@ -44,7 +44,7 @@ describe("FrameAnalyzer", () => {
 
   describe("analyzeFrame() returns state 'object_present' when blob > ROI_BLOB_THRESHOLD", () => {
     it("should indicate object presence when both thresholds are exceeded", () => {
-      const ROI_BLOB_THRESHOLD = 0.06; // from KioskDisplay
+      const ROI_BLOB_THRESHOLD = 0.05; // from KioskDisplay
       const analysis = makeAnalysis({
         roiForegroundRatio: ROI_FG_THRESHOLD + 0.05,
         roiLargestBlobRatio: ROI_BLOB_THRESHOLD + 0.02,

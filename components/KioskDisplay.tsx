@@ -48,9 +48,9 @@ const BG_RATE_RESULT = 0.001;
 const BG_RATE_FROZEN = 0;
 
 // ── Entry coherence gate ──
-// The largest single connected blob in the eroded ROI mask must cover ≥6% of the ROI.
+// The largest single connected blob in the eroded ROI mask must cover ≥5% of the ROI.
 // Prevents scattered noise patches that sum above ROI_FG_THRESHOLD from triggering entry.
-const ROI_BLOB_THRESHOLD = 0.06;
+const ROI_BLOB_THRESHOLD = 0.05;
 
 // ── Stabilizing motion gate ──
 // A frame only counts toward classification if inter-frame motion is below this value.

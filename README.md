@@ -1,148 +1,204 @@
-# Recycling Buddy — Smart Waste Sorting Kiosk
+# Recycling Buddy Kiosk
 
-A real-time waste sorting guidance system for public spaces. A camera and display are installed in front of waste bins. Users hold an item in front of the camera, and the system instantly tells them which bin to use.
+A real-time AI-powered waste sorting kiosk. Hold any item in front of the camera and it tells you which bin it belongs in — instantly.
 
-Built for airports, schools, food courts, campuses, malls, and public buildings.
+Built for office and public-space pilots, with a focus on Japan.
 
-## How It Works
+---
 
-1. A person approaches the waste station
-2. They hold an item in front of the camera
-3. The system identifies the item using computer vision (OpenAI GPT-5.4 Mini)
-4. The screen shows which bin to use — in large, readable text with color coding
-5. If confidence is low, the system says so honestly
+## What it does
 
-The system combines **live item recognition** with **site-specific waste sorting rules**, so the same item might get different guidance depending on the local facility's capabilities.
+- Detects when an object is held up to the camera using local computer vision (no cloud needed for detection)
+- Captures a frame and classifies the item using OpenAI vision models
+- Displays the correct bin (recycling, compost, landfill, special waste, etc.) with colour coding
+- Supports **English and Japanese**
+- Lets users give thumbs up / thumbs down feedback on each result
+- Logs every scan and all feedback to a database for post-pilot analysis
+- Saves a captured image alongside every log entry so misclassifications can be reviewed visually
 
-## Setup
+---
+
+## How to use it
+
+1. Open the kiosk URL on any device with a camera
+2. Hold an item in front of the camera
+3. Wait for the result — usually 3–5 seconds
+4. Dispose of the item in the indicated bin
+5. Optionally tap ✓ or ✗ to confirm or correct the result
+
+---
+
+## Pages
+
+| URL | Purpose |
+|-----|---------|
+| `/` | The kiosk itself |
+| `/dashboard` | Live accuracy stats and feedback summary |
+| `/review` | Post-pilot image review — assign correct bins to misclassified items |
+
+---
+
+## Tech stack
+
+| Layer | Technology |
+|-------|-----------|
+| Framework | Next.js 16 (App Router, TypeScript) |
+| Styling | Tailwind CSS v4 |
+| AI classification | OpenAI GPT vision (nano → mini escalation) |
+| Local detection | OffscreenCanvas background subtraction at 160×120 |
+| Database | Upstash Redis (pilot logs + feedback) |
+| Image storage | Vercel Blob (captured frames) |
+| Hosting | Vercel |
+
+---
+
+## Local development
 
 ### Prerequisites
 
 - Node.js 18+
-- An OpenAI API key
-- A webcam (built-in or USB)
+- An OpenAI account with API credits
+- A webcam
 
-### Install
+### Install and run
 
 ```bash
+git clone https://github.com/ryuto1127/recycling-buddy-kiosk.git
+cd recycling-buddy-kiosk
 npm install
 ```
 
-### Configure
+Create `.env.local`:
 
-```bash
-cp .env.local.example .env.local
+```env
+OPENAI_API_KEY=sk-...
 ```
-
-Edit `.env.local` and add your OpenAI API key:
-
-```
-OPENAI_API_KEY=sk-your-key-here
-SITE_ID=default
-```
-
-### Run
 
 ```bash
 npm run dev
 ```
 
-Open http://localhost:3000 in a browser. Allow camera access when prompted.
+Open [http://localhost:3000](http://localhost:3000) and allow camera access when prompted.
 
-For a production kiosk, run the browser in full-screen/kiosk mode (e.g., `chromium --kiosk http://localhost:3000`).
+---
 
-### Build for Production
+## Deployment
+
+### 1. Push to GitHub and deploy to Vercel
 
 ```bash
-npm run build
-npm run start
+vercel --prod
 ```
 
-## Site-Specific Waste Rules
+Or connect the GitHub repo to Vercel for automatic deploys on every `git push`.
 
-The system uses JSON configuration files in `config/sites/` to define waste sorting rules per deployment location.
+### 2. Add storage
 
-- `config/sites/default.json` — General-purpose 4-stream rules (Recycling, Compost, Landfill, Special Disposal)
-- `config/sites/airport.json` — Airport terminal example with a Liquids stream
-
-To create rules for a new site:
-
-1. Copy `config/sites/default.json` to `config/sites/your-site.json`
-2. Edit the streams, overrides, and site name
-3. Set `SITE_ID=your-site` in `.env.local`
-
-Each site config defines:
-- **Streams**: The available waste bins (name, color, description of what goes in each)
-- **Overrides**: Item-specific rules that take precedence over the AI's classification (e.g., "coffee cups go to landfill because of plastic lining")
-- **Default stream**: Fallback when uncertain (usually landfill)
-
-## Architecture
-
-```
-Browser (Kiosk Display)
-  ├── Camera feed (getUserMedia)
-  ├── Frame capture every 1.5s
-  ├── State machine: idle → detecting → result → idle
-  └── Large, high-contrast UI
-
-Server (Next.js API Route)
-  ├── /api/classify — receives base64 frame
-  ├── OpenAI GPT-5.4 Mini — identifies the item
-  ├── Waste rules engine — applies site-specific overrides
-  └── Returns: item name, bin, confidence, reasoning
+```bash
+# Redis — stores pilot logs and user feedback
+vercel integration add upstash
 ```
 
-### Key Design Decisions
+For Blob (image storage), go to **Vercel dashboard → Storage → Create Database → Blob**.
 
-- **Stability requirement**: The system requires 2 consecutive matching classifications before showing a result, preventing flickering
-- **Honest uncertainty**: Low-confidence results show a clear warning. Very low confidence shows "Item Not Recognized" instead of a wrong guess
-- **Site-configurable rules**: The AI identifies what the object *is*; the rules engine determines where it *goes* at this location
-- **No external dependencies for camera**: Uses native browser getUserMedia API
-- **GPT-5.4 Mini for speed**: Uses a fast, cost-efficient vision model for real-time classification
+### 3. Sync env vars locally
 
-## Project Structure
+```bash
+vercel env pull
+```
+
+### Environment variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `OPENAI_API_KEY` | Yes | Your OpenAI API key |
+| `KV_REST_API_URL` | Production | Upstash Redis REST URL |
+| `KV_REST_API_TOKEN` | Production | Upstash Redis token |
+| `BLOB_READ_WRITE_TOKEN` | Production | Vercel Blob token |
+| `SITE_ID` | No | Site identifier for multi-location use (default: `default`) |
+
+---
+
+## How classification works
+
+```
+User holds item in front of camera
+        ↓
+Local CV pipeline detects object (background subtraction, ROI blob detection)
+        ↓
+Frame captured and sent to /api/classify
+        ↓
+GPT nano → classifies item
+        ↓
+If uncertain or hazardous → escalates to GPT mini
+        ↓
+Site-specific waste rules applied (overrides, stream mapping)
+        ↓
+Result shown to user + frame saved to Blob + entry logged to Redis
+```
+
+---
+
+## Customising waste rules
+
+Edit `lib/waste-rules.ts` to:
+- Add hard overrides for items the model consistently gets wrong
+- Adjust confidence thresholds
+- Add site-specific bin types or instructions
+
+To create rules for a new location, copy `config/sites/default.json` to `config/sites/your-site.json`, edit it, and set `SITE_ID=your-site` in your environment.
+
+---
+
+## Post-pilot workflow
+
+After a real-world test:
+
+1. Go to `/review` on your deployed URL
+2. Every item a user marked as **wrong** appears with its captured image
+3. Click the correct bin for each one
+4. Use the corrected data to add override rules in `lib/waste-rules.ts`
+
+All raw data is in your Upstash console:
+- `recycling:pilot-log` — every classification (item, stream, confidence, model, latency, image URL)
+- `recycling:feedback` — every user correction
+- `recycling:corrections` — human-assigned correct bins from the review page
+
+---
+
+## Project structure
 
 ```
 ├── app/
-│   ├── api/classify/route.ts    # Classification API endpoint
-│   ├── globals.css              # Global styles
-│   ├── layout.tsx               # Root layout (kiosk-optimized)
-│   └── page.tsx                 # Main entry point
+│   ├── api/
+│   │   ├── classify/       # Classification endpoint (OpenAI + waste rules)
+│   │   ├── feedback/       # User feedback endpoint
+│   │   ├── feedback-stats/ # Aggregated stats for dashboard
+│   │   ├── pilot-image/    # Signed URL proxy for private blob images
+│   │   └── review/         # Review page data + correction saving
+│   ├── dashboard/          # Live stats page
+│   ├── review/             # Post-pilot image review page
+│   └── page.tsx            # Kiosk entry point
 ├── components/
-│   ├── CameraFeed.tsx           # Camera capture with getUserMedia
-│   ├── ConfidenceMeter.tsx      # Visual confidence indicator
-│   ├── IdleScreen.tsx           # Attract screen when idle
-│   ├── KioskDisplay.tsx         # Main orchestrator + state machine
-│   └── ResultDisplay.tsx        # Disposal guidance display
+│   ├── CameraFeed.tsx      # Camera capture
+│   ├── KioskDisplay.tsx    # State machine + CV orchestration
+│   └── LiveOverlay.tsx     # Result display + feedback UI
 ├── config/
-│   └── sites/
-│       ├── default.json         # Default waste rules
-│       └── airport.json         # Airport example
+│   └── sites/              # Per-location waste rule JSON files
 └── lib/
-    ├── types.ts                 # Shared TypeScript types
-    └── waste-rules.ts           # Rules engine
+    ├── blob-store.ts        # Vercel Blob upload helper
+    ├── feedback-analysis.ts # Feedback aggregation
+    ├── frame-analyzer.ts    # Local CV pipeline
+    ├── i18n.ts              # EN/JA translations
+    ├── offline-cache.ts     # Browser localStorage cache
+    ├── pilot-log.ts         # Redis logging
+    ├── redis.ts             # Upstash Redis client
+    ├── types.ts             # Shared TypeScript types
+    └── waste-rules.ts       # Classification rules engine
 ```
 
-## Future Improvements
+---
 
-### Better Real-Time Vision
-- **Edge inference**: Run a lightweight object detection model (YOLO/MobileNet) locally on the kiosk hardware for instant pre-screening, using the cloud API only for ambiguous items
-- **Multi-item detection**: Detect and classify multiple items simultaneously with bounding boxes
-- **Motion/presence detection**: Use frame differencing to detect when someone approaches, rather than running the camera loop continuously
-- **Optimized frame selection**: Only send frames when motion stabilizes (item is being held still), reducing API calls
+## License
 
-### Physical Deployment
-- **Directional arrows**: Show arrows pointing toward the physical bin (left/right/center) based on the bin layout at each site
-- **Hardware integration**: Connect to physical indicators (LED strips on bins, audio cues) via serial/GPIO
-- **Offline fallback**: Cache common classifications locally so the system works during network outages
-- **Usage analytics**: Track classification counts, confidence distributions, and common items per site
-- **Accessibility**: Audio output, multi-language support, high-contrast modes for different lighting conditions
-- **Vandal-resistant UI**: No interactive elements that can be abused; auto-recovery from all error states
-
-### Site-Specific Rules
-- **Admin panel**: Web interface for site operators to edit waste rules without touching JSON files
-- **Regional rule databases**: Pre-built rule sets for different municipalities/countries
-- **Seasonal overrides**: Handle temporary changes (e.g., holiday packaging rules)
-- **Feedback loop**: Allow staff to flag incorrect classifications, building a correction dataset over time
-# recycling-buddy-kiosk
-# recycling-buddy-kiosk
+MIT

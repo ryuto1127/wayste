@@ -24,8 +24,8 @@ export async function uploadFrameToBlob(
     });
 
     return blob.url;
-  } catch {
-    // best-effort — never block the response
+  } catch (err) {
+    console.error("[blob-store] upload failed:", err);
     return undefined;
   }
 }

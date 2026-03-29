@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import Link from "next/link";
 import type { FeedbackEntry } from "@/lib/types";
 import type { Locale } from "@/lib/i18n";
@@ -20,6 +20,7 @@ export default function ReviewPage() {
   const [entries, setEntries] = useState<ReviewEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<string | null>(null);
+  const [savingName, setSavingName] = useState<string | null>(null);
   const [locale, setLocale] = useState<Locale>("en");
 
   const T = useCallback((key: Parameters<typeof t>[1]) => t(locale, key), [locale]);
@@ -52,6 +53,24 @@ export default function ReviewPage() {
       // silent
     } finally {
       setSaving(null);
+    }
+  }, []);
+
+  const correctName = useCallback(async (id: string, actualItemName: string) => {
+    setSavingName(id);
+    try {
+      await fetch("/api/review", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, actualItemName }),
+      });
+      setEntries((prev) =>
+        prev.map((e) => (e.id === id ? { ...e, actualItemName } : e))
+      );
+    } catch {
+      // silent
+    } finally {
+      setSavingName(null);
     }
   }, []);
 
@@ -113,7 +132,9 @@ export default function ReviewPage() {
                       key={entry.id}
                       entry={entry}
                       saving={saving === entry.id}
+                      savingName={savingName === entry.id}
                       onCorrect={correct}
+                      onCorrectName={correctName}
                       locale={locale}
                       T={T}
                     />
@@ -134,7 +155,9 @@ export default function ReviewPage() {
                       key={entry.id}
                       entry={entry}
                       saving={saving === entry.id}
+                      savingName={savingName === entry.id}
                       onCorrect={correct}
+                      onCorrectName={correctName}
                       locale={locale}
                       T={T}
                     />
@@ -152,21 +175,49 @@ export default function ReviewPage() {
 function EntryCard({
   entry,
   saving,
+  savingName,
   onCorrect,
+  onCorrectName,
   locale,
   T,
 }: {
   entry: ReviewEntry;
   saving: boolean;
+  savingName: boolean;
   onCorrect: (id: string, stream: string) => void;
+  onCorrectName: (id: string, name: string) => void;
   locale: Locale;
   T: (key: Parameters<typeof t>[1]) => string;
 }) {
+  const [editingName, setEditingName] = useState(false);
+  const [nameValue, setNameValue] = useState(entry.actualItemName ?? entry.itemName);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const displayName = entry.actualItemName ?? entry.itemName;
   const date = new Date(entry.timestamp).toLocaleString(
     locale === "ja" ? "ja-JP" : "en-US",
     { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }
   );
   const isCorrected = !!entry.actualStream;
+
+  const startEdit = () => {
+    setNameValue(entry.actualItemName ?? entry.itemName);
+    setEditingName(true);
+    setTimeout(() => inputRef.current?.focus(), 0);
+  };
+
+  const saveEdit = async () => {
+    const trimmed = nameValue.trim();
+    if (trimmed && trimmed !== (entry.actualItemName ?? entry.itemName)) {
+      await onCorrectName(entry.id, trimmed);
+    }
+    setEditingName(false);
+  };
+
+  const cancelEdit = () => {
+    setNameValue(entry.actualItemName ?? entry.itemName);
+    setEditingName(false);
+  };
 
   return (
     <div className={`rounded-xl border p-4 flex flex-col gap-3 max-w-sm ${
@@ -182,7 +233,7 @@ function EntryCard({
       ) : entry.imageUrl ? (
         <img
           src={entry.imageUrl}
-          alt={entry.itemName}
+          alt={displayName}
           className="w-full max-h-96 object-contain rounded-lg bg-neutral-800"
         />
       ) : (
@@ -193,7 +244,50 @@ function EntryCard({
 
       {/* Info */}
       <div>
-        <p className="font-semibold text-white truncate">{entry.itemName}</p>
+        {editingName ? (
+          <div className="flex items-center gap-2">
+            <input
+              ref={inputRef}
+              value={nameValue}
+              onChange={(e) => setNameValue(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") saveEdit(); if (e.key === "Escape") cancelEdit(); }}
+              disabled={savingName}
+              className="flex-1 bg-neutral-700 text-white text-sm font-semibold rounded-lg px-2 py-1 border border-neutral-500 focus:outline-none focus:border-white min-w-0"
+            />
+            <button
+              onClick={saveEdit}
+              disabled={savingName}
+              className="px-2 py-1 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-xs font-medium disabled:opacity-40 shrink-0"
+            >
+              {savingName ? "…" : T("saveName")}
+            </button>
+            <button
+              onClick={cancelEdit}
+              disabled={savingName}
+              className="px-2 py-1 rounded-lg bg-neutral-700 hover:bg-neutral-600 text-xs font-medium disabled:opacity-40 shrink-0"
+            >
+              ✕
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-1.5 group">
+            <p className="font-semibold text-white truncate">
+              {displayName}
+              {entry.actualItemName && entry.actualItemName !== entry.itemName && (
+                <span className="ml-1.5 text-xs text-neutral-500 font-normal line-through">{entry.itemName}</span>
+              )}
+            </p>
+            <button
+              onClick={startEdit}
+              title={T("editName")}
+              className="text-neutral-600 hover:text-neutral-300 transition-colors opacity-0 group-hover:opacity-100 shrink-0"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="w-3.5 h-3.5">
+                <path d="M13.488 2.513a1.75 1.75 0 0 0-2.475 0L6.75 6.774a2.75 2.75 0 0 0-.596.892l-.848 2.047a.75.75 0 0 0 .98.98l2.047-.848a2.75 2.75 0 0 0 .892-.596l4.261-4.263a1.75 1.75 0 0 0 0-2.474ZM3.75 12.5a.75.75 0 0 0 0 1.5h8.5a.75.75 0 0 0 0-1.5h-8.5Z" />
+              </svg>
+            </button>
+          </div>
+        )}
         <p className="text-xs text-neutral-500 mt-0.5">{date}</p>
       </div>
 

@@ -89,6 +89,10 @@ const translations = {
     correctedSection: "Corrected",
     imageUnavailable: "Image unavailable (upload failed)",
     noImage: "No image",
+    editName: "Edit name",
+    saveName: "Save",
+    cancelEdit: "Cancel",
+    correctedName: "Corrected name",
   },
   ja: {
     analyzing: "分析中...",
@@ -171,6 +175,10 @@ const translations = {
     correctedSection: "修正済み",
     imageUnavailable: "画像が利用できません（アップロード失敗）",
     noImage: "画像なし",
+    editName: "名前を編集",
+    saveName: "保存",
+    cancelEdit: "キャンセル",
+    correctedName: "修正済み名前",
   },
 } as const;
 

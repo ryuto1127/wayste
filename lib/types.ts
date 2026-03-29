@@ -142,6 +142,7 @@ export interface FeedbackEntry {
   confidence: number;
   feedback: "correct" | "wrong";
   actualStream?: WasteStream;
+  actualItemName?: string;
   siteId: string;
   imageUrl?: string;  // Vercel Blob URL of the captured frame
   requestId?: string;

@@ -8,7 +8,8 @@ import { z } from "zod/v4";
 import { redis, KEYS } from "@/lib/redis";
 import type { FeedbackEntry } from "@/lib/types";
 
-const CORRECTIONS_KEY = "recycling:corrections"; // Redis hash: id → actualStream
+const CORRECTIONS_KEY = "recycling:corrections";       // Redis hash: id → actualStream
+const NAMES_KEY       = "recycling:corrections:names"; // Redis hash: id → actualItemName
 
 export async function GET() {
   try {
@@ -26,10 +27,14 @@ export async function GET() {
       .filter((e) => e.feedback === "wrong");
 
     // Merge any saved corrections
-    const corrections = (await redis.hgetall(CORRECTIONS_KEY)) as Record<string, string> | null;
+    const [corrections, names] = await Promise.all([
+      redis.hgetall(CORRECTIONS_KEY) as Promise<Record<string, string> | null>,
+      redis.hgetall(NAMES_KEY)       as Promise<Record<string, string> | null>,
+    ]);
     const merged = entries.map((e) => ({
       ...e,
-      actualStream: corrections?.[e.id] ?? e.actualStream ?? null,
+      actualStream:   corrections?.[e.id] ?? e.actualStream   ?? null,
+      actualItemName: names?.[e.id]        ?? e.actualItemName ?? null,
     }));
 
     // Newest first
@@ -44,7 +49,8 @@ export async function GET() {
 
 const CorrectionSchema = z.object({
   id: z.string(),
-  actualStream: z.string(),
+  actualStream:   z.string().optional(),
+  actualItemName: z.string().optional(),
 });
 
 export async function POST(request: Request) {
@@ -61,7 +67,11 @@ export async function POST(request: Request) {
   }
 
   try {
-    await redis.hset(CORRECTIONS_KEY, { [parsed.data.id]: parsed.data.actualStream });
+    const { id, actualStream, actualItemName } = parsed.data;
+    const ops: Promise<unknown>[] = [];
+    if (actualStream   !== undefined) ops.push(redis.hset(CORRECTIONS_KEY, { [id]: actualStream }));
+    if (actualItemName !== undefined) ops.push(redis.hset(NAMES_KEY,       { [id]: actualItemName }));
+    await Promise.all(ops);
     return NextResponse.json({ saved: true });
   } catch (err) {
     console.error("[review] POST failed:", err);

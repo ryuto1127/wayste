@@ -103,11 +103,11 @@ export default function ReviewPage() {
           <>
             {/* Pending entries */}
             {pending.length > 0 && (
-              <div className="bg-neutral-900 rounded-2xl p-6 mb-6 w-fit">
+              <div className="bg-neutral-900 rounded-2xl p-6 mb-6 w-full">
                 <h2 className="text-sm font-semibold text-orange-400 uppercase tracking-wider mb-4">
                   {T("needsCorrection")}
                 </h2>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 justify-center">
                   {pending.map((entry) => (
                     <EntryCard
                       key={entry.id}
@@ -124,11 +124,11 @@ export default function ReviewPage() {
 
             {/* Corrected entries */}
             {corrected.length > 0 && (
-              <div className="bg-neutral-900 rounded-2xl p-6 w-fit">
+              <div className="bg-neutral-900 rounded-2xl p-6">
                 <h2 className="text-sm font-semibold text-emerald-400 uppercase tracking-wider mb-4">
                   {T("correctedSection")}
                 </h2>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 justify-center">
                   {corrected.map((entry) => (
                     <EntryCard
                       key={entry.id}

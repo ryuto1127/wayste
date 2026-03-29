@@ -103,7 +103,7 @@ export default function ReviewPage() {
           <>
             {/* Pending entries */}
             {pending.length > 0 && (
-              <div className="bg-neutral-900 rounded-2xl p-6 mb-6">
+              <div className="bg-neutral-900 rounded-2xl p-6 mb-6 w-fit">
                 <h2 className="text-sm font-semibold text-orange-400 uppercase tracking-wider mb-4">
                   {T("needsCorrection")}
                 </h2>
@@ -124,7 +124,7 @@ export default function ReviewPage() {
 
             {/* Corrected entries */}
             {corrected.length > 0 && (
-              <div className="bg-neutral-900 rounded-2xl p-6">
+              <div className="bg-neutral-900 rounded-2xl p-6 w-fit">
                 <h2 className="text-sm font-semibold text-emerald-400 uppercase tracking-wider mb-4">
                   {T("correctedSection")}
                 </h2>
@@ -169,7 +169,7 @@ function EntryCard({
   const isCorrected = !!entry.actualStream;
 
   return (
-    <div className={`rounded-xl border p-4 flex flex-col gap-3 ${
+    <div className={`rounded-xl border p-4 flex flex-col gap-3 max-w-sm ${
       isCorrected
         ? "border-emerald-800/50 bg-emerald-950/20"
         : "border-neutral-800 bg-neutral-800/40"

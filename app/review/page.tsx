@@ -68,7 +68,7 @@ export default function ReviewPage() {
 
   return (
     <div className="min-h-screen bg-neutral-950 text-white p-8 overflow-y-auto">
-      <div className="max-w-5xl mx-auto">
+      <div className="max-w-7xl mx-auto">
         {/* Header */}
         <div className="flex items-center justify-between mb-8">
           <div>
@@ -176,17 +176,17 @@ function EntryCard({
     }`}>
       {/* Image */}
       {entry.blobUploadFailed ? (
-        <div className="w-full h-48 rounded-lg bg-neutral-700 flex items-center justify-center text-neutral-400 text-sm text-center px-4">
+        <div className="w-full rounded-lg bg-neutral-700 flex items-center justify-center text-neutral-400 text-sm text-center px-4 py-12">
           {T("imageUnavailable")}
         </div>
       ) : entry.imageUrl ? (
         <img
           src={entry.imageUrl}
           alt={entry.itemName}
-          className="w-full h-48 object-cover rounded-lg bg-neutral-800"
+          className="w-full max-h-96 object-contain rounded-lg bg-neutral-800"
         />
       ) : (
-        <div className="w-full h-48 rounded-lg bg-neutral-700 flex items-center justify-center text-neutral-500 text-sm">
+        <div className="w-full rounded-lg bg-neutral-700 flex items-center justify-center text-neutral-500 text-sm py-12">
           {T("noImage")}
         </div>
       )}

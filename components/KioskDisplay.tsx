@@ -21,14 +21,14 @@ import LiveOverlay from "./LiveOverlay";
 
 // ── Timing constants ──
 const ANALYSIS_INTERVAL_MS = 150; // ~7 fps local CV
-const STABILITY_REQUIRED = 5;     // quality frames needed in stabilizing to trigger classification
+const STABILITY_REQUIRED = 5; // quality frames needed in stabilizing to trigger classification
 /**
  * Escape hatch: if stabilizing has run this many total frames without accumulating
  * STABILITY_REQUIRED quality frames (heavy hand occlusion, persistent motion), classify
  * anyway with what we have. Prevents the user from being stuck in "stabilizing" forever.
  */
 const STABILIZING_MAX_FRAMES = 28; // ~4.2s at 7fps
-const COOLDOWN_MS = 2500;         // pause before re-scanning
+const COOLDOWN_MS = 2500; // pause before re-scanning
 const OBJECT_GONE_FRAMES = 3;     // frames below ROI threshold before "gone" (~0.4s at 7fps)
 const FG_PERSIST_FRAMES = 4;      // consecutive ROI-blob frames required to leave idle
 const OBJECT_DETECTED_TIMEOUT = 8; // frames in object_detected before forcing to stabilizing
@@ -38,6 +38,12 @@ const OBJECT_DETECTED_TIMEOUT = 8; // frames in object_detected before forcing t
  * so the BG model gets a full-rate update window in idle.
  */
 const RESULT_TIMEOUT_MS = 10_000;
+/** Minimum time an error message is visible before being cleared. */
+const ERROR_HOLD_MS = 4_000;
+/** Abort API call if it takes longer than this. */
+const API_TIMEOUT_MS = 8_000;
+/** Retry delay after a 429 rate-limit response. */
+const RATE_LIMIT_RETRY_MS = 1_200;
 
 // ── Background adaptation rates (passed to FrameAnalyzer per pipeline state) ──
 // idle / cooldown: full rate — continuously absorb drift and persistent leftovers
@@ -97,9 +103,18 @@ export default function KioskDisplay() {
   const inFlightRef = useRef(false);
   const lastAnalysisRef = useRef<FrameAnalysis | null>(null);
   const lastCachedRef = useRef("");
+  /** Timestamp when error was set — used to enforce ERROR_HOLD_MS minimum visibility. */
+  const errorSetAtRef = useRef(0);
+  /** Mirror of `error` state as a ref so the CV interval can read it without a stale closure. */
+  const errorRef = useRef<string | null>(null);
 
   // Prevent SSR — this component requires browser APIs (camera, OffscreenCanvas)
   useEffect(() => setMounted(true), []);
+
+  // Keep error ref in sync with state for stale-closure-safe reads inside the CV interval.
+  useEffect(() => {
+    errorRef.current = error;
+  }, [error]);
 
   const T = useCallback(
     (key: Parameters<typeof t>[1]) => t(locale, key),
@@ -116,27 +131,56 @@ export default function KioskDisplay() {
     setPipelineState(next);
   }, []);
 
-  // ── API call ──
+  // ── API call (with timeout + 429 retry) ──
   const classify = useCallback(
-    async (frame: string, meta: ClassifyMeta) => {
-      const res = await fetch("/api/classify", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image: frame, meta, locale }),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(
-          res.status === 402
-            ? "API quota exceeded — add credits at platform.openai.com/settings/billing"
-            : (body as { error?: string }).error ?? `API error: ${res.status}`
-        );
-      }
-      const data = (await res.json()) as ClassificationResponse & { requestId?: string };
-      if (data.requestId) {
-        console.log(`[classify] requestId=${data.requestId}`);
-      }
-      return data;
+    async (frame: string, meta: ClassifyMeta): Promise<ClassificationResponse> => {
+      const doFetch = async (): Promise<ClassificationResponse> => {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+
+        try {
+          const res = await fetch("/api/classify", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ image: frame, meta, locale }),
+            signal: controller.signal,
+          });
+
+          if (res.status === 429) {
+            // Rate-limited — wait and retry once
+            await new Promise((r) => setTimeout(r, RATE_LIMIT_RETRY_MS));
+            const retryRes = await fetch("/api/classify", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ image: frame, meta, locale }),
+            });
+            if (!retryRes.ok) {
+              const body = await retryRes.json().catch(() => ({}));
+              throw new Error((body as { error?: string }).error ?? `API error: ${retryRes.status}`);
+            }
+            return (await retryRes.json()) as ClassificationResponse;
+          }
+
+          if (!res.ok) {
+            const body = await res.json().catch(() => ({}));
+            throw new Error(
+              res.status === 402
+                ? "API quota exceeded — add credits at platform.openai.com/settings/billing"
+                : (body as { error?: string }).error ?? `API error: ${res.status}`
+            );
+          }
+
+          const data = (await res.json()) as ClassificationResponse & { requestId?: string };
+          if (data.requestId) {
+            console.log(`[classify] requestId=${data.requestId}`);
+          }
+          return data;
+        } finally {
+          clearTimeout(timeout);
+        }
+      };
+
+      return doFetch();
     },
     [locale]
   );
@@ -310,7 +354,10 @@ export default function KioskDisplay() {
       }
 
       if (state === "cooldown") {
-        if (Date.now() - cooldownStartRef.current >= COOLDOWN_MS) {
+        const cooldownElapsed = Date.now() - cooldownStartRef.current >= COOLDOWN_MS;
+        // If an error is showing, don't clear it until ERROR_HOLD_MS has passed
+        const errorHeld = !errorRef.current || (Date.now() - errorSetAtRef.current >= ERROR_HOLD_MS);
+        if (cooldownElapsed && errorHeld) {
           setStableResult(null);
           setError(null);
           transition("idle");
@@ -396,9 +443,16 @@ export default function KioskDisplay() {
             lastCachedRef.current = cacheKey;
           }
         })
-        .catch(() => {
-          setError(T("retryingAutomatically"));
-          transition("idle");
+        .catch((err) => {
+          const msg = err instanceof DOMException && err.name === "AbortError"
+            ? T("retryingAutomatically") // timeout — will auto-retry next scan
+            : T("retryingAutomatically");
+          console.warn("[classify] API error:", err);
+          setError(msg);
+          errorSetAtRef.current = Date.now();
+          // Stay in cooldown so the error is visible for ERROR_HOLD_MS
+          cooldownStartRef.current = Date.now();
+          transition("cooldown");
         })
         .finally(() => {
           inFlightRef.current = false;
@@ -442,7 +496,10 @@ export default function KioskDisplay() {
     <div className="h-screen w-screen bg-neutral-950 flex overflow-hidden select-none">
       {/* Left: Camera feed */}
       <div className="relative flex-1 h-full">
-        <CameraFeed ref={cameraRef} />
+        <CameraFeed
+          ref={cameraRef}
+          mirror={process.env.NEXT_PUBLIC_MIRROR_CAMERA === "true"}
+        />
 
         {/* Status indicator */}
         <div className="absolute top-6 left-6 flex items-center gap-2">

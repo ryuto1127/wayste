@@ -7,6 +7,7 @@ import {
   applySiteRules,
   buildClassificationResult,
   loadSiteConfig,
+  matchesPattern,
 } from "@/lib/waste-rules";
 import type { SiteConfig } from "@/lib/types";
 
@@ -106,6 +107,57 @@ describe("buildClassificationResult", () => {
     );
     expect(result.wasteStream).toBe("recycling");
     expect(result.needsReview).toBe(false);
+  });
+});
+
+describe("matchesPattern — word-boundary matching", () => {
+  it("matches exact words", () => {
+    expect(matchesPattern("coffee cup", "coffee cup")).toBe(true);
+    expect(matchesPattern("Coffee Cup", "coffee cup")).toBe(true);
+  });
+
+  it("matches pattern words within item name", () => {
+    expect(matchesPattern("used paper coffee cup", "coffee cup")).toBe(true);
+    expect(matchesPattern("old battery pack", "battery")).toBe(true);
+  });
+
+  it("does NOT match partial words (prevents cup → cupcake)", () => {
+    expect(matchesPattern("cupcake", "cup")).toBe(false);
+    expect(matchesPattern("open box", "pen")).toBe(false);
+    expect(matchesPattern("tablecloth", "table")).toBe(false);
+  });
+
+  it("matches as word boundary substring", () => {
+    expect(matchesPattern("AA battery", "battery")).toBe(true);
+    expect(matchesPattern("plastic bag from store", "plastic bag")).toBe(true);
+  });
+
+  it("handles single-word items", () => {
+    expect(matchesPattern("napkin", "napkin")).toBe(true);
+    expect(matchesPattern("Napkin", "napkin")).toBe(true);
+  });
+
+  it("matches hyphenated and multi-word patterns", () => {
+    expect(matchesPattern("old k-cup pod", "k-cup")).toBe(true);
+  });
+
+  it("does not match empty pattern", () => {
+    expect(matchesPattern("something", "")).toBe(false);
+  });
+});
+
+describe("applyOverrides specificity ordering", () => {
+  it("prefers longer (more specific) patterns over shorter ones", () => {
+    const config = makeSiteConfig({
+      overrides: [
+        { pattern: "cup", stream: "landfill", note: "Generic cup" },
+        { pattern: "coffee cup", stream: "compost", note: "Compostable cup" },
+      ],
+    });
+    // "coffee cup" should match the more specific "coffee cup" pattern, not "cup"
+    const result = applyOverrides("coffee cup", "recycling", config);
+    expect(result.stream).toBe("compost");
+    expect(result.note).toBe("Compostable cup");
   });
 });
 

@@ -68,6 +68,18 @@ export interface PilotLogEntry {
   meta?: ClassifyMeta;
 }
 
+/**
+ * Known waste streams. Site configs may define additional streams (e.g. "ewaste"),
+ * so this is a branded union that allows arbitrary strings at runtime while
+ * keeping autocomplete for known values.
+ *
+ * Why `(string & {})`: Site-specific streams like "ewaste" must be representable
+ * without modifying this core type. The branded union preserves IDE autocomplete
+ * for known values while remaining open. All runtime stream IDs coming from
+ * model output or config are validated against the site's stream list in
+ * `buildClassificationResult`, so unknown typos are caught there — not by the
+ * type system alone.
+ */
 export type WasteStream =
   | "recycling"
   | "compost"
@@ -112,6 +124,13 @@ export interface SiteConfig {
   siteRules?: SiteRule[];
   staffHandlingItems?: string[];
   reviewThreshold?: number;
+  /**
+   * Whether to horizontally flip the camera feed.
+   * Set to `true` for selfie / front-facing cameras (mirror effect).
+   * Set to `false` (default) for fixed kiosk cameras facing outward,
+   * so text on packages reads correctly.
+   */
+  mirrorCamera?: boolean;
 }
 
 export interface StreamDefinition {

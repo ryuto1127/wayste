@@ -4,6 +4,7 @@ import { useState, useCallback } from "react";
 import type {
   ClassificationResponse,
   PipelineState,
+  WasteStream,
 } from "@/lib/types";
 import type { Locale, TranslationKey } from "@/lib/i18n";
 import { t } from "@/lib/i18n";
@@ -20,6 +21,15 @@ function streamLabel(locale: Locale, streamId: string): string {
   };
   const key = map[streamId];
   return key ? t(locale, key) : streamId;
+}
+
+// ── Trust level: replaces raw confidence % ──
+type TrustLevel = "high" | "medium" | "low";
+
+function getTrustLevel(confidence: number, needsReview: boolean): TrustLevel {
+  if (needsReview || confidence < 0.4) return "low";
+  if (confidence < 0.7) return "medium";
+  return "high";
 }
 
 interface LiveOverlayProps {
@@ -107,12 +117,17 @@ export default function LiveOverlay({
             <p className="text-sm text-neutral-600 mt-2">
               {T("systemWillIdentify")}
             </p>
+            <p className="text-xs text-neutral-700 mt-4">
+              {T("showOneItem")}
+            </p>
           </>
         )}
       </div>
     </div>
   );
 }
+
+// ── Result panel: trust-level messaging instead of raw confidence % ──
 
 function ResultPanel({
   result,
@@ -127,7 +142,7 @@ function ResultPanel({
     (key: TranslationKey) => t(locale, key),
     [locale]
   );
-  const pct = Math.round(result.confidence * 100);
+  const trust = getTrustLevel(result.confidence, result.needsReview);
 
   return (
     <div className="flex flex-col p-6 gap-4">
@@ -141,20 +156,25 @@ function ResultPanel({
         {result.itemName}
       </div>
 
-      {/* Bin assignment or review state */}
-      {result.needsReview ? (
-        <ReviewBanner result={result} locale={locale} />
+      {/* ── Bin assignment: trust-level dependent ── */}
+      {trust === "low" ? (
+        <LowConfidenceBanner result={result} locale={locale} />
       ) : (
         <div
           className="rounded-2xl px-6 py-5 transition-colors duration-300"
           style={{ backgroundColor: result.binColor }}
         >
           <div className="text-xs font-semibold uppercase tracking-widest text-white/70 mb-1">
-            {T("disposeIn")}
+            {trust === "high" ? T("putThisIn") : T("likelyBelongsIn")}
           </div>
           <div className="text-4xl font-black text-white uppercase">
             {streamLabel(locale, result.wasteStream)}
           </div>
+          {trust === "medium" && (
+            <p className="text-sm text-white/60 mt-2">
+              {T("notSureCheck")}
+            </p>
+          )}
         </div>
       )}
 
@@ -175,23 +195,8 @@ function ResultPanel({
           />
         )}
 
-      {/* Properties */}
+      {/* Reasoning — always shown, replaces the raw confidence row */}
       <div className="space-y-2.5">
-        <PropertyRow label={T("category")} value={streamLabel(locale, result.wasteStream)} />
-        <PropertyRow label={T("confidence")} value={`${pct}%`}>
-          <div className="w-full h-1.5 bg-neutral-700 rounded-full overflow-hidden mt-1">
-            <div
-              className={`h-full rounded-full transition-all duration-500 ${
-                result.confidence >= 0.8
-                  ? "bg-emerald-500"
-                  : result.confidence >= 0.55
-                    ? "bg-amber-500"
-                    : "bg-red-500"
-              }`}
-              style={{ width: `${pct}%` }}
-            />
-          </div>
-        </PropertyRow>
         <PropertyRow label={T("reasoning")} value={result.reasoning} />
         {result.specialInstructions && (
           <PropertyRow label={T("note")} value={result.specialInstructions} />
@@ -209,7 +214,11 @@ function ResultPanel({
   );
 }
 
-function ReviewBanner({
+// ── Low-confidence banner: replaces "needs_review" dead end ──
+// Instead of "Needs Verification", show the best guess with a soft hedge
+// and a fallback instruction ("When in doubt, use Landfill").
+
+function LowConfidenceBanner({
   result,
   locale,
 }: {
@@ -221,20 +230,37 @@ function ReviewBanner({
     [locale]
   );
 
+  // Even at low confidence, if we have a stream guess, show it as a soft suggestion.
+  // The "needs_review" stream itself is an internal concept — users see the fallback.
+  const hasGuess =
+    result.wasteStream !== "needs_review" && result.confidence > 0;
+
   return (
-    <div className="rounded-2xl px-6 py-5 bg-amber-700 border-2 border-amber-500">
-      <div className="text-xs font-semibold uppercase tracking-widest text-amber-200/80 mb-1">
-        {T("uncertain")}
-      </div>
-      <div className="text-2xl font-black text-white uppercase mb-2">
-        {T("needsVerification")}
-      </div>
-      <p className="text-sm text-amber-100/80">{T("reviewDescription")}</p>
-      {result.confidence > 0 && (
-        <p className="text-xs text-amber-200/60 mt-2">
-          {T("bestGuess")} {result.itemName} → {result.wasteStream} (
-          {Math.round(result.confidence * 100)}%)
-        </p>
+    <div className="rounded-2xl px-6 py-5 bg-amber-800/80 border-2 border-amber-600/60">
+      {hasGuess ? (
+        <>
+          <div className="text-xs font-semibold uppercase tracking-widest text-amber-200/80 mb-1">
+            {T("likelyBelongsIn")}
+          </div>
+          <div className="text-3xl font-black text-white uppercase mb-2">
+            {streamLabel(locale, result.wasteStream)}
+          </div>
+          <p className="text-sm text-amber-100/80">
+            {T("notSureCheck")}
+          </p>
+        </>
+      ) : (
+        <>
+          <div className="text-xs font-semibold uppercase tracking-widest text-amber-200/80 mb-1">
+            {T("uncertain")}
+          </div>
+          <div className="text-2xl font-black text-white uppercase mb-2">
+            {T("whenInDoubtUse")} {streamLabel(locale, "landfill")}
+          </div>
+          <p className="text-sm text-amber-100/80">
+            {T("notSureCheck")}
+          </p>
+        </>
       )}
     </div>
   );
@@ -297,6 +323,8 @@ function StreamBadge({ stream }: { stream: string }) {
   );
 }
 
+// ── Feedback buttons with spam protection ──
+
 function FeedbackButtons({
   result,
   onFeedbackGiven,
@@ -312,11 +340,11 @@ function FeedbackButtons({
   );
 
   const [state, setState] = useState<
-    "idle" | "sent" | "sending"
+    "idle" | "picking_stream" | "sent" | "sending"
   >("idle");
 
   const sendFeedback = useCallback(
-    async (feedback: "correct" | "wrong", actualStream?: string) => {
+    async (feedback: "correct" | "wrong", actualStream?: WasteStream) => {
       setState("sending");
       try {
         await fetch("/api/feedback", {
@@ -335,8 +363,8 @@ function FeedbackButtons({
         // best-effort
       }
       setState("sent");
-      onFeedbackGiven();
-      setTimeout(() => setState("idle"), 3000);
+      // Short delay to show "thanks" before resetting
+      setTimeout(() => onFeedbackGiven(), 1200);
     },
     [result, onFeedbackGiven]
   );
@@ -359,17 +387,55 @@ function FeedbackButtons({
     );
   }
 
+  // After tapping "Wrong", show available streams so user can indicate the correct one.
+  if (state === "picking_stream") {
+    const streams: { id: WasteStream; label: string; color: string }[] = [
+      { id: "recycling", label: T("recycling"), color: "bg-blue-700 hover:bg-blue-600" },
+      { id: "compost", label: T("compost"), color: "bg-green-700 hover:bg-green-600" },
+      { id: "landfill", label: T("landfill"), color: "bg-neutral-700 hover:bg-neutral-600" },
+      { id: "special", label: T("special"), color: "bg-red-700 hover:bg-red-600" },
+    ];
+
+    return (
+      <div className="space-y-2">
+        <p className="text-xs text-neutral-400 text-center">
+          {T("whatCorrectDisposal")}
+        </p>
+        <div className="grid grid-cols-2 gap-2">
+          {streams.map((s) => (
+            <button
+              key={s.id}
+              onClick={() => sendFeedback("wrong", s.id)}
+              disabled={state !== "picking_stream"}
+              className={`${s.color} text-white text-sm font-medium py-2.5 rounded-xl transition-colors`}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+        <button
+          onClick={() => setState("idle")}
+          className="w-full py-2 text-neutral-500 text-xs hover:text-neutral-400 transition-colors"
+        >
+          {T("cancel")}
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="flex gap-2 mt-1">
       <button
         onClick={() => sendFeedback("correct")}
-        className="flex-1 py-2.5 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-sm font-medium transition-colors"
+        disabled={state !== "idle"}
+        className="flex-1 py-2.5 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-sm font-medium transition-colors disabled:opacity-50"
       >
         {T("correct")}
       </button>
       <button
-        onClick={() => sendFeedback("wrong")}
-        className="flex-1 py-2.5 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-sm font-medium transition-colors"
+        onClick={() => setState("picking_stream")}
+        disabled={state !== "idle"}
+        className="flex-1 py-2.5 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-sm font-medium transition-colors disabled:opacity-50"
       >
         {T("wrong")}
       </button>

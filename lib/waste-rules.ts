@@ -10,11 +10,22 @@ import type {
 } from "./types";
 import { redis } from "./redis";
 
-const configCache = new Map<string, SiteConfig>();
+/** Cache TTL in milliseconds — config is re-read from disk after this period. */
+const CONFIG_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+interface CachedConfig {
+  config: SiteConfig;
+  loadedAt: number;
+}
+
+const configCache = new Map<string, CachedConfig>();
 
 export function loadSiteConfig(siteId: string = "default"): SiteConfig {
+  const now = Date.now();
   const cached = configCache.get(siteId);
-  if (cached) return cached;
+  if (cached && now - cached.loadedAt < CONFIG_CACHE_TTL_MS) {
+    return cached.config;
+  }
 
   const configPath = join(process.cwd(), "config", "sites", `${siteId}.json`);
   let config: SiteConfig;
@@ -32,7 +43,7 @@ export function loadSiteConfig(siteId: string = "default"): SiteConfig {
     throw new Error("Default site config not found.");
   }
 
-  configCache.set(siteId, config);
+  configCache.set(siteId, { config, loadedAt: now });
   return config;
 }
 
@@ -56,16 +67,67 @@ export async function loadSiteConfigWithDynamic(siteId: string = "default"): Pro
   return config;
 }
 
+/**
+ * Check if `pattern` matches `itemName` using word-boundary-aware logic.
+ *
+ * Rules:
+ * 1. Both strings are lowercased and split into words.
+ * 2. A match occurs when ALL words in the pattern appear in the item name.
+ *    This prevents "cup" from matching "cupcake" because "cup" is not a
+ *    standalone word in "cupcake".
+ * 3. Single-word patterns also match as substring with word boundaries:
+ *    "battery" matches "AA battery" but not "combattery".
+ *
+ * This replaces the old bidirectional substring matching which caused
+ * false positives (e.g. "cup" → "cupcake", "pen" → "open").
+ */
+export function matchesPattern(itemName: string, pattern: string): boolean {
+  const lowerItem = itemName.toLowerCase();
+  const lowerPattern = pattern.toLowerCase();
+
+  // Fast path: exact match
+  if (lowerItem === lowerPattern) return true;
+
+  // Word-boundary match: all pattern words must appear as whole words in the item name.
+  // Split on non-alphanumeric characters to get word tokens.
+  const patternWords = lowerPattern.split(/[^a-z0-9]+/).filter(Boolean);
+  const itemWords = lowerItem.split(/[^a-z0-9]+/).filter(Boolean);
+
+  if (patternWords.length === 0) return false;
+
+  // Every word in the pattern must be present as a word in the item name.
+  const allPatternWordsMatch = patternWords.every((pw) =>
+    itemWords.some((iw) => iw === pw)
+  );
+  if (allPatternWordsMatch) return true;
+
+  // Fallback for compound words and hyphenated patterns:
+  // Check if the full pattern appears as a word-boundary substring in the item.
+  // Uses \b word boundaries to prevent "cup" matching inside "cupcake".
+  try {
+    const escaped = lowerPattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const re = new RegExp(`\\b${escaped}\\b`);
+    if (re.test(lowerItem)) return true;
+  } catch {
+    // Malformed regex — fall through
+  }
+
+  return false;
+}
+
 export function applyOverrides(
   itemName: string,
   claudeStream: WasteStream,
   siteConfig: SiteConfig
 ): { stream: WasteStream; overrideApplied: boolean; note?: string } {
-  const lowerItem = itemName.toLowerCase();
+  // Sort overrides by pattern length descending — more specific patterns match first.
+  // This ensures "coffee cup" is checked before "cup".
+  const sorted = [...siteConfig.overrides].sort(
+    (a, b) => b.pattern.length - a.pattern.length
+  );
 
-  for (const override of siteConfig.overrides) {
-    const pattern = override.pattern.toLowerCase();
-    if (lowerItem.includes(pattern) || pattern.includes(lowerItem)) {
+  for (const override of sorted) {
+    if (matchesPattern(itemName, override.pattern)) {
       return {
         stream: override.stream,
         overrideApplied: true,
@@ -81,12 +143,10 @@ export function applySiteRules(
   itemName: string,
   siteConfig: SiteConfig
 ): { siteNote?: string; requiresStaff: boolean; streamOverride?: WasteStream } {
-  const lowerItem = itemName.toLowerCase();
-
   // Check staff-handling items
   if (siteConfig.staffHandlingItems) {
     for (const pattern of siteConfig.staffHandlingItems) {
-      if (lowerItem.includes(pattern.toLowerCase())) {
+      if (matchesPattern(itemName, pattern)) {
         return {
           siteNote: `In ${siteConfig.siteName}, this item requires staff handling.`,
           requiresStaff: true,
@@ -96,11 +156,13 @@ export function applySiteRules(
     }
   }
 
-  // Check site-specific rules
+  // Check site-specific rules (sorted by specificity)
   if (siteConfig.siteRules) {
-    for (const rule of siteConfig.siteRules) {
-      const pattern = rule.pattern.toLowerCase();
-      if (lowerItem.includes(pattern) || pattern.includes(lowerItem)) {
+    const sorted = [...siteConfig.siteRules].sort(
+      (a, b) => b.pattern.length - a.pattern.length
+    );
+    for (const rule of sorted) {
+      if (matchesPattern(itemName, rule.pattern)) {
         return {
           siteNote: `In ${siteConfig.siteName}: ${rule.instruction}`,
           requiresStaff: rule.requiresStaff ?? false,
@@ -135,6 +197,16 @@ export function buildClassificationResult(
 ): ClassificationResponse {
   const threshold = siteConfig.reviewThreshold ?? REVIEW_THRESHOLD_DEFAULT;
   const confidence = Math.max(0, Math.min(1, raw.confidence));
+
+  // Validate the model's stream against the site's known streams.
+  // If the model returned a stream ID not in the config, fall back to needs_review.
+  const knownStreamIds = new Set(siteConfig.streams.map((s) => s.id));
+  if (raw.wasteStream && !knownStreamIds.has(raw.wasteStream)) {
+    console.warn(
+      `[waste-rules] Model returned unknown stream "${raw.wasteStream}" — falling back to needs_review`
+    );
+    raw = { ...raw, wasteStream: "needs_review" };
+  }
 
   // Apply item overrides
   const { stream: overriddenStream, note: overrideNote } = applyOverrides(

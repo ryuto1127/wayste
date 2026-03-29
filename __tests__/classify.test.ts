@@ -195,7 +195,7 @@ describe("POST /api/classify", () => {
   it("returns 429 when rate limit is hit", async () => {
     // Override Redis mock to simulate rate limit exceeded
     const { redis } = await import("@/lib/redis");
-    (redis.incr as jest.Mock).mockResolvedValueOnce(3); // count > 2
+    (redis.incr as jest.Mock).mockResolvedValueOnce(7); // count > 6 (RATE_LIMIT_MAX)
 
     const { POST } = await import("@/app/api/classify/route");
 

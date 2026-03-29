@@ -13,7 +13,16 @@ export interface CameraFeedHandle {
   getVideo: () => HTMLVideoElement | null;
 }
 
-const CameraFeed = forwardRef<CameraFeedHandle>(function CameraFeed(_, ref) {
+interface CameraFeedProps {
+  /**
+   * Whether to horizontally flip the video feed (mirror effect).
+   * Default `false` — suitable for outward-facing kiosk cameras.
+   * Set to `true` for front-facing / selfie-style cameras.
+   */
+  mirror?: boolean;
+}
+
+const CameraFeed = forwardRef<CameraFeedHandle, CameraFeedProps>(function CameraFeed({ mirror = false }, ref) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -109,7 +118,7 @@ const CameraFeed = forwardRef<CameraFeedHandle>(function CameraFeed(_, ref) {
         playsInline
         muted
         className="h-full w-full object-cover"
-        style={{ transform: "scaleX(-1)" }}
+        style={mirror ? { transform: "scaleX(-1)" } : undefined}
       />
       <canvas ref={canvasRef} className="hidden" />
       {!ready && (

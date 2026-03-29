@@ -19,16 +19,21 @@ const translations = {
     // Result panel
     detectedItem: "Detected Item",
     disposeIn: "Dispose in",
+    putThisIn: "Put this in",
     uncertain: "Uncertain",
     needsVerification: "Needs Verification",
     reviewDescription:
       "The system is not confident enough to recommend a bin. Please check the signage near the bins or ask facilities staff.",
     bestGuess: "Best guess:",
+    likelyBelongsIn: "This looks like it goes in",
+    whenInDoubtUse: "When in doubt, use",
+    notSureCheck: "Not sure? Check the label or ask staff",
     multiplePartsTitle: "This item has multiple parts",
     category: "Category",
     confidence: "Confidence",
     reasoning: "Reasoning",
     note: "Note",
+    showOneItem: "Show one item at a time",
 
     // Feedback
     correct: "Correct",
@@ -108,16 +113,21 @@ const translations = {
 
     detectedItem: "検出されたアイテム",
     disposeIn: "捨てる場所",
+    putThisIn: "こちらに捨ててください：",
     uncertain: "不明",
     needsVerification: "確認が必要",
     reviewDescription:
       "分類の確信度が低いため、ゴミ箱の表示を確認するか、スタッフにお尋ねください。",
     bestGuess: "推定:",
+    likelyBelongsIn: "おそらくこちら：",
+    whenInDoubtUse: "迷ったらこちらへ：",
+    notSureCheck: "不明な場合はラベルを確認するかスタッフにお尋ねください",
     multiplePartsTitle: "このアイテムは複数の部品があります",
     category: "カテゴリ",
     confidence: "確信度",
     reasoning: "理由",
     note: "備考",
+    showOneItem: "アイテムを1つずつ見せてください",
 
     correct: "正しい",
     wrong: "間違い",

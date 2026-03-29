@@ -29,10 +29,30 @@ const RequestSchema = z.object({
 });
 
 // ── Rate limiting (Redis-based) ──
-const RATE_LIMIT_MAX = 2;
-const RATE_LIMIT_TTL_S = 1;
+// Kiosks are trusted single-device endpoints — allow enough headroom for
+// back-to-back scans and retries. 6 requests per 3-second window prevents
+// genuine abuse while never blocking legitimate consecutive classifications.
+const RATE_LIMIT_MAX = 6;
+const RATE_LIMIT_TTL_S = 3;
 
-// ── Raw model response shape ──
+// ── Raw model response validation ──
+const RawClassificationSchema = z.object({
+  itemName: z.string().default("unknown"),
+  wasteStream: z.string().default("needs_review"),
+  confidence: z.number().min(0).max(1).default(0),
+  reasoning: z.string().default(""),
+  isCompound: z.boolean().optional().default(false),
+  components: z
+    .array(
+      z.object({
+        partName: z.string(),
+        wasteStream: z.string(),
+        instruction: z.string(),
+      })
+    )
+    .optional(),
+});
+
 interface RawClassification {
   itemName: string;
   wasteStream: string;
@@ -73,10 +93,35 @@ async function callModel(
   const text = response.choices[0]?.message?.content;
   if (!text) throw new Error("No text response from model");
 
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) throw new Error("No JSON found in response");
+  // Parse JSON — with response_format: "json_object" the output should be valid JSON,
+  // but we still extract defensively in case the model wraps it in markdown fences.
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    // Fallback: extract the first JSON object from the response
+    const jsonMatch = text.match(/\{[\s\S]*?\}(?=[^}]*$)/);
+    if (!jsonMatch) throw new Error("No JSON found in response");
+    parsed = JSON.parse(jsonMatch[0]);
+  }
 
-  return JSON.parse(jsonMatch[0]) as RawClassification;
+  // Validate and provide defaults for missing fields
+  const validated = RawClassificationSchema.safeParse(parsed);
+  if (!validated.success) {
+    console.warn("[callModel] Schema validation failed, using raw parse:", validated.error.issues);
+    // Graceful degradation: use raw parse but enforce minimum shape
+    const raw = parsed as Record<string, unknown>;
+    return {
+      itemName: typeof raw.itemName === "string" ? raw.itemName : "unknown",
+      wasteStream: typeof raw.wasteStream === "string" ? raw.wasteStream : "needs_review",
+      confidence: typeof raw.confidence === "number" ? Math.max(0, Math.min(1, raw.confidence)) : 0,
+      reasoning: typeof raw.reasoning === "string" ? raw.reasoning : "",
+      isCompound: raw.isCompound === true,
+      components: Array.isArray(raw.components) ? (raw.components as ComponentPart[]) : undefined,
+    };
+  }
+
+  return validated.data as RawClassification;
 }
 
 // ── Escalation policy: should we re-query with mini? ──
@@ -158,6 +203,7 @@ export async function POST(request: Request) {
 
     // ── Step 2: Escalate to mini if needed ──
     if (shouldEscalate(raw, meta)) {
+      escalated = true;
       try {
         const miniPrompt = buildClassificationPrompt(siteConfig, locale);
         const miniRaw = await callModel(
@@ -173,11 +219,11 @@ export async function POST(request: Request) {
           raw.wasteStream === "needs_review"
         ) {
           raw = miniRaw;
+          modelUsed = "mini"; // Only mark as mini if we actually used its result
         }
-        modelUsed = "mini";
-        escalated = true;
-      } catch {
-        // Mini failed — use nano result as-is
+      } catch (miniErr) {
+        // Mini failed — use nano result as-is, keep modelUsed = "nano"
+        console.warn("[classify] Mini escalation failed, using nano result:", miniErr);
       }
     }
 

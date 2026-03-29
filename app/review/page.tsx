@@ -1,14 +1,17 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import Link from "next/link";
 import type { FeedbackEntry } from "@/lib/types";
+import type { Locale } from "@/lib/i18n";
+import { t } from "@/lib/i18n";
 
-const STREAMS = [
-  { id: "recycling", label: "Recycling", color: "bg-blue-600 hover:bg-blue-500" },
-  { id: "compost", label: "Compost", color: "bg-green-600 hover:bg-green-500" },
-  { id: "landfill", label: "Landfill", color: "bg-neutral-600 hover:bg-neutral-500" },
-  { id: "special", label: "Special", color: "bg-orange-600 hover:bg-orange-500" },
-  { id: "needs_review", label: "Needs Review", color: "bg-purple-600 hover:bg-purple-500" },
+const STREAMS: { id: string; labelKey: "recycling" | "compost" | "landfill" | "special" | "needsCorrection"; color: string }[] = [
+  { id: "recycling", labelKey: "recycling", color: "bg-blue-600 hover:bg-blue-500" },
+  { id: "compost", labelKey: "compost", color: "bg-green-600 hover:bg-green-500" },
+  { id: "landfill", labelKey: "landfill", color: "bg-neutral-600 hover:bg-neutral-500" },
+  { id: "special", labelKey: "special", color: "bg-orange-600 hover:bg-orange-500" },
+  { id: "needs_review", labelKey: "needsCorrection", color: "bg-purple-600 hover:bg-purple-500" },
 ];
 
 type ReviewEntry = FeedbackEntry & { actualStream: string | null; blobUploadFailed?: boolean };
@@ -16,7 +19,10 @@ type ReviewEntry = FeedbackEntry & { actualStream: string | null; blobUploadFail
 export default function ReviewPage() {
   const [entries, setEntries] = useState<ReviewEntry[]>([]);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState<string | null>(null); // entry id being saved
+  const [saving, setSaving] = useState<string | null>(null);
+  const [locale, setLocale] = useState<Locale>("en");
+
+  const T = useCallback((key: Parameters<typeof t>[1]) => t(locale, key), [locale]);
 
   const load = useCallback(async () => {
     try {
@@ -61,64 +67,82 @@ export default function ReviewPage() {
   }
 
   return (
-    <div className="min-h-screen bg-neutral-950 text-white p-8">
-      {/* Header */}
+    <div className="min-h-screen bg-neutral-950 text-white p-8 overflow-y-auto">
       <div className="max-w-5xl mx-auto">
+        {/* Header */}
         <div className="flex items-center justify-between mb-8">
           <div>
-            <h1 className="text-2xl font-bold">Image Review</h1>
-            <p className="text-neutral-400 text-sm mt-1">
-              Assign correct bins to items users marked as wrong
-            </p>
+            <h1 className="text-3xl font-bold">{T("imageReview")}</h1>
+            <p className="text-neutral-400 text-sm mt-1">{T("imageReviewSubtitle")}</p>
           </div>
-          <div className="flex gap-4 text-sm">
-            <span className="text-orange-400 font-medium">{pending.length} pending</span>
-            <span className="text-emerald-400 font-medium">{corrected.length} corrected</span>
+          <div className="flex items-center gap-3">
+            <div className="flex gap-3 text-sm">
+              <span className="text-orange-400 font-medium">{pending.length} {T("pendingCount")}</span>
+              <span className="text-emerald-400 font-medium">{corrected.length} {T("correctedCount")}</span>
+            </div>
+            <button
+              onClick={() => setLocale(locale === "en" ? "ja" : "en")}
+              className="px-3 py-1.5 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-sm transition-colors"
+            >
+              {T("switchLang")}
+            </button>
+            <Link
+              href="/"
+              className="px-4 py-2 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-sm transition-colors"
+            >
+              {T("backToKiosk")}
+            </Link>
           </div>
         </div>
 
-        {entries.length === 0 && (
-          <div className="text-center py-24 text-neutral-500">
-            No wrong feedback entries yet.
+        {entries.length === 0 ? (
+          <div className="bg-neutral-900 rounded-2xl p-12 text-center">
+            <p className="text-neutral-400 text-lg">{T("noWrongEntries")}</p>
           </div>
-        )}
+        ) : (
+          <>
+            {/* Pending entries */}
+            {pending.length > 0 && (
+              <div className="bg-neutral-900 rounded-2xl p-6 mb-6">
+                <h2 className="text-sm font-semibold text-orange-400 uppercase tracking-wider mb-4">
+                  {T("needsCorrection")}
+                </h2>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {pending.map((entry) => (
+                    <EntryCard
+                      key={entry.id}
+                      entry={entry}
+                      saving={saving === entry.id}
+                      onCorrect={correct}
+                      locale={locale}
+                      T={T}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
 
-        {/* Pending entries */}
-        {pending.length > 0 && (
-          <section className="mb-12">
-            <h2 className="text-sm font-semibold text-orange-400 uppercase tracking-wider mb-4">
-              Needs correction
-            </h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {pending.map((entry) => (
-                <EntryCard
-                  key={entry.id}
-                  entry={entry}
-                  saving={saving === entry.id}
-                  onCorrect={correct}
-                />
-              ))}
-            </div>
-          </section>
-        )}
-
-        {/* Already corrected entries */}
-        {corrected.length > 0 && (
-          <section>
-            <h2 className="text-sm font-semibold text-emerald-400 uppercase tracking-wider mb-4">
-              Corrected
-            </h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {corrected.map((entry) => (
-                <EntryCard
-                  key={entry.id}
-                  entry={entry}
-                  saving={saving === entry.id}
-                  onCorrect={correct}
-                />
-              ))}
-            </div>
-          </section>
+            {/* Corrected entries */}
+            {corrected.length > 0 && (
+              <div className="bg-neutral-900 rounded-2xl p-6">
+                <h2 className="text-sm font-semibold text-emerald-400 uppercase tracking-wider mb-4">
+                  {T("correctedSection")}
+                </h2>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {corrected.map((entry) => (
+                    <EntryCard
+                      key={entry.id}
+                      entry={entry}
+                      saving={saving === entry.id}
+                      onCorrect={correct}
+                      locale={locale}
+                      T={T}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>
@@ -129,24 +153,31 @@ function EntryCard({
   entry,
   saving,
   onCorrect,
+  locale,
+  T,
 }: {
   entry: ReviewEntry;
   saving: boolean;
   onCorrect: (id: string, stream: string) => void;
+  locale: Locale;
+  T: (key: Parameters<typeof t>[1]) => string;
 }) {
-  const date = new Date(entry.timestamp).toLocaleString();
+  const date = new Date(entry.timestamp).toLocaleString(
+    locale === "ja" ? "ja-JP" : "en-US",
+    { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }
+  );
   const isCorrected = !!entry.actualStream;
 
   return (
     <div className={`rounded-xl border p-4 flex flex-col gap-3 ${
       isCorrected
         ? "border-emerald-800/50 bg-emerald-950/20"
-        : "border-neutral-800 bg-neutral-900"
+        : "border-neutral-800 bg-neutral-800/40"
     }`}>
       {/* Image */}
       {entry.blobUploadFailed ? (
         <div className="w-full h-48 rounded-lg bg-neutral-700 flex items-center justify-center text-neutral-400 text-sm text-center px-4">
-          Image unavailable (upload failed)
+          {T("imageUnavailable")}
         </div>
       ) : entry.imageUrl ? (
         <img
@@ -155,25 +186,25 @@ function EntryCard({
           className="w-full h-48 object-cover rounded-lg bg-neutral-800"
         />
       ) : (
-        <div className="w-full h-48 rounded-lg bg-neutral-800 flex items-center justify-center text-neutral-600 text-sm">
-          No image
+        <div className="w-full h-48 rounded-lg bg-neutral-700 flex items-center justify-center text-neutral-500 text-sm">
+          {T("noImage")}
         </div>
       )}
 
       {/* Info */}
       <div>
         <p className="font-semibold text-white truncate">{entry.itemName}</p>
-        <p className="text-xs text-neutral-400 mt-0.5">{date}</p>
+        <p className="text-xs text-neutral-500 mt-0.5">{date}</p>
       </div>
 
       {/* Prediction vs correction */}
       <div className="flex items-center gap-2 text-sm">
-        <span className="text-neutral-400">Predicted:</span>
-        <span className="text-red-400 font-medium">{entry.predictedStream}</span>
+        <span className="text-neutral-400">{T("predicted")}:</span>
+        <StreamPill stream={entry.predictedStream} />
         {isCorrected && (
           <>
             <span className="text-neutral-600">→</span>
-            <span className="text-emerald-400 font-medium">{entry.actualStream}</span>
+            <StreamPill stream={entry.actualStream!} />
           </>
         )}
       </div>
@@ -186,20 +217,33 @@ function EntryCard({
             onClick={() => onCorrect(entry.id, s.id)}
             disabled={saving}
             className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${s.color} ${
-              entry.actualStream === s.id
-                ? "ring-2 ring-white"
-                : "opacity-70"
+              entry.actualStream === s.id ? "ring-2 ring-white" : "opacity-70"
             } disabled:opacity-40`}
           >
-            {s.label}
+            {T(s.labelKey)}
           </button>
         ))}
       </div>
 
       {/* Confidence */}
-      <p className="text-xs text-neutral-600">
-        Confidence: {Math.round(entry.confidence * 100)}%
+      <p className="text-xs text-neutral-500">
+        {T("confidence")}: {Math.round(entry.confidence * 100)}%
       </p>
     </div>
+  );
+}
+
+function StreamPill({ stream }: { stream: string }) {
+  const colorMap: Record<string, string> = {
+    recycling: "bg-blue-600",
+    compost: "bg-green-600",
+    landfill: "bg-neutral-600",
+    special: "bg-orange-600",
+    needs_review: "bg-purple-600",
+  };
+  return (
+    <span className={`${colorMap[stream] ?? "bg-neutral-600"} text-white text-[10px] font-bold uppercase px-2 py-0.5 rounded-md`}>
+      {stream}
+    </span>
   );
 }

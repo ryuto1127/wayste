@@ -78,6 +78,17 @@ const translations = {
     currentThreshold: "Current threshold",
     suggestedThreshold: "Suggested",
     basedOnFeedback: "Based on feedback accuracy",
+
+    // Review page
+    imageReview: "Image Review",
+    imageReviewSubtitle: "Assign correct bins to items users marked as wrong",
+    pendingCount: "pending",
+    correctedCount: "corrected",
+    noWrongEntries: "No wrong feedback entries yet.",
+    needsCorrection: "Needs correction",
+    correctedSection: "Corrected",
+    imageUnavailable: "Image unavailable (upload failed)",
+    noImage: "No image",
   },
   ja: {
     analyzing: "分析中...",
@@ -149,6 +160,17 @@ const translations = {
     currentThreshold: "現在のしきい値",
     suggestedThreshold: "推奨値",
     basedOnFeedback: "フィードバック精度に基づく",
+
+    // Review page
+    imageReview: "画像レビュー",
+    imageReviewSubtitle: "ユーザーが「間違い」と報告したアイテムに正しいゴミ箱を割り当てる",
+    pendingCount: "件 未対応",
+    correctedCount: "件 修正済み",
+    noWrongEntries: "まだ間違いのフィードバックはありません。",
+    needsCorrection: "修正が必要",
+    correctedSection: "修正済み",
+    imageUnavailable: "画像が利用できません（アップロード失敗）",
+    noImage: "画像なし",
   },
 } as const;
 

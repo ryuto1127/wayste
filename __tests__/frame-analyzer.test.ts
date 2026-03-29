@@ -99,6 +99,40 @@ describe("FrameAnalyzer", () => {
   });
 });
 
+describe("HSV-based skin detection", () => {
+  // MAX_SKIN_RATIO was updated from 0.70 to 0.80
+  it("uses updated MAX_SKIN_RATIO threshold of 0.80", () => {
+    expect(MAX_SKIN_RATIO).toBe(0.80);
+  });
+
+  it("light skin tone: skinRatio below threshold passes", () => {
+    // Light skin with small object — skinRatio around 0.5 should pass
+    const analysis = makeAnalysis({ skinRatio: 0.5 });
+    const blocked = analysis.skinRatio > MAX_SKIN_RATIO;
+    expect(blocked).toBe(false);
+  });
+
+  it("dark skin tone: skinRatio below threshold passes", () => {
+    // Dark skin holding object — skinRatio around 0.4 should pass
+    const analysis = makeAnalysis({ skinRatio: 0.4 });
+    const blocked = analysis.skinRatio > MAX_SKIN_RATIO;
+    expect(blocked).toBe(false);
+  });
+
+  it("gloved hand: skinRatio near zero passes", () => {
+    // Glove has no skin-like colors in HSV range
+    const analysis = makeAnalysis({ skinRatio: 0.02 });
+    const blocked = analysis.skinRatio > MAX_SKIN_RATIO;
+    expect(blocked).toBe(false);
+  });
+
+  it("blocks when skinRatio exceeds 0.80", () => {
+    const analysis = makeAnalysis({ skinRatio: 0.85 });
+    const blocked = analysis.skinRatio > MAX_SKIN_RATIO;
+    expect(blocked).toBe(true);
+  });
+});
+
 describe("imageQualityBand", () => {
   it("returns 'good' for high sharpness and low skin ratio", () => {
     expect(imageQualityBand(makeAnalysis({ sharpnessScore: 500, skinRatio: 0.1 }))).toBe("good");

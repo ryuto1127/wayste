@@ -190,6 +190,7 @@ export function buildClassificationResult(
     wasteStream: string;
     confidence: number;
     reasoning: string;
+    preAction?: string;
     isCompound?: boolean;
     components?: ComponentPart[];
   },
@@ -274,6 +275,7 @@ export function buildClassificationResult(
     binColor,
     binLabel,
     specialInstructions: overrideNote,
+    preAction: raw.preAction || undefined,
     needsReview,
     isCompound,
     components: isCompound ? components : undefined,
@@ -301,8 +303,9 @@ Identify the item being held in front of the camera and classify it.
 Streams: ${streams}
 
 Respond with ONLY this JSON:
-{"itemName":"short name","wasteStream":"stream_id","confidence":0.0-1.0,"reasoning":"one sentence"}
+{"itemName":"short name","wasteStream":"stream_id","confidence":0.0-1.0,"reasoning":"one sentence","preAction":""}
 
+If the user should do something before disposing (empty contents, remove lid, rinse, disassemble), put a short instruction in preAction. Otherwise leave it as an empty string.
 If the image is unclear, blurry, or shows no item, set confidence to 0 and itemName to "nothing detected".
 Be honest about confidence — do not inflate it when uncertain.${langNote}`;
 }
@@ -339,9 +342,12 @@ Respond with ONLY a JSON object in this exact format, no other text:
   "wasteStream": "one of: ${siteConfig.streams.map((s) => s.id).join(", ")}",
   "confidence": 0.0 to 1.0,
   "reasoning": "one sentence explaining why this item goes in this stream",
+  "preAction": "",
   "isCompound": false,
   "components": []
 }
+
+If the user should do something before disposing (empty contents, remove lid/cap, rinse, disassemble), put a short instruction in preAction. Otherwise leave it as an empty string.
 
 If isCompound is true, populate components like:
 "components": [

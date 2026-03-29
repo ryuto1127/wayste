@@ -28,8 +28,8 @@ const STABILITY_REQUIRED = 5; // quality frames needed in stabilizing to trigger
  * anyway with what we have. Prevents the user from being stuck in "stabilizing" forever.
  */
 const STABILIZING_MAX_FRAMES = 28; // ~4.2s at 7fps
-const COOLDOWN_MS = 2500; // pause before re-scanning
-const OBJECT_GONE_FRAMES = 3;     // frames below ROI threshold before "gone" (~0.4s at 7fps)
+const COOLDOWN_MS = 1500; // pause before re-scanning
+const OBJECT_GONE_FRAMES = 2;     // frames below ROI threshold before "gone" (~0.3s at 7fps)
 const FG_PERSIST_FRAMES = 4;      // consecutive ROI-blob frames required to leave idle
 const OBJECT_DETECTED_TIMEOUT = 8; // frames in object_detected before forcing to stabilizing
 /**
@@ -37,7 +37,7 @@ const OBJECT_DETECTED_TIMEOUT = 8; // frames in object_detected before forcing t
  * (e.g., a tissue leftover that never leaves), force a transition to cooldown
  * so the BG model gets a full-rate update window in idle.
  */
-const RESULT_TIMEOUT_MS = 10_000;
+const RESULT_TIMEOUT_MS = 4_000;
 /** Minimum time an error message is visible before being cleared. */
 const ERROR_HOLD_MS = 4_000;
 /** Abort API call if it takes longer than this. */
@@ -85,7 +85,9 @@ export default function KioskDisplay() {
   const [stableResult, setStableResult] =
     useState<ClassificationResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [locale, setLocale] = useState<Locale>("en");
+  const [locale, setLocale] = useState<Locale>(
+    (process.env.NEXT_PUBLIC_DEFAULT_LOCALE as Locale) || "en"
+  );
 
   // ── CV counters (refs to avoid re-renders) ──
   const stableCountRef = useRef(0);
@@ -445,8 +447,8 @@ export default function KioskDisplay() {
         })
         .catch((err) => {
           const msg = err instanceof DOMException && err.name === "AbortError"
-            ? T("retryingAutomatically") // timeout — will auto-retry next scan
-            : T("retryingAutomatically");
+            ? T("connectionSlow")
+            : T("classificationFailed");
           console.warn("[classify] API error:", err);
           setError(msg);
           errorSetAtRef.current = Date.now();
@@ -539,7 +541,7 @@ export default function KioskDisplay() {
         {/* Language toggle */}
         <button
           onClick={toggleLocale}
-          className="absolute top-6 right-6 px-3 py-1.5 rounded-lg bg-black/50 backdrop-blur-sm hover:bg-black/70 text-white/80 text-sm font-medium transition-colors"
+          className="absolute top-6 right-6 px-5 py-2.5 rounded-xl bg-white/20 border border-white/40 backdrop-blur-sm hover:bg-white/30 text-white text-base font-medium transition-colors"
         >
           {T("switchLang")}
         </button>

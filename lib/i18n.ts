@@ -15,6 +15,8 @@ const translations = {
 
     // LiveOverlay - error
     retryingAutomatically: "Retrying automatically",
+    connectionSlow: "Connection slow — retrying...",
+    classificationFailed: "Classification failed — retrying...",
 
     // Result panel
     detectedItem: "Detected Item",
@@ -50,6 +52,10 @@ const translations = {
     landfill: "Landfill",
     special: "Special",
     ewaste: "E-Waste",
+    burnable: "Burnable",
+    nonBurnable: "Non-burnable",
+    recyclable: "Recyclable",
+    plastic: "Plastic",
 
     // Pipeline states
     itemDetected: "Item detected",
@@ -110,6 +116,8 @@ const translations = {
     systemWillIdentify: "自動で識別します",
 
     retryingAutomatically: "自動で再試行中",
+    connectionSlow: "接続が遅いため再試行中...",
+    classificationFailed: "分類に失敗しました。再試行中...",
 
     detectedItem: "検出されたアイテム",
     disposeIn: "捨てる場所",
@@ -142,6 +150,10 @@ const translations = {
     landfill: "ゴミ",
     special: "特別処理",
     ewaste: "電子ゴミ",
+    burnable: "可燃ゴミ",
+    nonBurnable: "不燃ゴミ",
+    recyclable: "資源ゴミ",
+    plastic: "プラスチック",
 
     // Pipeline states
     itemDetected: "アイテムを検出しました",

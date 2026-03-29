@@ -18,6 +18,10 @@ function streamLabel(locale: Locale, streamId: string): string {
     special: "special",
     ewaste: "ewaste",
     needs_review: "needsVerification",
+    burnable: "burnable",
+    "non-burnable": "nonBurnable",
+    recyclable: "recyclable",
+    plastic: "plastic",
   };
   const key = map[streamId];
   return key ? t(locale, key) : streamId;
@@ -161,20 +165,28 @@ function ResultPanel({
         <LowConfidenceBanner result={result} locale={locale} />
       ) : (
         <div
-          className="rounded-2xl px-6 py-5 transition-colors duration-300"
+          className="rounded-2xl px-6 py-6 transition-colors duration-300"
           style={{ backgroundColor: result.binColor }}
         >
           <div className="text-xs font-semibold uppercase tracking-widest text-white/70 mb-1">
             {trust === "high" ? T("putThisIn") : T("likelyBelongsIn")}
           </div>
-          <div className="text-4xl font-black text-white uppercase">
+          <div className="text-5xl font-black text-white uppercase">
             {streamLabel(locale, result.wasteStream)}
           </div>
           {trust === "medium" && (
             <p className="text-sm text-white/60 mt-2">
-              {T("notSureCheck")}
+              {locale === "ja" ? "ゴミ箱の表示もご確認ください" : "Please also check the bin label"}
             </p>
           )}
+        </div>
+      )}
+
+      {/* Pre-action banner */}
+      {result.preAction && (
+        <div className="bg-amber-900/60 border border-amber-600/40 rounded-xl px-4 py-3 flex items-start gap-3">
+          <span className="text-amber-200 text-lg font-bold mt-0.5">!</span>
+          <p className="text-amber-100 text-sm font-medium">{result.preAction}</p>
         </div>
       )}
 
@@ -195,21 +207,25 @@ function ResultPanel({
           />
         )}
 
-      {/* Reasoning — always shown, replaces the raw confidence row */}
-      <div className="space-y-2.5">
-        <PropertyRow label={T("reasoning")} value={result.reasoning} />
-        {result.specialInstructions && (
-          <PropertyRow label={T("note")} value={result.specialInstructions} />
-        )}
-      </div>
+      {/* Special instructions (shown prominently) */}
+      {result.specialInstructions && (
+        <div className="bg-blue-900/30 border border-blue-700/40 rounded-xl px-4 py-3">
+          <p className="text-blue-300 text-sm">{result.specialInstructions}</p>
+        </div>
+      )}
 
-      {/* Feedback section */}
-      <FeedbackButtons
-        key={`${result.itemName}::${result.wasteStream}`}
-        result={result}
-        onFeedbackGiven={onFeedbackGiven}
-        locale={locale}
-      />
+      {/* Reasoning — collapsible, hidden by default */}
+      <CollapsibleReasoning label={T("reasoning")} value={result.reasoning} />
+
+      {/* Feedback section — smaller, at bottom */}
+      <div className="mt-auto pt-2">
+        <FeedbackButtons
+          key={`${result.itemName}::${result.wasteStream}`}
+          result={result}
+          onFeedbackGiven={onFeedbackGiven}
+          locale={locale}
+        />
+      </div>
     </div>
   );
 }
@@ -266,6 +282,24 @@ function LowConfidenceBanner({
   );
 }
 
+function CollapsibleReasoning({ label, value }: { label: string; value: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <button
+      onClick={() => setOpen((o) => !o)}
+      className="w-full text-left bg-neutral-800/50 rounded-xl px-4 py-2.5 transition-colors hover:bg-neutral-800/70"
+    >
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-semibold uppercase tracking-wider text-neutral-500">
+          {label}
+        </span>
+        <span className="text-neutral-500 text-xs">{open ? "▲" : "▼"}</span>
+      </div>
+      {open && <p className="text-sm text-neutral-200 mt-1.5">{value}</p>}
+    </button>
+  );
+}
+
 function CompoundBreakdown({
   components,
   locale,
@@ -311,6 +345,10 @@ function StreamBadge({ stream }: { stream: string }) {
     special: "bg-red-600",
     ewaste: "bg-purple-600",
     needs_review: "bg-amber-600",
+    burnable: "bg-red-500",
+    "non-burnable": "bg-gray-500",
+    recyclable: "bg-blue-500",
+    plastic: "bg-amber-500",
   };
   const bg = colorMap[stream] ?? "bg-neutral-600";
 
@@ -424,18 +462,18 @@ function FeedbackButtons({
   }
 
   return (
-    <div className="flex gap-2 mt-1">
+    <div className="flex gap-2">
       <button
         onClick={() => sendFeedback("correct")}
         disabled={state !== "idle"}
-        className="flex-1 py-2.5 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-sm font-medium transition-colors disabled:opacity-50"
+        className="flex-1 py-1.5 rounded-lg bg-neutral-800/60 hover:bg-neutral-700 text-neutral-400 text-xs font-medium transition-colors disabled:opacity-50"
       >
         {T("correct")}
       </button>
       <button
         onClick={() => setState("picking_stream")}
         disabled={state !== "idle"}
-        className="flex-1 py-2.5 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-sm font-medium transition-colors disabled:opacity-50"
+        className="flex-1 py-1.5 rounded-lg bg-neutral-800/60 hover:bg-neutral-700 text-neutral-400 text-xs font-medium transition-colors disabled:opacity-50"
       >
         {T("wrong")}
       </button>

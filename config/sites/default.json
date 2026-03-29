@@ -1,6 +1,7 @@
 {
   "siteId": "default",
   "siteName": "Recycling Buddy",
+  "defaultLocale": "en",
   "reviewThreshold": 0.55,
   "streams": [
     {

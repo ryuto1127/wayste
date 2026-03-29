@@ -1,0 +1,31 @@
+{
+  "siteId": "japan-office",
+  "siteName": "オフィス（日本）",
+  "defaultLocale": "ja",
+  "reviewThreshold": 0.55,
+  "streams": [
+    { "id": "burnable", "label": "可燃ゴミ", "color": "#EF4444", "description": "生ゴミ、汚れた紙、ティッシュ、使い捨て紙コップ、割り箸、食品包装フィルム" },
+    { "id": "non-burnable", "label": "不燃ゴミ", "color": "#6B7280", "description": "金属製品、ガラス製品、陶磁器、ゴム製品、革製品" },
+    { "id": "recyclable", "label": "資源ゴミ", "color": "#3B82F6", "description": "ペットボトル（中を洗浄）、アルミ缶、スチール缶、新聞紙、段ボール、雑誌、びん" },
+    { "id": "plastic", "label": "プラスチック", "color": "#F59E0B", "description": "プラマーク付きの容器包装（食品トレイ、ボトルキャップ、レジ袋）" },
+    { "id": "special", "label": "特別収集", "color": "#DC2626", "description": "電池、蛍光灯、スプレー缶、薬品。通常のゴミ箱には入れないでください" },
+    { "id": "needs_review", "label": "確認が必要", "color": "#D97706", "description": "分類の確信度が低いため、ゴミ箱の表示を確認するかスタッフにお尋ねください" }
+  ],
+  "overrides": [
+    { "pattern": "ペットボトル", "stream": "recyclable", "note": "中を空にして洗ってからキャップを外して資源ゴミへ" },
+    { "pattern": "pet bottle", "stream": "recyclable", "note": "中を空にして洗ってからキャップを外して資源ゴミへ" },
+    { "pattern": "弁当容器", "stream": "burnable", "note": "汚れた弁当容器は可燃ゴミ。きれいに洗えた場合はプラスチック" },
+    { "pattern": "紙コップ", "stream": "burnable", "note": "内側にプラスチックコーティングがあるため可燃ゴミ" },
+    { "pattern": "coffee cup", "stream": "burnable", "note": "内側にプラスチックコーティングがあるため可燃ゴミ" },
+    { "pattern": "割り箸", "stream": "burnable", "note": "可燃ゴミとして処理してください" },
+    { "pattern": "ビニール袋", "stream": "plastic", "note": "プラマークがあればプラスチックへ" },
+    { "pattern": "缶", "stream": "recyclable", "note": "中を洗って資源ゴミへ" },
+    { "pattern": "新聞", "stream": "recyclable", "note": "紐でまとめて資源ゴミへ" },
+    { "pattern": "段ボール", "stream": "recyclable", "note": "たたんで資源ゴミへ" },
+    { "pattern": "電池", "stream": "special", "note": "電池は特別収集です。専用の回収ボックスに入れてください" },
+    { "pattern": "battery", "stream": "special", "note": "電池は特別収集です。専用の回収ボックスに入れてください" }
+  ],
+  "siteRules": [],
+  "staffHandlingItems": ["蛍光灯", "スプレー缶", "fluorescent", "spray can"],
+  "defaultStream": "burnable"
+}

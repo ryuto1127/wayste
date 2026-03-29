@@ -107,6 +107,7 @@ export interface ClassificationResponse {
   binColor: string;
   binLabel: string;
   specialInstructions?: string;
+  preAction?: string;
   needsReview: boolean;
   isCompound: boolean;
   components?: ComponentPart[];
@@ -118,6 +119,7 @@ export interface ClassificationResponse {
 export interface SiteConfig {
   siteId: string;
   siteName: string;
+  defaultLocale?: "en" | "ja";
   streams: StreamDefinition[];
   overrides: ItemOverride[];
   defaultStream: WasteStream;

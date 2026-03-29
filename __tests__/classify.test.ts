@@ -51,6 +51,7 @@ interface RawClassification {
   wasteStream: string;
   confidence: number;
   reasoning: string;
+  preAction?: string;
   isCompound?: boolean;
   components?: ComponentPart[];
 }
@@ -192,10 +193,33 @@ describe("POST /api/classify", () => {
     }
   });
 
+  it("includes preAction field in response when model provides it", async () => {
+    const nanoResponse = makeOpenAIResponse({
+      itemName: "pet bottle",
+      wasteStream: "recycling",
+      confidence: 0.92,
+      reasoning: "PET plastic bottle",
+      preAction: "Empty contents and remove cap",
+    });
+    mockCreate.mockResolvedValueOnce(nanoResponse);
+
+    const { POST } = await import("@/app/api/classify/route");
+    const req = makeRequest({
+      image: "d".repeat(200),
+      siteId: "default",
+    });
+
+    const res = await POST(req);
+    if (res.status === 200) {
+      const data = await res.json();
+      expect(data.preAction).toBe("Empty contents and remove cap");
+    }
+  });
+
   it("returns 429 when rate limit is hit", async () => {
     // Override Redis mock to simulate rate limit exceeded
     const { redis } = await import("@/lib/redis");
-    (redis.incr as jest.Mock).mockResolvedValueOnce(7); // count > 6 (RATE_LIMIT_MAX)
+    (redis.incr as jest.Mock).mockResolvedValueOnce(16); // count > 15 (RATE_LIMIT_MAX)
 
     const { POST } = await import("@/app/api/classify/route");
 

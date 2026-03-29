@@ -1,6 +1,7 @@
 {
   "siteId": "airport",
   "siteName": "Airport Terminal — Recycling Buddy",
+  "defaultLocale": "en",
   "streams": [
     {
       "id": "recycling",

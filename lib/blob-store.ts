@@ -21,6 +21,7 @@ export async function uploadFrameToBlob(
     const blob = await put(filename, buffer, {
       access: "public",
       contentType: "image/jpeg",
+      addRandomSuffix: true,
     });
 
     return blob.url;

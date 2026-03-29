@@ -1,6 +1,7 @@
 {
   "siteId": "office-hq",
   "siteName": "HQ Office — 4th Floor Kitchen",
+  "defaultLocale": "ja",
   "reviewThreshold": 0.55,
   "streams": [
     {

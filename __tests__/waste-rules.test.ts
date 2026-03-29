@@ -14,6 +14,7 @@ import type { SiteConfig } from "@/lib/types";
 // Load real configs for integration-style tests
 const defaultConfig = loadSiteConfig("default");
 const officeConfig = loadSiteConfig("office-hq");
+const japanOfficeConfig = loadSiteConfig("japan-office");
 
 function makeSiteConfig(overrides: Partial<SiteConfig> = {}): SiteConfig {
   return {
@@ -158,6 +159,45 @@ describe("applyOverrides specificity ordering", () => {
     const result = applyOverrides("coffee cup", "recycling", config);
     expect(result.stream).toBe("compost");
     expect(result.note).toBe("Compostable cup");
+  });
+});
+
+describe("japan-office config", () => {
+  it("loads japan-office config successfully", () => {
+    expect(japanOfficeConfig.siteId).toBe("japan-office");
+    expect(japanOfficeConfig.defaultLocale).toBe("ja");
+    expect(japanOfficeConfig.streams.length).toBeGreaterThan(0);
+  });
+
+  it("has Japanese waste streams (burnable, non-burnable, recyclable, plastic)", () => {
+    const streamIds = japanOfficeConfig.streams.map((s) => s.id);
+    expect(streamIds).toContain("burnable");
+    expect(streamIds).toContain("non-burnable");
+    expect(streamIds).toContain("recyclable");
+    expect(streamIds).toContain("plastic");
+  });
+
+  it("overrides for pet bottles route to recyclable", () => {
+    const result = applyOverrides("ペットボトル", "burnable", japanOfficeConfig);
+    expect(result.stream).toBe("recyclable");
+    expect(result.overrideApplied).toBe(true);
+  });
+
+  it("overrides for coffee cup route to burnable", () => {
+    const result = applyOverrides("coffee cup", "recyclable", japanOfficeConfig);
+    expect(result.stream).toBe("burnable");
+    expect(result.overrideApplied).toBe(true);
+  });
+
+  it("overrides for battery route to special", () => {
+    const result = applyOverrides("電池", "burnable", japanOfficeConfig);
+    expect(result.stream).toBe("special");
+    expect(result.overrideApplied).toBe(true);
+  });
+
+  it("has staffHandlingItems for fluorescent and spray cans", () => {
+    expect(japanOfficeConfig.staffHandlingItems).toContain("蛍光灯");
+    expect(japanOfficeConfig.staffHandlingItems).toContain("スプレー缶");
   });
 });
 

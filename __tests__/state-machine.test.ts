@@ -13,11 +13,11 @@ const FG_PERSIST_FRAMES = 4;
 const OBJECT_DETECTED_TIMEOUT = 8;
 const STABILITY_REQUIRED = 5;
 const STABILIZING_MAX_FRAMES = 28;
-const RESULT_TIMEOUT_MS = 10_000;
-const OBJECT_GONE_FRAMES = 3;
+const RESULT_TIMEOUT_MS = 4_000;
+const OBJECT_GONE_FRAMES = 2;
 const ROI_BLOB_THRESHOLD = 0.05;
 const STABILIZE_MOTION_THRESHOLD = 0.06;
-const COOLDOWN_MS = 2500;
+const COOLDOWN_MS = 1500;
 
 function makeAnalysis(overrides: Partial<FrameAnalysis> = {}): FrameAnalysis {
   return {

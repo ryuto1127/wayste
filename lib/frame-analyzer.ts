@@ -38,9 +38,25 @@ const FG_PIXEL_THRESHOLD = 40; // per-pixel diff threshold for foreground classi
  */
 export const ROI_FG_THRESHOLD = 0.09;
 export const MOTION_RATIO_THRESHOLD = 0.08; // <8% inter-frame change → stable (very forgiving of hand tremor)
-export const MAX_SKIN_RATIO = 0.70; // >70% skin in foreground → too much hand
+export const MAX_SKIN_RATIO = 0.80; // >80% skin in foreground → too much hand
 
 const MOTION_PIXEL_THRESHOLD = 35;
+
+/** Convert RGB (0-255) to HSV where H is 0-360, S is 0-1, V is 0-1. */
+function rgbToHsv(r: number, g: number, b: number): [number, number, number] {
+  r /= 255; g /= 255; b /= 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  const d = max - min;
+  const s = max === 0 ? 0 : d / max;
+  const v = max;
+  let h = 0;
+  if (d !== 0) {
+    if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) * 60;
+    else if (max === g) h = ((b - r) / d + 2) * 60;
+    else h = ((r - g) / d + 4) * 60;
+  }
+  return [h, s, v];
+}
 
 export class FrameAnalyzer {
   private bgModel: Float32Array | null = null;
@@ -229,7 +245,8 @@ export class FrameAnalyzer {
     }
     const motionScore = motionCount / PIXEL_COUNT;
 
-    // ── Skin-tone ratio (RGB heuristic, foreground pixels only) ──
+    // ── Skin-tone ratio (HSV-based, foreground pixels only) ──
+    // HSV detection is more equitable across skin tones than the old RGB heuristic.
     let skinCount = 0;
     let fgPixels = 0;
     for (let i = 0; i < PIXEL_COUNT; i++) {
@@ -239,15 +256,8 @@ export class FrameAnalyzer {
       const r = px[o],
         g = px[o + 1],
         b = px[o + 2];
-      if (
-        r > 95 &&
-        g > 40 &&
-        b > 20 &&
-        r > g &&
-        r > b &&
-        r - Math.min(g, b) > 15 &&
-        Math.abs(r - g) > 15
-      ) {
+      const [h, s, v] = rgbToHsv(r, g, b);
+      if (h <= 50 && s >= 0.1 && s <= 0.8 && v >= 0.2) {
         skinCount++;
       }
     }

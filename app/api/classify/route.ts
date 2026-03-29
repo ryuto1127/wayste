@@ -32,7 +32,7 @@ const RequestSchema = z.object({
 // Kiosks are trusted single-device endpoints — allow enough headroom for
 // back-to-back scans and retries. 6 requests per 3-second window prevents
 // genuine abuse while never blocking legitimate consecutive classifications.
-const RATE_LIMIT_MAX = 6;
+const RATE_LIMIT_MAX = parseInt(process.env.RATE_LIMIT_MAX || "15");
 const RATE_LIMIT_TTL_S = 3;
 
 // ── Raw model response validation ──
@@ -41,6 +41,7 @@ const RawClassificationSchema = z.object({
   wasteStream: z.string().default("needs_review"),
   confidence: z.number().min(0).max(1).default(0),
   reasoning: z.string().default(""),
+  preAction: z.string().optional().default(""),
   isCompound: z.boolean().optional().default(false),
   components: z
     .array(
@@ -58,6 +59,7 @@ interface RawClassification {
   wasteStream: string;
   confidence: number;
   reasoning: string;
+  preAction?: string;
   isCompound?: boolean;
   components?: ComponentPart[];
 }
@@ -116,6 +118,7 @@ async function callModel(
       wasteStream: typeof raw.wasteStream === "string" ? raw.wasteStream : "needs_review",
       confidence: typeof raw.confidence === "number" ? Math.max(0, Math.min(1, raw.confidence)) : 0,
       reasoning: typeof raw.reasoning === "string" ? raw.reasoning : "",
+      preAction: typeof raw.preAction === "string" ? raw.preAction : "",
       isCompound: raw.isCompound === true,
       components: Array.isArray(raw.components) ? (raw.components as ComponentPart[]) : undefined,
     };

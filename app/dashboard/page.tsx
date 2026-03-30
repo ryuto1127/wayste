@@ -64,14 +64,14 @@ export default function DashboardPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-neutral-950 text-white flex items-center justify-center">
+      <div className="h-full bg-neutral-950 text-white flex items-center justify-center">
         <p className="text-neutral-400">Loading...</p>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-neutral-950 text-white p-8 overflow-y-auto">
+    <div className="h-full bg-neutral-950 text-white p-8 overflow-y-auto">
       <div className="max-w-5xl mx-auto">
         {/* Header */}
         <div className="flex items-center justify-between mb-8">

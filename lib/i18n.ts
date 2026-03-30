@@ -33,7 +33,10 @@ const translations = {
     multiplePartsTitle: "This item has multiple parts",
     category: "Category",
     confidence: "Confidence",
-    reasoning: "Reasoning",
+    reasoning: "Why?",
+    confidenceHigh: "High",
+    confidenceMedium: "Medium",
+    confidenceLow: "Low",
     note: "Note",
     showOneItem: "Show one item at a time",
 
@@ -133,7 +136,10 @@ const translations = {
     multiplePartsTitle: "このアイテムは複数の部品があります",
     category: "カテゴリ",
     confidence: "確信度",
-    reasoning: "理由",
+    reasoning: "なぜ？",
+    confidenceHigh: "高",
+    confidenceMedium: "中",
+    confidenceLow: "低",
     note: "備考",
     showOneItem: "アイテムを1つずつ見せてください",
 

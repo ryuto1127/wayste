@@ -20,8 +20,8 @@ import CameraFeed, { type CameraFeedHandle } from "./CameraFeed";
 import LiveOverlay from "./LiveOverlay";
 
 // ── Timing constants ──
-const ANALYSIS_INTERVAL_MS = 150; // ~7 fps local CV
-const STABILITY_REQUIRED = 5; // quality frames needed in stabilizing to trigger classification
+const ANALYSIS_INTERVAL_MS = 100; // ~10 fps local CV
+const STABILITY_REQUIRED = 4; // quality frames needed in stabilizing to trigger classification
 /**
  * Escape hatch: if stabilizing has run this many total frames without accumulating
  * STABILITY_REQUIRED quality frames (heavy hand occlusion, persistent motion), classify
@@ -30,14 +30,16 @@ const STABILITY_REQUIRED = 5; // quality frames needed in stabilizing to trigger
 const STABILIZING_MAX_FRAMES = 28; // ~4.2s at 7fps
 const COOLDOWN_MS = 1500; // pause before re-scanning
 const OBJECT_GONE_FRAMES = 2;     // frames below ROI threshold before "gone" (~0.3s at 7fps)
-const FG_PERSIST_FRAMES = 4;      // consecutive ROI-blob frames required to leave idle
+const FG_PERSIST_FRAMES = 3;      // consecutive ROI-blob frames required to leave idle
 const OBJECT_DETECTED_TIMEOUT = 8; // frames in object_detected before forcing to stabilizing
 /**
  * If the result state persists for this long with the object still visible
  * (e.g., a tissue leftover that never leaves), force a transition to cooldown
  * so the BG model gets a full-rate update window in idle.
+ * Set high so the result stays on screen long enough for the user to read and
+ * give feedback — the primary dismiss path is item removal (OBJECT_GONE_FRAMES).
  */
-const RESULT_TIMEOUT_MS = 4_000;
+const RESULT_TIMEOUT_MS = 30_000;
 /** Minimum time an error message is visible before being cleared. */
 const ERROR_HOLD_MS = 4_000;
 /** Abort API call if it takes longer than this. */
@@ -562,10 +564,10 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           </span>
         </div>
 
-        {/* Language toggle */}
+        {/* Language toggle — tucked in bottom-right corner, low contrast */}
         <button
           onClick={toggleLocale}
-          className="absolute top-6 right-6 px-5 py-2.5 rounded-xl bg-white/20 border border-white/40 backdrop-blur-sm hover:bg-white/30 text-white text-base font-medium transition-colors"
+          className="absolute bottom-3 right-3 px-3 py-1.5 rounded-lg text-neutral-600 hover:text-neutral-400 text-xs font-medium transition-colors"
         >
           {T("switchLang")}
         </button>

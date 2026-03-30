@@ -4,11 +4,9 @@ import { useState, useCallback } from "react";
 import type {
   ClassificationResponse,
   PipelineState,
-  WasteStream,
 } from "@/lib/types";
 import type { Locale, TranslationKey } from "@/lib/i18n";
 import { t } from "@/lib/i18n";
-import { useSiteStreams } from "@/lib/site-streams-context";
 
 /** Map a waste stream ID to its localised display label. */
 function streamLabel(locale: Locale, streamId: string): string {
@@ -43,6 +41,7 @@ interface LiveOverlayProps {
   pipelineState: PipelineState;
   onFeedbackGiven: () => void;
   locale: Locale;
+  onToggleLocale: () => void;
 }
 
 export default function LiveOverlay({
@@ -51,6 +50,7 @@ export default function LiveOverlay({
   pipelineState,
   onFeedbackGiven,
   locale,
+  onToggleLocale,
 }: LiveOverlayProps) {
   const T = useCallback(
     (key: TranslationKey) => t(locale, key),
@@ -69,6 +69,15 @@ export default function LiveOverlay({
     );
   }
 
+  const langButton = (
+    <button
+      onClick={onToggleLocale}
+      className="self-end px-3 py-1.5 text-neutral-600 hover:text-neutral-400 text-xs font-medium transition-colors"
+    >
+      {T("switchLang")}
+    </button>
+  );
+
   if (result && (pipelineState === "result" || pipelineState === "cooldown")) {
     return (
       <div className="flex-1 flex flex-col overflow-y-auto">
@@ -77,62 +86,66 @@ export default function LiveOverlay({
           onFeedbackGiven={onFeedbackGiven}
           locale={locale}
         />
+        <div className="px-4 pb-3 flex justify-end">{langButton}</div>
       </div>
     );
   }
 
   // ── Empty / detection states ──
   return (
-    <div className="flex-1 flex flex-col items-center justify-center p-8">
-      <div className="text-neutral-600 text-center">
-        {pipelineState === "classifying" ? (
-          <>
-            <div className="text-4xl mb-4 animate-pulse text-amber-500">
-              ...
-            </div>
-            <p className="text-lg text-amber-400">{T("identifyingItem")}</p>
-            <p className="text-sm text-neutral-500 mt-2">
-              {T("holdSteadyCam")}
-            </p>
-          </>
-        ) : pipelineState === "object_detected" ? (
-          <>
-            <div className="text-4xl mb-4 text-blue-400">
-              <span className="inline-block animate-pulse">&#9678;</span>
-            </div>
-            <p className="text-lg text-blue-400">{T("itemDetected")}</p>
-            <p className="text-sm text-neutral-500 mt-2">
-              {T("holdForScan")}
-            </p>
-          </>
-        ) : pipelineState === "stabilizing" ? (
-          <>
-            <div className="text-4xl mb-4 animate-pulse text-blue-500">
-              ...
-            </div>
-            <p className="text-lg text-blue-400">{T("readingItem")}</p>
-            <p className="text-sm text-neutral-500 mt-2">
-              {T("holdSteadyCam")}
-            </p>
-          </>
-        ) : (
-          <>
-            <div className="text-5xl mb-4 animate-pulse">?</div>
-            <p className="text-xl text-neutral-400">{T("holdItemUp")}</p>
-            <p className="text-sm text-neutral-600 mt-2">
-              {T("systemWillIdentify")}
-            </p>
-            <p className="text-xs text-neutral-700 mt-4">
-              {T("showOneItem")}
-            </p>
-          </>
-        )}
+    <div className="flex-1 flex flex-col">
+      <div className="flex-1 flex flex-col items-center justify-center p-8">
+        <div className="text-neutral-600 text-center">
+          {pipelineState === "classifying" ? (
+            <>
+              <div className="text-4xl mb-4 animate-pulse text-amber-500">
+                ...
+              </div>
+              <p className="text-lg text-amber-400">{T("identifyingItem")}</p>
+              <p className="text-sm text-neutral-500 mt-2">
+                {T("holdSteadyCam")}
+              </p>
+            </>
+          ) : pipelineState === "object_detected" ? (
+            <>
+              <div className="text-4xl mb-4 text-blue-400">
+                <span className="inline-block animate-pulse">&#9678;</span>
+              </div>
+              <p className="text-lg text-blue-400">{T("itemDetected")}</p>
+              <p className="text-sm text-neutral-500 mt-2">
+                {T("holdForScan")}
+              </p>
+            </>
+          ) : pipelineState === "stabilizing" ? (
+            <>
+              <div className="text-4xl mb-4 animate-pulse text-blue-500">
+                ...
+              </div>
+              <p className="text-lg text-blue-400">{T("readingItem")}</p>
+              <p className="text-sm text-neutral-500 mt-2">
+                {T("holdSteadyCam")}
+              </p>
+            </>
+          ) : (
+            <>
+              <div className="text-5xl mb-4 animate-pulse">?</div>
+              <p className="text-xl text-neutral-400">{T("holdItemUp")}</p>
+              <p className="text-sm text-neutral-600 mt-2">
+                {T("systemWillIdentify")}
+              </p>
+              <p className="text-xs text-neutral-700 mt-4">
+                {T("showOneItem")}
+              </p>
+            </>
+          )}
+        </div>
       </div>
+      <div className="px-4 pb-3 flex justify-end">{langButton}</div>
     </div>
   );
 }
 
-// ── Result panel: trust-level messaging instead of raw confidence % ──
+// ── Result panel: simple bin + confidence badge ──
 
 function ResultPanel({
   result,
@@ -149,39 +162,42 @@ function ResultPanel({
   );
   const trust = getTrustLevel(result.confidence, result.needsReview);
 
+  const trustLabel =
+    trust === "high"
+      ? T("confidenceHigh")
+      : trust === "medium"
+        ? T("confidenceMedium")
+        : T("confidenceLow");
+  const trustColor =
+    trust === "high"
+      ? "bg-emerald-600"
+      : trust === "medium"
+        ? "bg-amber-600"
+        : "bg-red-600";
+
   return (
     <div className="flex flex-col p-6 gap-4">
-      {/* Header */}
-      <div className="text-xs font-semibold uppercase tracking-widest text-neutral-500">
-        {T("detectedItem")}
-      </div>
-
-      {/* Item name */}
-      <div className="text-3xl font-bold text-white leading-tight">
-        {result.itemName}
-      </div>
-
-      {/* ── Bin assignment: trust-level dependent ── */}
-      {trust === "low" ? (
-        <LowConfidenceBanner result={result} locale={locale} />
-      ) : (
-        <div
-          className="rounded-2xl px-6 py-6 transition-colors duration-300"
-          style={{ backgroundColor: result.binColor }}
-        >
-          <div className="text-xs font-semibold uppercase tracking-widest text-white/70 mb-1">
-            {trust === "high" ? T("putThisIn") : T("likelyBelongsIn")}
-          </div>
-          <div className="text-5xl font-black text-white uppercase">
-            {streamLabel(locale, result.wasteStream)}
-          </div>
-          {trust === "medium" && (
-            <p className="text-sm text-white/60 mt-2">
-              {locale === "ja" ? "ゴミ箱の表示もご確認ください" : "Please also check the bin label"}
-            </p>
-          )}
+      {/* Item name + confidence badge */}
+      <div className="flex items-center gap-3">
+        <div className="text-3xl font-bold text-white leading-tight flex-1">
+          {result.itemName}
         </div>
-      )}
+        <span
+          className={`${trustColor} text-white text-xs font-bold uppercase px-2.5 py-1 rounded-lg whitespace-nowrap`}
+        >
+          {trustLabel}
+        </span>
+      </div>
+
+      {/* Bin assignment — same for all confidence levels */}
+      <div
+        className="rounded-2xl px-6 py-6 transition-colors duration-300"
+        style={{ backgroundColor: result.binColor }}
+      >
+        <div className="text-5xl font-black text-white uppercase">
+          {streamLabel(locale, result.wasteStream)}
+        </div>
+      </div>
 
       {/* Pre-action banner */}
       {result.preAction && (
@@ -227,58 +243,6 @@ function ResultPanel({
           locale={locale}
         />
       </div>
-    </div>
-  );
-}
-
-// ── Low-confidence banner: replaces "needs_review" dead end ──
-// Instead of "Needs Verification", show the best guess with a soft hedge
-// and a fallback instruction ("When in doubt, use Landfill").
-
-function LowConfidenceBanner({
-  result,
-  locale,
-}: {
-  result: ClassificationResponse;
-  locale: Locale;
-}) {
-  const T = useCallback(
-    (key: TranslationKey) => t(locale, key),
-    [locale]
-  );
-
-  // Even at low confidence, if we have a stream guess, show it as a soft suggestion.
-  // The "needs_review" stream itself is an internal concept — users see the fallback.
-  const hasGuess =
-    result.wasteStream !== "needs_review" && result.confidence > 0;
-
-  return (
-    <div className="rounded-2xl px-6 py-5 bg-amber-800/80 border-2 border-amber-600/60">
-      {hasGuess ? (
-        <>
-          <div className="text-xs font-semibold uppercase tracking-widest text-amber-200/80 mb-1">
-            {T("likelyBelongsIn")}
-          </div>
-          <div className="text-3xl font-black text-white uppercase mb-2">
-            {streamLabel(locale, result.wasteStream)}
-          </div>
-          <p className="text-sm text-amber-100/80">
-            {T("notSureCheck")}
-          </p>
-        </>
-      ) : (
-        <>
-          <div className="text-xs font-semibold uppercase tracking-widest text-amber-200/80 mb-1">
-            {T("uncertain")}
-          </div>
-          <div className="text-2xl font-black text-white uppercase mb-2">
-            {T("whenInDoubtUse")} {streamLabel(locale, "landfill")}
-          </div>
-          <p className="text-sm text-amber-100/80">
-            {T("notSureCheck")}
-          </p>
-        </>
-      )}
     </div>
   );
 }
@@ -378,12 +342,10 @@ function FeedbackButtons({
     [locale]
   );
 
-  const [state, setState] = useState<
-    "idle" | "picking_stream" | "sent" | "sending"
-  >("idle");
+  const [state, setState] = useState<"idle" | "sent" | "sending">("idle");
 
   const sendFeedback = useCallback(
-    async (feedback: "correct" | "wrong", actualStream?: WasteStream) => {
+    async (feedback: "correct" | "wrong") => {
       setState("sending");
       try {
         await fetch("/api/feedback", {
@@ -394,7 +356,6 @@ function FeedbackButtons({
             predictedStream: result.wasteStream,
             confidence: result.confidence,
             feedback,
-            actualStream,
             imageUrl: result.imageUrl,
           }),
         });
@@ -402,7 +363,6 @@ function FeedbackButtons({
         // best-effort
       }
       setState("sent");
-      // Short delay to show "thanks" before resetting
       setTimeout(() => onFeedbackGiven(), 1200);
     },
     [result, onFeedbackGiven]
@@ -426,67 +386,6 @@ function FeedbackButtons({
     );
   }
 
-  // After tapping "Wrong", show available streams so user can indicate the correct one.
-  const siteStreams = useSiteStreams();
-
-  const streamColorMap: Record<string, string> = {
-    recycling: "bg-blue-700 hover:bg-blue-600",
-    compost: "bg-green-700 hover:bg-green-600",
-    landfill: "bg-neutral-700 hover:bg-neutral-600",
-    special: "bg-red-700 hover:bg-red-600",
-    ewaste: "bg-purple-700 hover:bg-purple-600",
-    burnable: "bg-red-500 hover:bg-red-400",
-    "non-burnable": "bg-gray-500 hover:bg-gray-400",
-    recyclable: "bg-blue-500 hover:bg-blue-400",
-    plastic: "bg-amber-500 hover:bg-amber-400",
-  };
-
-  const DEFAULT_STREAM_IDS = ["recycling", "compost", "landfill", "special"];
-
-  const streams =
-    siteStreams.length > 0
-      ? siteStreams
-          .filter((s) => s.id !== "needs_review")
-          .map((s) => ({
-            id: s.id as WasteStream,
-            label: streamLabel(locale, s.id),
-            color: streamColorMap[s.id] ?? "bg-neutral-700 hover:bg-neutral-600",
-          }))
-      : DEFAULT_STREAM_IDS.map((id) => ({
-          id: id as WasteStream,
-          label: streamLabel(locale, id),
-          color: streamColorMap[id],
-        }));
-
-  if (state === "picking_stream") {
-
-    return (
-      <div className="space-y-2">
-        <p className="text-xs text-neutral-400 text-center">
-          {T("whatCorrectDisposal")}
-        </p>
-        <div className="grid grid-cols-2 gap-2">
-          {streams.map((s) => (
-            <button
-              key={s.id}
-              onClick={() => sendFeedback("wrong", s.id)}
-              disabled={state !== "picking_stream"}
-              className={`${s.color} text-white text-sm font-medium py-2.5 rounded-xl transition-colors`}
-            >
-              {s.label}
-            </button>
-          ))}
-        </div>
-        <button
-          onClick={() => setState("idle")}
-          className="w-full py-2 text-neutral-500 text-xs hover:text-neutral-400 transition-colors"
-        >
-          {T("cancel")}
-        </button>
-      </div>
-    );
-  }
-
   return (
     <div className="flex gap-2">
       <button
@@ -497,7 +396,7 @@ function FeedbackButtons({
         {T("correct")}
       </button>
       <button
-        onClick={() => setState("picking_stream")}
+        onClick={() => sendFeedback("wrong")}
         disabled={state !== "idle"}
         className="flex-1 py-1.5 rounded-lg bg-neutral-800/60 hover:bg-neutral-700 text-neutral-400 text-xs font-medium transition-colors disabled:opacity-50"
       >
@@ -507,22 +406,3 @@ function FeedbackButtons({
   );
 }
 
-function PropertyRow({
-  label,
-  value,
-  children,
-}: {
-  label: string;
-  value: string;
-  children?: React.ReactNode;
-}) {
-  return (
-    <div className="bg-neutral-800/50 rounded-xl px-4 py-3">
-      <div className="text-xs font-semibold uppercase tracking-wider text-neutral-500 mb-0.5">
-        {label}
-      </div>
-      <div className="text-sm text-neutral-200">{value}</div>
-      {children}
-    </div>
-  );
-}

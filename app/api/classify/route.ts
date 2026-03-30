@@ -145,9 +145,6 @@ function shouldEscalate(
   // Model explicitly flagged it for review
   if (raw.wasteStream === "needs_review") return true;
 
-  // Poor image quality — nano may have misread the item
-  if (meta?.imageQuality === "poor") return true;
-
   return false;
 }
 
@@ -199,12 +196,16 @@ export async function POST(request: Request) {
 
   try {
     // ── Step 1: Nano inference ──
+    const step1Start = Date.now();
     const nanoPrompt = buildNanoPrompt(siteConfig, locale);
     let raw = await callModel(openai, "gpt-5.4-nano", image, nanoPrompt);
     let modelUsed: "nano" | "mini" = "nano";
     let escalated = false;
+    const step1Ms = Date.now() - step1Start;
 
     // ── Step 2: Escalate to mini if needed ──
+    const step2Start = Date.now();
+    let step2Ms = 0;
     if (shouldEscalate(raw, meta)) {
       escalated = true;
       try {
@@ -228,53 +229,56 @@ export async function POST(request: Request) {
         // Mini failed — use nano result as-is, keep modelUsed = "nano"
         console.warn("[classify] Mini escalation failed, using nano result:", miniErr);
       }
+      step2Ms = Date.now() - step2Start;
     }
 
     // ── Step 3: Build final result ──
+    const step3Start = Date.now();
     const result = buildClassificationResult(raw, siteConfig);
     result.modelUsed = modelUsed;
+    const step3Ms = Date.now() - step3Start;
 
-    // ── Step 4: Upload frame to Blob (synchronous — URL is returned to client) ──
+    // ── Step 4: Upload frame to Blob + log entry (fire-and-forget, non-blocking) ──
+    // Blob upload previously blocked the response (~1-3s on Vercel). Moving it to
+    // waitUntil means imageUrl won't be in the classify response, but it is only
+    // used in the feedback payload (not displayed in the UI), so this is fine.
     const logTimestamp = new Date().toISOString();
-    let blobUploadFailed = false;
-    let imageUrl: string | undefined;
-    try {
-      imageUrl = await uploadFrameToBlob(
-        image,
-        result.itemName,
-        result.wasteStream,
-        logTimestamp
-      );
-      if (!imageUrl) blobUploadFailed = true;
-    } catch {
-      blobUploadFailed = true;
-    }
-    result.imageUrl = imageUrl;
+    const totalServerMs = Date.now() - startMs;
 
-    // ── Step 5: Log entry (fire-and-forget, non-blocking) ──
+    console.log(`[${requestId}] TIMING BREAKDOWN:`, {
+      step1_nano_ms: step1Ms,
+      step2_mini_escalation_ms: step2Ms,
+      step3_build_result_ms: step3Ms,
+      totalServerMs,
+    });
     console.log(`[${requestId}] classified`, {
       modelUsed,
       escalated,
       itemName: result.itemName,
       confidence: result.confidence,
       wasteStream: result.wasteStream,
-      latencyMs: Date.now() - startMs,
+      latencyMs: totalServerMs,
     });
 
-    waitUntil(logPilotEntry({
-      timestamp: logTimestamp,
-      modelUsed,
-      escalated,
-      itemName: result.itemName,
-      wasteStream: result.wasteStream,
-      confidence: result.confidence,
-      requiresVerification: result.needsReview,
-      latencyMs: Date.now() - startMs,
-      imageUrl,
-      blobUploadFailed,
-      requestId,
-      meta: meta as ClassifyMeta | undefined,
-    }));
+    waitUntil(
+      uploadFrameToBlob(image, result.itemName, result.wasteStream, logTimestamp)
+        .then((imageUrl) =>
+          logPilotEntry({
+            timestamp: logTimestamp,
+            modelUsed,
+            escalated,
+            itemName: result.itemName,
+            wasteStream: result.wasteStream,
+            confidence: result.confidence,
+            requiresVerification: result.needsReview,
+            latencyMs: totalServerMs,
+            imageUrl,
+            blobUploadFailed: !imageUrl,
+            requestId,
+            meta: meta as ClassifyMeta | undefined,
+          })
+        )
+    );
 
     return NextResponse.json({ ...result, requestId });
   } catch (err: unknown) {

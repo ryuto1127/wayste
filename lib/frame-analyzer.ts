@@ -36,7 +36,7 @@ const FG_PIXEL_THRESHOLD = 40; // per-pixel diff threshold for foreground classi
  * ~760 pixels after the ≥2-neighbor erosion pass.
  * Paired with ROI_BLOB_THRESHOLD in KioskDisplay for coherence gating.
  */
-export const ROI_FG_THRESHOLD = 0.09;
+export const ROI_FG_THRESHOLD = 0.06;
 export const MOTION_RATIO_THRESHOLD = 0.08; // <8% inter-frame change → stable (very forgiving of hand tremor)
 export const MAX_SKIN_RATIO = 0.80; // >80% skin in foreground → too much hand
 

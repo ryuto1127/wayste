@@ -30,6 +30,12 @@ const STABILITY_REQUIRED = 4; // quality frames needed in stabilizing to trigger
 const STABILIZING_MAX_FRAMES = 28; // ~4.2s at 7fps
 const COOLDOWN_MS = 1500; // pause before re-scanning
 const OBJECT_GONE_FRAMES = 2;     // frames below ROI threshold before "gone" (~0.3s at 7fps)
+/**
+ * Minimum time the result panel stays on screen after a classification, even if
+ * the object is removed immediately. Gives users enough time to read the result
+ * before it disappears.
+ */
+const RESULT_MIN_DISPLAY_MS = 4_000;
 const FG_PERSIST_FRAMES = 3;      // consecutive ROI-blob frames required to leave idle
 const OBJECT_DETECTED_TIMEOUT = 8; // frames in object_detected before forcing to stabilizing
 /**
@@ -43,22 +49,25 @@ const RESULT_TIMEOUT_MS = 30_000;
 /** Minimum time an error message is visible before being cleared. */
 const ERROR_HOLD_MS = 4_000;
 /** Abort API call if it takes longer than this. */
-const API_TIMEOUT_MS = 8_000;
+const API_TIMEOUT_MS = 15_000;
 /** Retry delay after a 429 rate-limit response. */
 const RATE_LIMIT_RETRY_MS = 1_200;
 
 // ── Background adaptation rates (passed to FrameAnalyzer per pipeline state) ──
 // idle / cooldown: full rate — continuously absorb drift and persistent leftovers
-const BG_RATE_IDLE = 0.015; // matches BG_LEARN_RATE in frame-analyzer
+const BG_RATE_IDLE = 0.025; // matches BG_LEARN_RATE in frame-analyzer
 // result: micro rate — slowly absorbs stuck items without corrupting live objects
 const BG_RATE_RESULT = 0.001;
 // object_detected / stabilizing / classifying: frozen — never absorb the held object
 const BG_RATE_FROZEN = 0;
 
+// ── Capture ROI (fraction of frame, applied to both image capture and scan frame UI) ──
+const CAPTURE_ROI_MARGIN = 0.15; // 15% margin on each side → 70% of frame sent to model
+
 // ── Entry coherence gate ──
 // The largest single connected blob in the eroded ROI mask must cover ≥5% of the ROI.
 // Prevents scattered noise patches that sum above ROI_FG_THRESHOLD from triggering entry.
-const ROI_BLOB_THRESHOLD = 0.05;
+const ROI_BLOB_THRESHOLD = 0.03;
 
 // ── Elongated-object gate ──
 // The largest blob's bounding-box diagonal as a fraction of the ROI diagonal.
@@ -163,6 +172,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
   const classify = useCallback(
     async (frame: string, meta: ClassifyMeta): Promise<ClassificationResponse> => {
       const doFetch = async (): Promise<ClassificationResponse> => {
+        const fetchStartMs = Date.now();
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
 
@@ -173,15 +183,20 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
             body: JSON.stringify({ image: frame, meta, locale }),
             signal: controller.signal,
           });
+          const fetchDoneMs = Date.now() - fetchStartMs;
 
           if (res.status === 429) {
             // Rate-limited — wait and retry once
+            console.warn(`[classify] Got 429, retrying after ${RATE_LIMIT_RETRY_MS}ms`);
             await new Promise((r) => setTimeout(r, RATE_LIMIT_RETRY_MS));
+            const retryStart = Date.now();
             const retryRes = await fetch("/api/classify", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ image: frame, meta, locale }),
             });
+            const retryMs = Date.now() - retryStart;
+            console.log(`[classify] Retry completed in ${retryMs}ms`);
             if (!retryRes.ok) {
               const body = await retryRes.json().catch(() => ({}));
               throw new Error((body as { error?: string }).error ?? `API error: ${retryRes.status}`);
@@ -200,7 +215,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
 
           const data = (await res.json()) as ClassificationResponse & { requestId?: string };
           if (data.requestId) {
-            console.log(`[classify] requestId=${data.requestId}`);
+            console.log(`[classify] TIMING: fetch=${fetchDoneMs}ms, requestId=${data.requestId}`);
           }
           return data;
         } finally {
@@ -355,7 +370,9 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       if (state === "result") {
         if (!roiHasFg) {
           goneCountRef.current++;
-          if (goneCountRef.current >= OBJECT_GONE_FRAMES) {
+          const minDisplayElapsed =
+            Date.now() - resultEnterTimeRef.current >= RESULT_MIN_DISPLAY_MS;
+          if (goneCountRef.current >= OBJECT_GONE_FRAMES && minDisplayElapsed) {
             cooldownStartRef.current = Date.now();
             transition("cooldown");
           }
@@ -410,15 +427,16 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
        * - Does NOT affect the local CV detection pipeline which runs
        *   on its own downscaled canvas independently
        */
+      const procStart = Date.now();
       const vw = video.videoWidth;
       const vh = video.videoHeight;
-      const roiX = Math.round(vw * 0.20);
-      const roiY = Math.round(vh * 0.20);
-      const roiW = Math.round(vw * 0.60);
-      const roiH = Math.round(vh * 0.60);
+      const roiX = Math.round(vw * CAPTURE_ROI_MARGIN);
+      const roiY = Math.round(vh * CAPTURE_ROI_MARGIN);
+      const roiW = Math.round(vw * (1 - CAPTURE_ROI_MARGIN * 2));
+      const roiH = Math.round(vh * (1 - CAPTURE_ROI_MARGIN * 2));
 
-      // Scale down so longest dimension is at most 640px
-      const scale = Math.min(1, 640 / Math.max(roiW, roiH));
+      // Scale down so longest dimension is at most 320px
+      const scale = Math.min(1, 320 / Math.max(roiW, roiH));
       const outW = Math.round(roiW * scale);
       const outH = Math.round(roiH * scale);
 
@@ -426,11 +444,14 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       const cropCtx = cropCanvas.getContext("2d");
       if (!cropCtx) return;
       cropCtx.drawImage(video, roiX, roiY, roiW, roiH, 0, 0, outW, outH);
+      const cropMs = Date.now() - procStart;
 
       // Convert to blob then base64
       cropCanvas.convertToBlob({ type: "image/jpeg", quality: 0.82 }).then((blob) => {
+        const blobMs = Date.now() - procStart - cropMs;
         const reader = new FileReader();
         reader.onloadend = () => {
+          const base64Ms = Date.now() - procStart - cropMs - blobMs;
           const dataUrl = reader.result as string;
           const frame = dataUrl.split(",")[1];
           if (!frame) return;
@@ -443,6 +464,14 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
             sharpnessScore: analysis.sharpnessScore,
             imageQuality: imageQualityBand(analysis),
           };
+
+          console.log(`[classify] IMAGE PROCESSING:`, {
+            crop_ms: cropMs,
+            convertToBlob_ms: blobMs,
+            base64_ms: base64Ms,
+            frameSize_bytes: frame.length,
+            totalProcMs: Date.now() - procStart,
+          });
 
           classify(frame, meta)
         .then((result) => {
@@ -472,10 +501,15 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           }
         })
         .catch((err) => {
-          const msg = err instanceof DOMException && err.name === "AbortError"
+          const isTimeout = err instanceof DOMException && err.name === "AbortError";
+          const msg = isTimeout
             ? T("connectionSlow")
             : T("classificationFailed");
-          console.warn("[classify] API error:", err);
+          if (isTimeout) {
+            console.error(`[classify] TIMEOUT after ${API_TIMEOUT_MS}ms:`, err);
+          } else {
+            console.error("[classify] API error:", err);
+          }
           setError(msg);
           errorSetAtRef.current = Date.now();
           // Stay in cooldown so the error is visible for ERROR_HOLD_MS
@@ -575,8 +609,8 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           </div>
         )}
 
-        {/* Corner scan markers */}
-        <div className="absolute inset-12 pointer-events-none">
+        {/* Corner scan markers — positioned to match the capture ROI */}
+        <div className="absolute pointer-events-none" style={{ inset: `${CAPTURE_ROI_MARGIN * 100}%` }}>
           <div
             className={`absolute top-0 left-0 w-10 h-10 border-t-2 border-l-2 rounded-tl-lg transition-colors duration-300 ${
               unstable

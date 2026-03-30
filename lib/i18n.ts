@@ -37,6 +37,9 @@ const translations = {
     confidenceHigh: "High",
     confidenceMedium: "Medium",
     confidenceLow: "Low",
+    confidenceHighDesc: "The system is very confident",
+    confidenceMediumDesc: "Probably the right bin",
+    confidenceLowDesc: "Please verify with staff",
     note: "Note",
     showOneItem: "Show one item at a time",
 
@@ -140,6 +143,9 @@ const translations = {
     confidenceHigh: "高",
     confidenceMedium: "中",
     confidenceLow: "低",
+    confidenceHighDesc: "確信度が高い",
+    confidenceMediumDesc: "おそらく正しい",
+    confidenceLowDesc: "スタッフに確認を",
     note: "備考",
     showOneItem: "アイテムを1つずつ見せてください",
 

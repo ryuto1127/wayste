@@ -1,0 +1,8 @@
+{
+  "functions": {
+    "app/api/classify/route.ts": {
+      "maxDuration": 30,
+      "regions": ["iad1"]
+    }
+  }
+}

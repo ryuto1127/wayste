@@ -168,6 +168,12 @@ function ResultPanel({
       : trust === "medium"
         ? T("confidenceMedium")
         : T("confidenceLow");
+  const trustDesc =
+    trust === "high"
+      ? T("confidenceHighDesc")
+      : trust === "medium"
+        ? T("confidenceMediumDesc")
+        : T("confidenceLowDesc");
   const trustColor =
     trust === "high"
       ? "bg-emerald-600"
@@ -178,15 +184,18 @@ function ResultPanel({
   return (
     <div className="flex flex-col p-6 gap-4">
       {/* Item name + confidence badge */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-start gap-3">
         <div className="text-3xl font-bold text-white leading-tight flex-1">
           {result.itemName}
         </div>
-        <span
-          className={`${trustColor} text-white text-xs font-bold uppercase px-2.5 py-1 rounded-lg whitespace-nowrap`}
-        >
-          {trustLabel}
-        </span>
+        <div className="flex flex-col items-end gap-1 shrink-0">
+          <span
+            className={`${trustColor} text-white text-xs font-bold uppercase px-2.5 py-1 rounded-lg`}
+          >
+            {trustLabel}
+          </span>
+          <span className="text-[11px] text-neutral-400 text-right">{trustDesc}</span>
+        </div>
       </div>
 
       {/* Bin assignment — same for all confidence levels */}
@@ -231,8 +240,13 @@ function ResultPanel({
         </div>
       )}
 
-      {/* Reasoning — collapsible, hidden by default */}
-      <CollapsibleReasoning label={T("reasoning")} value={result.reasoning} />
+      {/* Reasoning — always visible */}
+      <div className="bg-neutral-800/50 rounded-xl px-4 py-3">
+        <div className="text-xs font-semibold uppercase tracking-wider text-neutral-500 mb-1.5">
+          {T("reasoning")}
+        </div>
+        <p className="text-sm text-neutral-200">{result.reasoning}</p>
+      </div>
 
       {/* Feedback section — smaller, at bottom */}
       <div className="mt-auto pt-2">
@@ -247,23 +261,6 @@ function ResultPanel({
   );
 }
 
-function CollapsibleReasoning({ label, value }: { label: string; value: string }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <button
-      onClick={() => setOpen((o) => !o)}
-      className="w-full text-left bg-neutral-800/50 rounded-xl px-4 py-2.5 transition-colors hover:bg-neutral-800/70"
-    >
-      <div className="flex items-center justify-between">
-        <span className="text-xs font-semibold uppercase tracking-wider text-neutral-500">
-          {label}
-        </span>
-        <span className="text-neutral-500 text-xs">{open ? "▲" : "▼"}</span>
-      </div>
-      {open && <p className="text-sm text-neutral-200 mt-1.5">{value}</p>}
-    </button>
-  );
-}
 
 function CompoundBreakdown({
   components,

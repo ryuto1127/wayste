@@ -564,14 +564,6 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           </span>
         </div>
 
-        {/* Language toggle — tucked in bottom-right corner, low contrast */}
-        <button
-          onClick={toggleLocale}
-          className="absolute bottom-3 right-3 px-3 py-1.5 rounded-lg text-neutral-600 hover:text-neutral-400 text-xs font-medium transition-colors"
-        >
-          {T("switchLang")}
-        </button>
-
         {/* Hold steady prompt */}
         {unstable && !stableResult && (
           <div className="absolute bottom-6 left-1/2 -translate-x-1/2">
@@ -640,6 +632,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           pipelineState={pipelineState}
           onFeedbackGiven={handleFeedbackGiven}
           locale={locale}
+          onToggleLocale={toggleLocale}
         />
       </div>
     </div>

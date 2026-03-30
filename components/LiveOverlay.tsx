@@ -37,6 +37,7 @@ function getTrustLevel(confidence: number, needsReview: boolean): TrustLevel {
 
 interface LiveOverlayProps {
   result: ClassificationResponse | null;
+  requestId?: string;
   error: string | null;
   pipelineState: PipelineState;
   onFeedbackGiven: () => void;
@@ -46,6 +47,7 @@ interface LiveOverlayProps {
 
 export default function LiveOverlay({
   result,
+  requestId,
   error,
   pipelineState,
   onFeedbackGiven,
@@ -83,6 +85,7 @@ export default function LiveOverlay({
       <div className="flex-1 flex flex-col overflow-y-auto">
         <ResultPanel
           result={result}
+          requestId={requestId}
           onFeedbackGiven={onFeedbackGiven}
           locale={locale}
         />
@@ -149,10 +152,12 @@ export default function LiveOverlay({
 
 function ResultPanel({
   result,
+  requestId,
   onFeedbackGiven,
   locale,
 }: {
   result: ClassificationResponse;
+  requestId?: string;
   onFeedbackGiven: () => void;
   locale: Locale;
 }) {
@@ -253,6 +258,7 @@ function ResultPanel({
         <FeedbackButtons
           key={`${result.itemName}::${result.wasteStream}`}
           result={result}
+          requestId={requestId}
           onFeedbackGiven={onFeedbackGiven}
           locale={locale}
         />
@@ -327,10 +333,12 @@ function StreamBadge({ stream }: { stream: string }) {
 
 function FeedbackButtons({
   result,
+  requestId,
   onFeedbackGiven,
   locale,
 }: {
   result: ClassificationResponse;
+  requestId?: string;
   onFeedbackGiven: () => void;
   locale: Locale;
 }) {
@@ -353,7 +361,7 @@ function FeedbackButtons({
             predictedStream: result.wasteStream,
             confidence: result.confidence,
             feedback,
-            imageUrl: result.imageUrl,
+            requestId,
           }),
         });
       } catch {
@@ -362,7 +370,7 @@ function FeedbackButtons({
       setState("sent");
       setTimeout(() => onFeedbackGiven(), 1200);
     },
-    [result, onFeedbackGiven]
+    [result, requestId, onFeedbackGiven]
   );
 
   if (state === "sent") {

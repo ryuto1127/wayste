@@ -99,6 +99,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
   const [pipelineState, setPipelineState] = useState<PipelineState>("idle");
   const [stableResult, setStableResult] =
     useState<ClassificationResponse | null>(null);
+  const [resultRequestId, setResultRequestId] = useState<string | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
   const [locale, setLocale] = useState<Locale>(defaultLocale ?? "en");
   /** Track whether the user has manually toggled the language. */
@@ -384,7 +385,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           // removing it, force a cooldown. This gives the BG model a full-rate update
           // window in the subsequent idle phase so the leftover is gradually absorbed.
           if (Date.now() - resultEnterTimeRef.current >= RESULT_TIMEOUT_MS) {
-            setStableResult(null);
+            setStableResult(null); setResultRequestId(undefined);
             goneCountRef.current = 0;
             cooldownStartRef.current = Date.now();
             transition("cooldown");
@@ -403,7 +404,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
         // If an error is showing, don't clear it until ERROR_HOLD_MS has passed
         const errorHeld = !errorRef.current || (Date.now() - errorSetAtRef.current >= ERROR_HOLD_MS);
         if (cooldownElapsed && errorHeld) {
-          setStableResult(null);
+          setStableResult(null); setResultRequestId(undefined);
           setError(null);
           transition("idle");
         }
@@ -488,6 +489,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           }
 
           setStableResult(result);
+          setResultRequestId(data.requestId);
           setError(null);
           goneCountRef.current = 0;
           resultEnterTimeRef.current = Date.now();
@@ -528,7 +530,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
 
   const handleFeedbackGiven = useCallback(() => {
     // After feedback, reset so user can scan next item
-    setStableResult(null);
+    setStableResult(null); setResultRequestId(undefined);
     cooldownStartRef.current = Date.now();
     transition("cooldown");
   }, [transition]);
@@ -537,7 +539,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
    *  if a persistent leftover has not yet been auto-absorbed. */
   const handleRecalibrate = useCallback(() => {
     analyzerRef.current?.reset();
-    setStableResult(null);
+    setStableResult(null); setResultRequestId(undefined);
     setError(null);
     fgPersistRef.current = 0;
     stableCountRef.current = 0;
@@ -662,6 +664,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       <div className="w-[420px] h-full bg-neutral-900 border-l border-neutral-800 flex flex-col">
         <LiveOverlay
           result={stableResult}
+          requestId={resultRequestId}
           error={error}
           pipelineState={pipelineState}
           onFeedbackGiven={handleFeedbackGiven}

@@ -1,21 +1,41 @@
 /**
- * GET  /api/review         — all "wrong" feedback entries, merged with saved corrections
+ * GET  /api/review         — all "wrong" feedback entries, merged with saved corrections + pilot log images
  * POST /api/review         — save a human correction { id, actualStream }
  */
 
 import { NextResponse } from "next/server";
 import { z } from "zod/v4";
 import { redis, KEYS } from "@/lib/redis";
-import type { FeedbackEntry } from "@/lib/types";
+import type { FeedbackEntry, PilotLogEntry } from "@/lib/types";
 
 const CORRECTIONS_KEY = "recycling:corrections";       // Redis hash: id → actualStream
 const NAMES_KEY       = "recycling:corrections:names"; // Redis hash: id → actualItemName
 
 export async function GET() {
   try {
-    // Load all feedback entries
-    const raw = await redis.lrange(KEYS.feedback, 0, -1);
-    const entries: FeedbackEntry[] = raw
+    // Load feedback entries and pilot log in parallel
+    const [feedbackRaw, pilotRaw] = await Promise.all([
+      redis.lrange(KEYS.feedback, 0, -1),
+      redis.lrange(KEYS.pilotLog, 0, -1),
+    ]);
+
+    // Build requestId → image info map from pilot log
+    const imageByRequestId = new Map<string, { imageUrl?: string; blobUploadFailed?: boolean }>();
+    for (const item of pilotRaw) {
+      try {
+        const entry = (typeof item === "string" ? JSON.parse(item) : item) as PilotLogEntry;
+        if (entry.requestId) {
+          imageByRequestId.set(entry.requestId, {
+            imageUrl: entry.imageUrl,
+            blobUploadFailed: entry.blobUploadFailed,
+          });
+        }
+      } catch {
+        // skip malformed
+      }
+    }
+
+    const entries: FeedbackEntry[] = feedbackRaw
       .map((item) => {
         try {
           return (typeof item === "string" ? JSON.parse(item) : item) as FeedbackEntry;
@@ -26,16 +46,22 @@ export async function GET() {
       .filter((e): e is FeedbackEntry => e !== null)
       .filter((e) => e.feedback === "wrong");
 
-    // Merge any saved corrections
+    // Merge corrections + image info from pilot log
     const [corrections, names] = await Promise.all([
       redis.hgetall(CORRECTIONS_KEY) as Promise<Record<string, string> | null>,
       redis.hgetall(NAMES_KEY)       as Promise<Record<string, string> | null>,
     ]);
-    const merged = entries.map((e) => ({
-      ...e,
-      actualStream:   corrections?.[e.id] ?? e.actualStream   ?? null,
-      actualItemName: names?.[e.id]        ?? e.actualItemName ?? null,
-    }));
+
+    const merged = entries.map((e) => {
+      const imageInfo = e.requestId ? (imageByRequestId.get(e.requestId) ?? {}) : {};
+      return {
+        ...e,
+        actualStream:   corrections?.[e.id] ?? e.actualStream   ?? null,
+        actualItemName: names?.[e.id]        ?? e.actualItemName ?? null,
+        imageUrl:       e.imageUrl ?? imageInfo.imageUrl,
+        blobUploadFailed: e.blobUploadFailed ?? imageInfo.blobUploadFailed,
+      };
+    });
 
     // Newest first
     merged.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());

@@ -171,8 +171,8 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
 
   // ── API call (with timeout + 429 retry) ──
   const classify = useCallback(
-    async (frame: string, meta: ClassifyMeta): Promise<ClassificationResponse> => {
-      const doFetch = async (): Promise<ClassificationResponse> => {
+    async (frame: string, meta: ClassifyMeta): Promise<ClassificationResponse & { requestId?: string }> => {
+      const doFetch = async (): Promise<ClassificationResponse & { requestId?: string }> => {
         const fetchStartMs = Date.now();
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
@@ -489,7 +489,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           }
 
           setStableResult(result);
-          setResultRequestId(data.requestId);
+          setResultRequestId(result.requestId);
           setError(null);
           goneCountRef.current = 0;
           resultEnterTimeRef.current = Date.now();

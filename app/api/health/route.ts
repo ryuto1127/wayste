@@ -27,9 +27,9 @@ export async function GET() {
 
     // Blob: check env var
     (async (): Promise<CheckResult> => {
-      const token = process.env.BLOB_READ_WRITE_TOKEN;
+      const token = process.env.PRIVATE_BLOB_READ_WRITE_TOKEN;
       if (!token || token.trim() === "") {
-        return { status: "error", error: "BLOB_READ_WRITE_TOKEN not set" };
+        return { status: "error", error: "PRIVATE_BLOB_READ_WRITE_TOKEN not set" };
       }
       return { status: "ok" };
     })(),

@@ -17,7 +17,7 @@ export async function GET(request: Request) {
 
   try {
     const blob = await head(blobUrl, {
-      token: process.env.BLOB_READ_WRITE_TOKEN,
+      token: process.env.PRIVATE_BLOB_READ_WRITE_TOKEN,
     });
     return NextResponse.redirect(blob.downloadUrl);
   } catch {

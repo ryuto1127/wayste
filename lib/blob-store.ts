@@ -23,6 +23,7 @@ export async function uploadFrameToBlob(
       access,
       contentType: "image/jpeg",
       addRandomSuffix: true,
+      token: process.env.PRIVATE_BLOB_READ_WRITE_TOKEN,
     });
 
     return blob.url;

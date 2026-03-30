@@ -2,7 +2,7 @@
 
 A real-time AI-powered waste sorting kiosk. Hold any item in front of the camera and it tells you which bin it belongs in — no app, no phone, no buttons required.
 
-Built for office and public-space pilots, with full English and Japanese support.
+Built for office and public-space pilots, with full English and Japanese support. Configurable per-site waste streams, pre-disposal guidance, and bias-aware computer vision.
 
 ---
 
@@ -12,12 +12,13 @@ Built for office and public-space pilots, with full English and Japanese support
 - Captures a frame and classifies the item using OpenAI vision models
 - Shows a **clear directive** based on confidence level — no raw percentages shown to users:
   - High confidence → **"Put this in Recycling"**
-  - Medium confidence → **"This looks like it goes in Landfill"** + a soft note to double-check
+  - Medium confidence → **"This looks like it goes in Landfill"** + a soft note to check the bin label
   - Low confidence → best guess with **"When in doubt, use Landfill"** fallback
-- Supports **English and Japanese** (toggle on the kiosk screen)
-- Lets users tap **Correct / Wrong** — tapping Wrong shows a bin picker so the system captures what the right answer actually was
+- Shows **pre-disposal guidance** when needed (e.g. "Empty contents and remove cap") before the bin directive
+- Supports **English and Japanese** with configurable default locale per site
+- Lets users tap **Correct / Wrong** to give feedback — the "Wrong" correction menu dynamically shows the site's configured streams
 - Logs every scan and all feedback to Redis for post-pilot analysis
-- Saves a captured image alongside every scan for visual review
+- Saves captured images as **private blobs** served through signed-URL proxy — no public URLs
 
 ---
 
@@ -48,7 +49,7 @@ Built for office and public-space pilots, with full English and Japanese support
 | Framework | Next.js 16 (App Router, TypeScript) |
 | Styling | Tailwind CSS v4 |
 | AI classification | OpenAI GPT vision — nano (fast) with mini escalation (accurate) |
-| Local detection | OffscreenCanvas background subtraction at 160×120, ~7 fps |
+| Local detection | OffscreenCanvas background subtraction at 160×120, ~7 fps, HSV-based skin filtering |
 | Response validation | Zod schema validation on all model output |
 | Database | Upstash Redis (pilot logs + feedback) |
 | Image storage | Vercel Blob (captured frames) |
@@ -121,8 +122,10 @@ vercel env pull
 | `KV_REST_API_URL` | Production | Upstash Redis REST URL |
 | `KV_REST_API_TOKEN` | Production | Upstash Redis token |
 | `BLOB_READ_WRITE_TOKEN` | Production | Vercel Blob token |
-| `SITE_ID` | No | Site config to load (default: `default`) |
+| `SITE_ID` | No | Site config to load (default: `default`). The site config's `defaultLocale` sets the UI language. |
+| `BLOB_ACCESS` | No | `private` (default) or `public`. Private blobs are served via `/api/pilot-image` with signed URLs. |
 | `NEXT_PUBLIC_MIRROR_CAMERA` | No | Set to `true` for front-facing / selfie cameras. Omit or set `false` for outward-facing kiosk cameras. |
+| `RATE_LIMIT_MAX` | No | Max classifications per IP per minute (default: `15`) |
 
 ---
 
@@ -138,7 +141,7 @@ Local CV pipeline detects object
         ↓
 ROI crop captured, scaled to max 640px, sent to /api/classify
         ↓
-GPT nano classifies item (fast path, ~1s)
+GPT nano classifies item + optional preAction guidance (fast path, ~1s)
         ↓
 If confidence < 0.5, poor image quality, or item flagged for review
         → escalates to GPT mini (accurate path, ~2–4s)
@@ -150,10 +153,12 @@ Override rules applied (word-boundary pattern matching, sorted by specificity)
         ↓
 Trust level determined:
   ≥70% confidence → high    → "Put this in [BIN]"
-  40–70%          → medium  → "This looks like it goes in [BIN]" + note
+  40–70%          → medium  → "This looks like it goes in [BIN]" + check bin label
   <40% / review   → low     → best guess + "When in doubt, use [default]"
         ↓
-Result shown to user + frame saved to Blob + entry logged to Redis
+Pre-action shown if applicable (e.g. "Empty contents and remove cap")
+        ↓
+Result shown to user + frame saved to Blob (private, signed-URL access) + entry logged to Redis
 ```
 
 ---
@@ -164,9 +169,20 @@ Result shown to user + frame saved to Blob + entry logged to Redis
 |---------|-----------|
 | **Error boundary** | Any render crash shows a recovery screen and auto-reloads after 10 seconds |
 | **API timeout** | OpenAI calls are aborted after 8 seconds — the kiosk never hangs indefinitely |
-| **429 retry** | If the rate limit is hit, the client waits 1.2s and retries once automatically |
-| **Error visibility** | API errors are shown for at least 4 seconds before clearing — never silently swallowed |
+| **Configurable rate limit** | `RATE_LIMIT_MAX` env var controls per-IP limit (default 15/min); client waits 1.2s and retries once on 429 |
+| **Differentiated errors** | Timeout errors show "connection slow" message; other failures show "classification failed" — never silently swallowed |
 | **Config hot-reload** | Site config is cached for 5 minutes — override updates propagate without restart |
+
+---
+
+## Computer vision pipeline
+
+The local CV pipeline uses **HSV color-space skin detection** instead of RGB heuristics. The HSV approach (`h ≤ 50, 0.1 ≤ s ≤ 0.8, v ≥ 0.2`) is significantly more equitable across skin tones — it avoids the bias inherent in RGB-range thresholds that tend to work better for lighter skin. The skin ratio gate (`MAX_SKIN_RATIO = 0.80`) prevents classifying a hand as an object while still allowing items held in-hand.
+
+Timing is tuned for kiosk responsiveness:
+- **Result display**: 4 seconds (then auto-transitions to cooldown)
+- **Cooldown**: 1.5 seconds between scans
+- **Object removal detection**: 2 consecutive empty frames
 
 ---
 
@@ -180,6 +196,7 @@ Rules live in JSON files in `config/sites/`. No code changes needed.
 {
   "siteId": "my-office",
   "siteName": "My Office — 2nd Floor",
+  "defaultLocale": "en",
   "reviewThreshold": 0.55,
   "mirrorCamera": false,
   "streams": [
@@ -198,7 +215,11 @@ Rules live in JSON files in `config/sites/`. No code changes needed.
 }
 ```
 
-To create rules for a new location, copy `config/sites/default.json` to `config/sites/your-site.json`, edit it, and set `SITE_ID=your-site` in your Vercel environment variables.
+To create rules for a new location, copy `config/sites/default.json` to `config/sites/your-site.json`, edit it, and set `SITE_ID=your-site` in your Vercel environment variables. Set `defaultLocale` to `"ja"` for Japanese-first sites.
+
+### Japanese waste streams
+
+The `japan-office` config demonstrates fully localized streams: `burnable`, `non-burnable`, `recyclable`, `plastic`, `special`, and `needs_review`. Overrides support Japanese item names (e.g. `ペットボトル` → recyclable, `電池` → special). See `config/sites/japan-office.json` for a full example.
 
 ### Override pattern matching
 
@@ -219,7 +240,7 @@ After a real-world test:
 3. For each card, click the correct bin to record the true classification
 4. Use the corrected data to add override rules in the relevant `config/sites/*.json` file
 
-> **Note:** When users tap "Wrong" on the kiosk, they are shown a bin picker to indicate the correct stream. This means feedback entries include `actualStream` — you can see the correct bin directly in the dashboard without always needing the review page.
+> **Note:** When users tap "Wrong" on the kiosk, their feedback is logged for post-pilot review. Use the `/review` page to assign correct bins to misclassified items.
 
 All raw data is in your Upstash console:
 - `recycling:pilot-log` — every classification (item, stream, confidence, model used, latency, image URL)
@@ -241,10 +262,11 @@ All raw data is in your Upstash console:
 │   │   ├── overrides/      # Dynamic override management
 │   │   ├── pilot-image/    # Signed URL proxy for private blob images
 │   │   ├── review/         # Review page data + correction saving
+│   │   ├── site-config/    # Returns site defaultLocale + streams for client use
 │   │   └── stats-stream/   # Server-sent events for live dashboard
 │   ├── dashboard/          # Live stats page
 │   ├── review/             # Post-pilot image review page
-│   └── page.tsx            # Kiosk entry point (wrapped in ErrorBoundary)
+│   └── page.tsx            # Kiosk entry point (server component, passes site config to client)
 ├── components/
 │   ├── CameraFeed.tsx      # Camera initialisation + frame capture (mirror prop)
 │   ├── ErrorBoundary.tsx   # Crash recovery with auto-reload
@@ -254,10 +276,12 @@ All raw data is in your Upstash console:
 │   └── sites/              # Per-location waste rule JSON files
 │       ├── default.json
 │       ├── office-hq.json
-│       └── airport.json
-├── __tests__/              # Jest unit tests (55 tests)
+│       ├── airport.json
+│       └── japan-office.json  # Japanese streams (burnable/non-burnable/recyclable/plastic)
+├── __tests__/              # Jest unit tests (67 tests)
 └── lib/
-    ├── blob-store.ts        # Vercel Blob upload helper
+    ├── blob-store.ts        # Vercel Blob upload helper (private by default)
+    ├── site-streams-context.tsx # React context providing site streams to client components
     ├── feedback-analysis.ts # Feedback aggregation + override suggestions
     ├── frame-analyzer.ts    # Local CV pipeline (background model, blob detection)
     ├── i18n.ts              # EN/JA translations
@@ -277,7 +301,7 @@ All raw data is in your Upstash console:
 npm test
 ```
 
-55 unit tests covering the state machine, CV pipeline thresholds, override pattern matching, offline cache, and classification API route.
+67 unit tests covering the state machine, CV pipeline thresholds, HSV skin detection, override pattern matching, Japanese site config, offline cache, and classification API route.
 
 ---
 

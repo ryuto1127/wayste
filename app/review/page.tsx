@@ -126,7 +126,7 @@ export default function ReviewPage() {
                 <h2 className="text-sm font-semibold text-orange-400 uppercase tracking-wider mb-4">
                   {T("needsCorrection")}
                 </h2>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 justify-center">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   {pending.map((entry) => (
                     <EntryCard
                       key={entry.id}
@@ -149,7 +149,7 @@ export default function ReviewPage() {
                 <h2 className="text-sm font-semibold text-emerald-400 uppercase tracking-wider mb-4">
                   {T("correctedSection")}
                 </h2>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 justify-center">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   {corrected.map((entry) => (
                     <EntryCard
                       key={entry.id}
@@ -227,17 +227,17 @@ function EntryCard({
     }`}>
       {/* Image */}
       {entry.blobUploadFailed ? (
-        <div className="w-full rounded-lg bg-neutral-700 flex items-center justify-center text-neutral-400 text-sm text-center px-4 py-12">
+        <div className="w-full rounded-lg bg-neutral-700 flex items-center justify-center text-neutral-400 text-sm text-center px-4 py-8">
           {T("imageUnavailable")}
         </div>
       ) : entry.imageUrl ? (
         <img
           src={entry.imageUrl}
           alt={displayName}
-          className="w-full max-h-96 object-contain rounded-lg bg-neutral-800"
+          className="w-full max-h-48 object-contain rounded-lg bg-neutral-800"
         />
       ) : (
-        <div className="w-full rounded-lg bg-neutral-700 flex items-center justify-center text-neutral-500 text-sm py-12">
+        <div className="w-full rounded-lg bg-neutral-700 flex items-center justify-center text-neutral-500 text-sm py-8">
           {T("noImage")}
         </div>
       )}

@@ -139,11 +139,11 @@ Local CV pipeline detects object
         ↓
 5 quality frames accumulated (motion + sharpness gated)
         ↓
-ROI crop captured, scaled to max 640px, sent to /api/classify
+ROI crop captured (70% of frame), scaled to max 320px, sent to /api/classify
         ↓
 GPT nano classifies item + optional preAction guidance (fast path, ~1s)
         ↓
-If confidence < 0.5, poor image quality, or item flagged for review
+If confidence < 0.5 or item flagged for review
         → escalates to GPT mini (accurate path, ~2–4s)
         → mini result used only if it improves on nano
         ↓
@@ -158,7 +158,7 @@ Trust level determined:
         ↓
 Pre-action shown if applicable (e.g. "Empty contents and remove cap")
         ↓
-Result shown to user + frame saved to Blob (private, signed-URL access) + entry logged to Redis
+Result shown to user; frame upload to Blob + Redis logging happen asynchronously (non-blocking)
 ```
 
 ---
@@ -168,7 +168,7 @@ Result shown to user + frame saved to Blob (private, signed-URL access) + entry 
 | Feature | Behaviour |
 |---------|-----------|
 | **Error boundary** | Any render crash shows a recovery screen and auto-reloads after 10 seconds |
-| **API timeout** | OpenAI calls are aborted after 8 seconds — the kiosk never hangs indefinitely |
+| **API timeout** | OpenAI calls are aborted after 15 seconds — the kiosk never hangs indefinitely |
 | **Configurable rate limit** | `RATE_LIMIT_MAX` env var controls per-IP limit (default 15/min); client waits 1.2s and retries once on 429 |
 | **Differentiated errors** | Timeout errors show "connection slow" message; other failures show "classification failed" — never silently swallowed |
 | **Config hot-reload** | Site config is cached for 5 minutes — override updates propagate without restart |

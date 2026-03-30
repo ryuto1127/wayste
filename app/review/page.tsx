@@ -220,7 +220,7 @@ function EntryCard({
   };
 
   return (
-    <div className={`rounded-xl border p-4 flex flex-col gap-3 max-w-sm ${
+    <div className={`rounded-xl border p-4 flex flex-col gap-3 ${
       isCorrected
         ? "border-emerald-800/50 bg-emerald-950/20"
         : "border-neutral-800 bg-neutral-800/40"

@@ -1,7 +1,7 @@
 /**
  * GET /api/pilot-image?url=<blobUrl>
- * Generates a short-lived signed URL for a private Vercel Blob and redirects to it.
- * This lets you view captured frames from the Upstash log without making the store public.
+ * For private blobs: generates a short-lived signed URL via head() and redirects.
+ * For public blobs: redirects directly (no token needed).
  */
 
 import { NextResponse } from "next/server";
@@ -13,6 +13,11 @@ export async function GET(request: Request) {
 
   if (!blobUrl) {
     return NextResponse.json({ error: "Missing url parameter." }, { status: 400 });
+  }
+
+  // Public store blobs can be redirected directly
+  if (blobUrl.includes(".public.blob.vercel-storage.com")) {
+    return NextResponse.redirect(blobUrl);
   }
 
   try {

@@ -19,11 +19,13 @@ export async function GET() {
       redis.lrange(KEYS.pilotLog, 0, -1),
     ]);
 
-    // Build requestId → image info map from pilot log
+    // Parse pilot log entries
+    const pilotEntries: PilotLogEntry[] = [];
     const imageByRequestId = new Map<string, { imageUrl?: string; blobUploadFailed?: boolean }>();
     for (const item of pilotRaw) {
       try {
         const entry = (typeof item === "string" ? JSON.parse(item) : item) as PilotLogEntry;
+        pilotEntries.push(entry);
         if (entry.requestId) {
           imageByRequestId.set(entry.requestId, {
             imageUrl: entry.imageUrl,
@@ -33,6 +35,22 @@ export async function GET() {
       } catch {
         // skip malformed
       }
+    }
+
+    // Fallback: match by itemName + wasteStream + confidence within a 60s window
+    // Used for feedback entries that predate the requestId fix
+    const MATCH_WINDOW_MS = 60_000;
+    function findByProximity(e: FeedbackEntry) {
+      return pilotEntries.find((p) => {
+        const tDiff = new Date(e.timestamp).getTime() - new Date(p.timestamp).getTime();
+        return (
+          tDiff >= 0 &&
+          tDiff <= MATCH_WINDOW_MS &&
+          p.itemName === e.itemName &&
+          p.wasteStream === e.predictedStream &&
+          Math.abs(p.confidence - e.confidence) < 0.01
+        );
+      });
     }
 
     const entries: FeedbackEntry[] = feedbackRaw
@@ -53,12 +71,15 @@ export async function GET() {
     ]);
 
     const merged = entries.map((e) => {
-      const imageInfo = e.requestId ? (imageByRequestId.get(e.requestId) ?? {}) : {};
+      // Primary: match by requestId; fallback: match by proximity
+      const imageInfo =
+        (e.requestId ? imageByRequestId.get(e.requestId) : undefined) ??
+        (() => { const p = findByProximity(e); return p ? { imageUrl: p.imageUrl, blobUploadFailed: p.blobUploadFailed } : {}; })();
       return {
         ...e,
-        actualStream:   corrections?.[e.id] ?? e.actualStream   ?? null,
-        actualItemName: names?.[e.id]        ?? e.actualItemName ?? null,
-        imageUrl:       e.imageUrl ?? imageInfo.imageUrl,
+        actualStream:     corrections?.[e.id] ?? e.actualStream   ?? null,
+        actualItemName:   names?.[e.id]        ?? e.actualItemName ?? null,
+        imageUrl:         e.imageUrl ?? imageInfo.imageUrl,
         blobUploadFailed: e.blobUploadFailed ?? imageInfo.blobUploadFailed,
       };
     });

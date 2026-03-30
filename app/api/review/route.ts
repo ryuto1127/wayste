@@ -80,7 +80,7 @@ export async function GET() {
         actualStream:     corrections?.[e.id] ?? e.actualStream   ?? null,
         actualItemName:   names?.[e.id]        ?? e.actualItemName ?? null,
         imageUrl:         e.imageUrl ?? imageInfo.imageUrl,
-        blobUploadFailed: e.blobUploadFailed ?? imageInfo.blobUploadFailed,
+        blobUploadFailed: imageInfo.blobUploadFailed,
       };
     });
 

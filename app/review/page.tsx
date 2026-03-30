@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from "react";
 import Link from "next/link";
-import type { FeedbackEntry } from "@/lib/types";
+import type { FeedbackEntry, PilotLogEntry } from "@/lib/types";
 import type { Locale } from "@/lib/i18n";
 import { t } from "@/lib/i18n";
 
@@ -18,17 +18,23 @@ type ReviewEntry = FeedbackEntry & { actualStream: string | null; blobUploadFail
 
 export default function ReviewPage() {
   const [entries, setEntries] = useState<ReviewEntry[]>([]);
+  const [captures, setCaptures] = useState<PilotLogEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<string | null>(null);
   const [savingName, setSavingName] = useState<string | null>(null);
   const [locale, setLocale] = useState<Locale>("en");
+  const [tab, setTab] = useState<"corrections" | "captures">("captures");
 
   const T = useCallback((key: Parameters<typeof t>[1]) => t(locale, key), [locale]);
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch("/api/review");
-      if (res.ok) setEntries(await res.json());
+      const [reviewRes, logRes] = await Promise.all([
+        fetch("/api/review"),
+        fetch("/api/pilot-log"),
+      ]);
+      if (reviewRes.ok) setEntries(await reviewRes.json());
+      if (logRes.ok) setCaptures(await logRes.json());
     } catch {
       // silent
     } finally {
@@ -95,9 +101,19 @@ export default function ReviewPage() {
             <p className="text-neutral-400 text-sm mt-1">{T("imageReviewSubtitle")}</p>
           </div>
           <div className="flex items-center gap-3">
-            <div className="flex gap-3 text-sm">
-              <span className="text-orange-400 font-medium">{pending.length} {T("pendingCount")}</span>
-              <span className="text-emerald-400 font-medium">{corrected.length} {T("correctedCount")}</span>
+            <div className="flex gap-1 bg-neutral-800 rounded-lg p-1 text-sm">
+              <button
+                onClick={() => setTab("captures")}
+                className={`px-3 py-1 rounded-md transition-colors ${tab === "captures" ? "bg-neutral-600 text-white" : "text-neutral-400 hover:text-white"}`}
+              >
+                All Captures ({captures.length})
+              </button>
+              <button
+                onClick={() => setTab("corrections")}
+                className={`px-3 py-1 rounded-md transition-colors ${tab === "corrections" ? "bg-neutral-600 text-white" : "text-neutral-400 hover:text-white"}`}
+              >
+                Corrections ({entries.length})
+              </button>
             </div>
             <button
               onClick={() => setLocale(locale === "en" ? "ja" : "en")}
@@ -114,7 +130,21 @@ export default function ReviewPage() {
           </div>
         </div>
 
-        {entries.length === 0 ? (
+        {tab === "captures" ? (
+          captures.length === 0 ? (
+            <div className="bg-neutral-900 rounded-2xl p-12 text-center">
+              <p className="text-neutral-400 text-lg">No captures yet.</p>
+            </div>
+          ) : (
+            <div className="bg-neutral-900 rounded-2xl p-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {captures.map((entry, i) => (
+                  <CaptureCard key={entry.requestId ?? i} entry={entry} />
+                ))}
+              </div>
+            </div>
+          )
+        ) : entries.length === 0 ? (
           <div className="bg-neutral-900 rounded-2xl p-12 text-center">
             <p className="text-neutral-400 text-lg">{T("noWrongEntries")}</p>
           </div>
@@ -323,6 +353,49 @@ function EntryCard({
       <p className="text-xs text-neutral-500">
         {T("confidence")}: {Math.round(entry.confidence * 100)}%
       </p>
+    </div>
+  );
+}
+
+function CaptureCard({ entry }: { entry: PilotLogEntry }) {
+  const date = new Date(entry.timestamp).toLocaleString("en-US", {
+    month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
+  });
+  const streamColors: Record<string, string> = {
+    recycling: "bg-blue-600",
+    compost: "bg-green-600",
+    landfill: "bg-neutral-600",
+    special: "bg-orange-600",
+    needs_review: "bg-purple-600",
+  };
+
+  return (
+    <div className="rounded-xl border border-neutral-800 bg-neutral-800/40 p-3 flex flex-col gap-2">
+      {entry.blobUploadFailed ? (
+        <div className="w-full rounded-lg bg-neutral-700 flex items-center justify-center text-neutral-400 text-xs text-center px-4 py-10">
+          Image unavailable
+        </div>
+      ) : entry.imageUrl ? (
+        <img
+          src={`/api/pilot-image?url=${encodeURIComponent(entry.imageUrl)}`}
+          alt={entry.itemName}
+          className="w-full max-h-48 object-contain rounded-lg bg-neutral-800"
+        />
+      ) : (
+        <div className="w-full rounded-lg bg-neutral-700 flex items-center justify-center text-neutral-500 text-xs py-10">
+          No image
+        </div>
+      )}
+      <div>
+        <p className="text-sm font-semibold text-white truncate">{entry.itemName}</p>
+        <p className="text-xs text-neutral-500">{date}</p>
+      </div>
+      <div className="flex items-center justify-between">
+        <span className={`${streamColors[entry.wasteStream] ?? "bg-neutral-600"} text-white text-[10px] font-bold uppercase px-2 py-0.5 rounded-md`}>
+          {entry.wasteStream}
+        </span>
+        <span className="text-xs text-neutral-500">{Math.round(entry.confidence * 100)}%</span>
+      </div>
     </div>
   );
 }

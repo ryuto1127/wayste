@@ -232,7 +232,7 @@ function EntryCard({
         </div>
       ) : entry.imageUrl ? (
         <img
-          src={entry.imageUrl}
+          src={`/api/pilot-image?url=${encodeURIComponent(entry.imageUrl)}`}
           alt={displayName}
           className="w-full max-h-96 object-contain rounded-lg bg-neutral-800"
         />

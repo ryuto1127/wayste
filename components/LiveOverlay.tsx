@@ -8,6 +8,7 @@ import type {
 } from "@/lib/types";
 import type { Locale, TranslationKey } from "@/lib/i18n";
 import { t } from "@/lib/i18n";
+import { useSiteStreams } from "@/lib/site-streams-context";
 
 /** Map a waste stream ID to its localised display label. */
 function streamLabel(locale: Locale, streamId: string): string {
@@ -426,13 +427,38 @@ function FeedbackButtons({
   }
 
   // After tapping "Wrong", show available streams so user can indicate the correct one.
+  const siteStreams = useSiteStreams();
+
+  const streamColorMap: Record<string, string> = {
+    recycling: "bg-blue-700 hover:bg-blue-600",
+    compost: "bg-green-700 hover:bg-green-600",
+    landfill: "bg-neutral-700 hover:bg-neutral-600",
+    special: "bg-red-700 hover:bg-red-600",
+    ewaste: "bg-purple-700 hover:bg-purple-600",
+    burnable: "bg-red-500 hover:bg-red-400",
+    "non-burnable": "bg-gray-500 hover:bg-gray-400",
+    recyclable: "bg-blue-500 hover:bg-blue-400",
+    plastic: "bg-amber-500 hover:bg-amber-400",
+  };
+
+  const DEFAULT_STREAM_IDS = ["recycling", "compost", "landfill", "special"];
+
+  const streams =
+    siteStreams.length > 0
+      ? siteStreams
+          .filter((s) => s.id !== "needs_review")
+          .map((s) => ({
+            id: s.id as WasteStream,
+            label: streamLabel(locale, s.id),
+            color: streamColorMap[s.id] ?? "bg-neutral-700 hover:bg-neutral-600",
+          }))
+      : DEFAULT_STREAM_IDS.map((id) => ({
+          id: id as WasteStream,
+          label: streamLabel(locale, id),
+          color: streamColorMap[id],
+        }));
+
   if (state === "picking_stream") {
-    const streams: { id: WasteStream; label: string; color: string }[] = [
-      { id: "recycling", label: T("recycling"), color: "bg-blue-700 hover:bg-blue-600" },
-      { id: "compost", label: T("compost"), color: "bg-green-700 hover:bg-green-600" },
-      { id: "landfill", label: T("landfill"), color: "bg-neutral-700 hover:bg-neutral-600" },
-      { id: "special", label: T("special"), color: "bg-red-700 hover:bg-red-600" },
-    ];
 
     return (
       <div className="space-y-2">

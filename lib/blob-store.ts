@@ -18,8 +18,9 @@ export async function uploadFrameToBlob(
     const safe = (s: string) => s.replace(/[^a-z0-9]/gi, "-").toLowerCase();
     const filename = `pilot-images/${timestamp.replace(/[:.]/g, "-")}-${safe(itemName)}-${safe(wasteStream)}.jpg`;
 
+    const access = (process.env.BLOB_ACCESS as "public" | "private") ?? "private";
     const blob = await put(filename, buffer, {
-      access: "public",
+      access,
       contentType: "image/jpeg",
       addRandomSuffix: true,
     });

@@ -74,7 +74,11 @@ const ROI_BLOB_DIAGONAL_MIN_AREA = 0.01; // ~69 eroded pixels — filters noise,
 // Slightly stricter than the idle isStable check (0.08) but not demanding perfect stillness.
 const STABILIZE_MOTION_THRESHOLD = 0.06;
 
-export default function KioskDisplay() {
+interface KioskDisplayProps {
+  defaultLocale?: Locale;
+}
+
+export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
   const cameraRef = useRef<CameraFeedHandle>(null);
   const analyzerRef = useRef<FrameAnalyzer | null>(null);
 
@@ -85,9 +89,9 @@ export default function KioskDisplay() {
   const [stableResult, setStableResult] =
     useState<ClassificationResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [locale, setLocale] = useState<Locale>(
-    (process.env.NEXT_PUBLIC_DEFAULT_LOCALE as Locale) || "en"
-  );
+  const [locale, setLocale] = useState<Locale>(defaultLocale ?? "en");
+  /** Track whether the user has manually toggled the language. */
+  const userHasToggledRef = useRef(false);
 
   // ── CV counters (refs to avoid re-renders) ──
   const stableCountRef = useRef(0);
@@ -113,6 +117,25 @@ export default function KioskDisplay() {
   // Prevent SSR — this component requires browser APIs (camera, OffscreenCanvas)
   useEffect(() => setMounted(true), []);
 
+  // Fetch defaultLocale from site-config API as a fallback (handles cases where
+  // the prop wasn't passed server-side).
+  useEffect(() => {
+    if (defaultLocale) return; // already provided via prop
+    fetch("/api/site-config")
+      .then((r) => r.json())
+      .then((data: { defaultLocale?: string }) => {
+        if (
+          data.defaultLocale &&
+          data.defaultLocale !== locale &&
+          !userHasToggledRef.current
+        ) {
+          setLocale(data.defaultLocale as Locale);
+        }
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Keep error ref in sync with state for stale-closure-safe reads inside the CV interval.
   useEffect(() => {
     errorRef.current = error;
@@ -124,6 +147,7 @@ export default function KioskDisplay() {
   );
 
   const toggleLocale = useCallback(() => {
+    userHasToggledRef.current = true;
     setLocale((l) => (l === "en" ? "ja" : "en"));
   }, []);
 

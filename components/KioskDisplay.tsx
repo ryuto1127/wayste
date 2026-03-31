@@ -111,6 +111,9 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
   const skinWaitRef = useRef(0);
   /** Consecutive frames with ROI blob present — must reach FG_PERSIST_FRAMES before leaving idle. */
   const fgPersistRef = useRef(0);
+  /** Set when a new foreground blob is detected while the pipeline is busy (non-idle).
+   *  Consumed at the cooldown→idle transition to skip idle and fast-path to object_detected. */
+  const pendingItemRef = useRef(false);
   /** Frames spent in object_detected with ROI blob present — triggers stabilizing after OBJECT_DETECTED_TIMEOUT. */
   const objectDetectedFrameRef = useRef(0);
   /** Total frames spent in stabilizing — escape hatch to prevent lock-out on persistent occlusion. */
@@ -277,6 +280,24 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
         elongated;
       const isStable = analysis.motionScore < MOTION_RATIO_THRESHOLD;
 
+      // ── Pending-item queue ──
+      // While the pipeline is busy (non-idle), track consecutive foreground frames.
+      // If a blob persists for FG_PERSIST_FRAMES frames, record a pending item so
+      // the next cooldown→idle transition fast-paths to object_detected instead of idle.
+      // Queue depth is 1 — last-wins; fgPersistRef resets after setting the flag
+      // so it doesn't keep firing.
+      if (state !== "idle") {
+        if (roiHasFg) {
+          fgPersistRef.current++;
+          if (fgPersistRef.current >= FG_PERSIST_FRAMES) {
+            pendingItemRef.current = true;
+            fgPersistRef.current = 0;
+          }
+        } else {
+          fgPersistRef.current = 0;
+        }
+      }
+
       // ────────────────────────────────────
       // State machine transitions
       // ────────────────────────────────────
@@ -406,7 +427,18 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
         if (cooldownElapsed && errorHeld) {
           setStableResult(null); setResultRequestId(undefined);
           setError(null);
-          transition("idle");
+          if (pendingItemRef.current) {
+            // A new item was detected while we were busy — skip idle and jump
+            // straight into the next scan without requiring re-presentation.
+            pendingItemRef.current = false;
+            fgPersistRef.current = 0;
+            stableCountRef.current = 0;
+            goneCountRef.current = 0;
+            objectDetectedFrameRef.current = 0;
+            transition("object_detected");
+          } else {
+            transition("idle");
+          }
         }
         return;
       }
@@ -542,6 +574,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
     setStableResult(null); setResultRequestId(undefined);
     setError(null);
     fgPersistRef.current = 0;
+    pendingItemRef.current = false;
     stableCountRef.current = 0;
     goneCountRef.current = 0;
     objectDetectedFrameRef.current = 0;

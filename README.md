@@ -172,6 +172,7 @@ Result shown to user; frame upload to Blob + Redis logging happen asynchronously
 | **Configurable rate limit** | `RATE_LIMIT_MAX` env var controls per-IP limit (default 15/min); client waits 1.2s and retries once on 429 |
 | **Differentiated errors** | Timeout errors show "connection slow" message; other failures show "classification failed" — never silently swallowed |
 | **Config hot-reload** | Site config is cached for 5 minutes — override updates propagate without restart |
+| **Pending-item queue** | One-slot queue remembers an item detected while busy; cooldown exits directly to `object_detected` so the next scan starts without re-presentation |
 
 ---
 
@@ -183,6 +184,10 @@ Timing is tuned for kiosk responsiveness:
 - **Result display**: 4 seconds (then auto-transitions to cooldown)
 - **Cooldown**: 1.5 seconds between scans
 - **Object removal detection**: 2 consecutive empty frames
+
+### Pending-item queue
+
+The pipeline holds a single-slot queue so back-to-back scans feel instant. If a foreground blob is detected for 3 consecutive frames while the pipeline is busy (classifying, result, or cooldown), the pending flag is set. When the cooldown ends, the pipeline skips the idle state entirely and jumps straight to `object_detected`, so the next scan begins immediately without the user needing to re-present the item. Queue depth is exactly 1 — a second arrival overwrites the first (last-wins). Manual recalibration flushes the queue.
 
 ---
 

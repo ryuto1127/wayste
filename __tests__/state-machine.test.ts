@@ -6,17 +6,14 @@
  */
 
 import type { PipelineState, FrameAnalysis } from "@/lib/types";
-import { ROI_FG_THRESHOLD, MOTION_RATIO_THRESHOLD } from "@/lib/frame-analyzer";
+import { ROI_FG_THRESHOLD } from "@/lib/frame-analyzer";
 
 // Constants matching KioskDisplay.tsx
-const FG_PERSIST_FRAMES = 4;
-const OBJECT_DETECTED_TIMEOUT = 8;
-const STABILITY_REQUIRED = 5;
-const STABILIZING_MAX_FRAMES = 28;
+const FG_PERSIST_FRAMES = 2;
+const SHARP_FRAMES_REQUIRED = 2;
 const RESULT_TIMEOUT_MS = 4_000;
 const OBJECT_GONE_FRAMES = 2;
 const ROI_BLOB_THRESHOLD = 0.05;
-const STABILIZE_MOTION_THRESHOLD = 0.06;
 const COOLDOWN_MS = 1500;
 
 function makeAnalysis(overrides: Partial<FrameAnalysis> = {}): FrameAnalysis {
@@ -40,8 +37,6 @@ class StateMachineSimulator {
   fgPersist = 0;
   goneCount = 0;
   objectDetectedFrames = 0;
-  stableCount = 0;
-  stabilizingFrames = 0;
   resultEnterTime = 0;
   cooldownStart = 0;
   classifyTriggered = false;
@@ -52,17 +47,14 @@ class StateMachineSimulator {
     const roiHasFg =
       analysis.roiForegroundRatio >= ROI_FG_THRESHOLD &&
       analysis.roiLargestBlobRatio >= ROI_BLOB_THRESHOLD;
-    const isStable = analysis.motionScore < MOTION_RATIO_THRESHOLD;
 
     if (this.state === "idle") {
       if (roiHasFg) {
         this.fgPersist++;
         if (this.fgPersist >= FG_PERSIST_FRAMES) {
           this.fgPersist = 0;
-          this.stableCount = 0;
           this.goneCount = 0;
           this.objectDetectedFrames = 0;
-          this.stabilizingFrames = 0;
           this.state = "object_detected";
         }
       } else {
@@ -81,42 +73,14 @@ class StateMachineSimulator {
         return;
       }
       this.goneCount = 0;
-      this.objectDetectedFrames++;
 
-      if (isStable || this.objectDetectedFrames >= OBJECT_DETECTED_TIMEOUT) {
-        this.stableCount = 0;
+      // Sharpness gate: only count frames where sharpnessScore > 150
+      if (analysis.sharpnessScore > 150) {
+        this.objectDetectedFrames++;
+      }
+
+      if (this.objectDetectedFrames >= SHARP_FRAMES_REQUIRED) {
         this.objectDetectedFrames = 0;
-        this.stabilizingFrames = 0;
-        this.state = "stabilizing";
-      }
-      return;
-    }
-
-    if (this.state === "stabilizing") {
-      if (!roiHasFg) {
-        this.goneCount++;
-        if (this.goneCount >= OBJECT_GONE_FRAMES) {
-          this.stabilizingFrames = 0;
-          this.state = "idle";
-        }
-        return;
-      }
-      this.goneCount = 0;
-      this.stabilizingFrames++;
-
-      const isQualityFrame =
-        analysis.sharpnessScore > 150 &&
-        analysis.skinRatio < 0.5 &&
-        analysis.motionScore < STABILIZE_MOTION_THRESHOLD;
-      if (isQualityFrame) {
-        this.stableCount++;
-      }
-
-      if (
-        this.stableCount >= STABILITY_REQUIRED ||
-        this.stabilizingFrames >= STABILIZING_MAX_FRAMES
-      ) {
-        this.stabilizingFrames = 0;
         this.classifyTriggered = true;
         this.state = "classifying";
       }
@@ -157,13 +121,12 @@ class StateMachineSimulator {
 }
 
 describe("State machine", () => {
-  it("idle -> object_detected after OBJECT_DETECT_CONSECUTIVE_FRAMES", () => {
+  it("idle -> object_detected after FG_PERSIST_FRAMES", () => {
     const sim = new StateMachineSimulator();
     expect(sim.state).toBe("idle");
 
     const objectFrame = makeAnalysis();
 
-    // Need FG_PERSIST_FRAMES (4) consecutive frames
     for (let i = 0; i < FG_PERSIST_FRAMES; i++) {
       sim.tick(objectFrame);
     }
@@ -171,12 +134,11 @@ describe("State machine", () => {
     expect(sim.state).toBe("object_detected");
   });
 
-  it("object_detected -> idle on timeout (OBJECT_DETECTED_TIMEOUT frames) when object disappears", () => {
+  it("object_detected -> idle when object disappears", () => {
     const sim = new StateMachineSimulator();
     sim.state = "object_detected";
     sim.objectDetectedFrames = 0;
 
-    // Object disappears
     const emptyFrame = makeAnalysis({
       roiForegroundRatio: 0,
       roiLargestBlobRatio: 0,
@@ -189,41 +151,66 @@ describe("State machine", () => {
     expect(sim.state).toBe("idle");
   });
 
-  it("stabilizing -> classifying after QUALITY_FRAMES_NEEDED good frames", () => {
+  it("object_detected -> classifying after SHARP_FRAMES_REQUIRED sharp frames", () => {
     const sim = new StateMachineSimulator();
-    sim.state = "stabilizing";
-    sim.stableCount = 0;
-    sim.stabilizingFrames = 0;
+    sim.state = "object_detected";
+    sim.objectDetectedFrames = 0;
 
-    const goodFrame = makeAnalysis({
-      sharpnessScore: 500,
-      skinRatio: 0.1,
-      motionScore: 0.02,
-    });
+    const sharpFrame = makeAnalysis({ sharpnessScore: 500 });
 
-    for (let i = 0; i < STABILITY_REQUIRED; i++) {
-      sim.tick(goodFrame);
+    for (let i = 0; i < SHARP_FRAMES_REQUIRED; i++) {
+      sim.tick(sharpFrame);
     }
 
     expect(sim.state).toBe("classifying");
     expect(sim.classifyTriggered).toBe(true);
   });
 
-  it("stabilizing -> classifying on escape hatch (STABILIZING_MAX_FRAMES)", () => {
+  it("object_detected ignores blurry frames", () => {
     const sim = new StateMachineSimulator();
-    sim.state = "stabilizing";
-    sim.stableCount = 0;
-    sim.stabilizingFrames = 0;
+    sim.state = "object_detected";
+    sim.objectDetectedFrames = 0;
 
-    // Poor quality frames that don't increment stableCount
-    const poorFrame = makeAnalysis({
-      sharpnessScore: 50,
-      skinRatio: 0.6,
-      motionScore: 0.1,
-    });
+    const blurryFrame = makeAnalysis({ sharpnessScore: 50 });
 
-    for (let i = 0; i < STABILIZING_MAX_FRAMES; i++) {
-      sim.tick(poorFrame);
+    // Feed many blurry frames — should stay in object_detected
+    for (let i = 0; i < 10; i++) {
+      sim.tick(blurryFrame);
+    }
+
+    expect(sim.state).toBe("object_detected");
+  });
+
+  it("object_detected counts only sharp frames among mixed input", () => {
+    const sim = new StateMachineSimulator();
+    sim.state = "object_detected";
+    sim.objectDetectedFrames = 0;
+
+    const blurryFrame = makeAnalysis({ sharpnessScore: 50 });
+    const sharpFrame = makeAnalysis({ sharpnessScore: 500 });
+
+    // Interleave: blurry, sharp, blurry, blurry, sharp → should trigger on 2nd sharp
+    sim.tick(blurryFrame);
+    expect(sim.state).toBe("object_detected");
+    sim.tick(sharpFrame);
+    expect(sim.state).toBe("object_detected");
+    sim.tick(blurryFrame);
+    sim.tick(blurryFrame);
+    expect(sim.state).toBe("object_detected");
+    sim.tick(sharpFrame);
+    expect(sim.state).toBe("classifying");
+  });
+
+  it("object_detected -> classifying works with high skin ratio (hand holding item)", () => {
+    const sim = new StateMachineSimulator();
+    sim.state = "object_detected";
+    sim.objectDetectedFrames = 0;
+
+    // High skin ratio should NOT block classification — user always holds the item
+    const handHeldFrame = makeAnalysis({ sharpnessScore: 500, skinRatio: 0.8 });
+
+    for (let i = 0; i < SHARP_FRAMES_REQUIRED; i++) {
+      sim.tick(handHeldFrame);
     }
 
     expect(sim.state).toBe("classifying");

@@ -4,7 +4,6 @@ export type KioskState = "idle" | "detecting" | "result" | "error";
 export type PipelineState =
   | "idle"
   | "object_detected"
-  | "stabilizing"
   | "classifying"
   | "result"
   | "cooldown";

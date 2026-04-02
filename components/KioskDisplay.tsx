@@ -15,22 +15,14 @@ import {
   FrameAnalyzer,
   imageQualityBand,
   ROI_FG_THRESHOLD,
-  MOTION_RATIO_THRESHOLD,
 } from "@/lib/frame-analyzer";
-import { initYolo, isYoloReady, runYoloInference } from "@/lib/yolo-inference";
+import { initYolo, isYoloReady, runYoloInference, warmUpYolo } from "@/lib/yolo-inference";
 import { loadYoloRules, resolveYoloDetection } from "@/lib/yolo-rules";
 import CameraFeed, { type CameraFeedHandle } from "./CameraFeed";
 import LiveOverlay from "./LiveOverlay";
 
 // ── Timing constants ──
 const ANALYSIS_INTERVAL_MS = 100; // ~10 fps local CV
-const STABILITY_REQUIRED = 4; // quality frames needed in stabilizing to trigger classification
-/**
- * Escape hatch: if stabilizing has run this many total frames without accumulating
- * STABILITY_REQUIRED quality frames (heavy hand occlusion, persistent motion), classify
- * anyway with what we have. Prevents the user from being stuck in "stabilizing" forever.
- */
-const STABILIZING_MAX_FRAMES = 28; // ~4.2s at 7fps
 const COOLDOWN_MS = 1500; // pause before re-scanning
 const OBJECT_GONE_FRAMES = 2;     // frames below ROI threshold before "gone" (~0.3s at 7fps)
 /**
@@ -39,8 +31,9 @@ const OBJECT_GONE_FRAMES = 2;     // frames below ROI threshold before "gone" (~
  * before it disappears.
  */
 const RESULT_MIN_DISPLAY_MS = 4_000;
-const FG_PERSIST_FRAMES = 3;      // consecutive ROI-blob frames required to leave idle
-const OBJECT_DETECTED_TIMEOUT = 8; // frames in object_detected before forcing to stabilizing
+const FG_PERSIST_FRAMES = 2;      // consecutive ROI-blob frames required to leave idle
+/** Sharp frames (sharpnessScore > 150) in object_detected before triggering classification. */
+const SHARP_FRAMES_REQUIRED = 2;
 /**
  * If the result state persists for this long with the object still visible
  * (e.g., a tissue leftover that never leaves), force a transition to cooldown
@@ -61,7 +54,7 @@ const RATE_LIMIT_RETRY_MS = 1_200;
 const BG_RATE_IDLE = 0.025; // matches BG_LEARN_RATE in frame-analyzer
 // result: micro rate — slowly absorbs stuck items without corrupting live objects
 const BG_RATE_RESULT = 0.001;
-// object_detected / stabilizing / classifying: frozen — never absorb the held object
+// object_detected / classifying: frozen — never absorb the held object
 const BG_RATE_FROZEN = 0;
 
 // ── Capture ROI (fraction of frame, applied to both image capture and scan frame UI) ──
@@ -82,11 +75,6 @@ const ROI_BLOB_THRESHOLD = 0.03;
 // diffuse noise patches from triggering detection via diagonal alone.
 const ROI_BLOB_DIAGONAL_THRESHOLD = 0.35;
 const ROI_BLOB_DIAGONAL_MIN_AREA = 0.01; // ~69 eroded pixels — filters noise, passes real thin objects
-
-// ── Stabilizing motion gate ──
-// A frame only counts toward classification if inter-frame motion is below this value.
-// Slightly stricter than the idle isStable check (0.08) but not demanding perfect stillness.
-const STABILIZE_MOTION_THRESHOLD = 0.06;
 
 interface KioskDisplayProps {
   defaultLocale?: Locale;
@@ -109,18 +97,14 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
   const userHasToggledRef = useRef(false);
 
   // ── CV counters (refs to avoid re-renders) ──
-  const stableCountRef = useRef(0);
   const goneCountRef = useRef(0);
-  const skinWaitRef = useRef(0);
   /** Consecutive frames with ROI blob present — must reach FG_PERSIST_FRAMES before leaving idle. */
   const fgPersistRef = useRef(0);
   /** Set when a new foreground blob is detected while the pipeline is busy (non-idle).
    *  Consumed at the cooldown→idle transition to skip idle and fast-path to object_detected. */
   const pendingItemRef = useRef(false);
-  /** Frames spent in object_detected with ROI blob present — triggers stabilizing after OBJECT_DETECTED_TIMEOUT. */
+  /** Sharp frames accumulated in object_detected — triggers classification after SHARP_FRAMES_REQUIRED. */
   const objectDetectedFrameRef = useRef(0);
-  /** Total frames spent in stabilizing — escape hatch to prevent lock-out on persistent occlusion. */
-  const stabilizingFramesRef = useRef(0);
   /** Timestamp when the result state was entered — used for the stuck-result timeout. */
   const resultEnterTimeRef = useRef(0);
   const cooldownStartRef = useRef(0);
@@ -143,7 +127,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
     // Load YOLO model, rules, and site config in parallel.
     // Failures are non-fatal — the pipeline falls back to the API.
     Promise.all([
-      initYolo(),
+      initYolo().then((loaded) => { if (loaded) return warmUpYolo(); }),
       loadYoloRules(),
       fetch("/api/site-config")
         .then((r) => r.json())
@@ -313,7 +297,6 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
         (analysis.roiForegroundRatio >= ROI_FG_THRESHOLD &&
          analysis.roiLargestBlobRatio >= ROI_BLOB_THRESHOLD) ||
         elongated;
-      const isStable = analysis.motionScore < MOTION_RATIO_THRESHOLD;
 
       // ── Pending-item queue ──
       // While the pipeline is busy (non-idle), track consecutive foreground frames.
@@ -346,8 +329,6 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
             // contrast) erode below FG_PIXEL_THRESHOLD and the blob fails before
             // reaching this count; real object pixels (higher contrast) survive.
             fgPersistRef.current = 0;
-            stableCountRef.current = 0;
-            skinWaitRef.current = 0;
             goneCountRef.current = 0;
             objectDetectedFrameRef.current = 0;
             transition("object_detected");
@@ -368,52 +349,18 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           return;
         }
         goneCountRef.current = 0;
-        objectDetectedFrameRef.current++;
 
-        // Fast path: a naturally stable frame — go to stabilizing immediately.
-        // Timeout path: object has been present long enough without stability —
-        //   transition anyway so the user is never stuck with "hold still" forever.
-        if (isStable || objectDetectedFrameRef.current >= OBJECT_DETECTED_TIMEOUT) {
-          stableCountRef.current = 0;
-          skinWaitRef.current = 0;
+        // Sharpness gate: only count frames where the image is not blurry.
+        // Skin ratio is intentionally NOT checked — the user is always holding
+        // the item, so hand presence is expected and should not block detection.
+        if (imageQualityBand(analysis) !== "poor") {
+          objectDetectedFrameRef.current++;
+        }
+
+        // After SHARP_FRAMES_REQUIRED confirmed frames, trigger classification
+        // immediately — no stabilizing phase needed.
+        if (objectDetectedFrameRef.current >= SHARP_FRAMES_REQUIRED) {
           objectDetectedFrameRef.current = 0;
-          stabilizingFramesRef.current = 0;
-          transition("stabilizing");
-        }
-        return;
-      }
-
-      if (state === "stabilizing") {
-        if (!roiHasFg) {
-          goneCountRef.current++;
-          if (goneCountRef.current >= OBJECT_GONE_FRAMES) {
-            stabilizingFramesRef.current = 0;
-            transition("idle");
-          }
-          return;
-        }
-        goneCountRef.current = 0;
-        stabilizingFramesRef.current++;
-
-        // Quality-gated accumulation: only count frames where the object is
-        // visible enough AND not actively moving.
-        //   imageQualityBand !== "poor" → sharpness OK + skin ratio acceptable
-        //   motionScore < STABILIZE_MOTION_THRESHOLD → object not actively rotating/moving
-        // Non-quality frames don't advance the counter but don't reset it either —
-        // the user just holds a beat longer, never has to start over.
-        // After STABILIZING_MAX_FRAMES total frames, classify anyway (escape hatch).
-        const isQualityFrame =
-          imageQualityBand(analysis) !== "poor" &&
-          analysis.motionScore < STABILIZE_MOTION_THRESHOLD;
-        if (isQualityFrame) {
-          stableCountRef.current++;
-        }
-
-        if (
-          stableCountRef.current >= STABILITY_REQUIRED ||
-          stabilizingFramesRef.current >= STABILIZING_MAX_FRAMES
-        ) {
-          stabilizingFramesRef.current = 0;
           triggerClassification(analysis);
         }
         return;
@@ -467,7 +414,6 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
             // straight into the next scan without requiring re-presentation.
             pendingItemRef.current = false;
             fgPersistRef.current = 0;
-            stableCountRef.current = 0;
             goneCountRef.current = 0;
             objectDetectedFrameRef.current = 0;
             transition("object_detected");
@@ -482,6 +428,9 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
     return () => clearInterval(interval);
 
     // ── Trigger classification (called from within the loop) ──
+    // Speculative prefetch: fires YOLO + API in parallel. YOLO is fast (~100ms)
+    // so if it hits we cancel/ignore the API result. If YOLO misses, the API
+    // call is already in flight — no sequential penalty.
     function triggerClassification(analysis: FrameAnalysis) {
       if (inFlightRef.current) return;
 
@@ -491,55 +440,105 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       inFlightRef.current = true;
       transition("classifying");
 
-      // ── Try YOLO local inference first ──
-      if (isYoloReady() && siteConfigRef.current) {
+      const yoloReady = isYoloReady() && siteConfigRef.current;
+
+      // Always start the API call immediately (speculative prefetch).
+      // If YOLO wins, we abort this via the AbortController.
+      const apiController = new AbortController();
+      const apiPromise = classifyViaApiAsync(video, analysis, apiController.signal);
+
+      if (yoloReady) {
         const yoloStart = Date.now();
-        runYoloInference(video, CAPTURE_ROI_MARGIN).then((detections) => {
-          const yoloMs = Date.now() - yoloStart;
+        runYoloInference(video, CAPTURE_ROI_MARGIN)
+          .then((detections) => {
+            const yoloMs = Date.now() - yoloStart;
 
-          if (detections.length > 0) {
-            const best = detections[0];
-            const result = resolveYoloDetection(best, siteConfigRef.current!);
+            if (detections.length > 0) {
+              const best = detections[0];
+              const result = resolveYoloDetection(best, siteConfigRef.current!);
 
-            if (result) {
-              console.log(`[yolo] LOCAL HIT: ${best.className} (${(best.confidence * 100).toFixed(1)}%) → ${result.wasteStream} in ${yoloMs}ms`);
-
-              setStableResult(result);
-              setResultRequestId(undefined);
-              setError(null);
-              goneCountRef.current = 0;
-              resultEnterTimeRef.current = Date.now();
-              transition("result");
-
-              const cacheKey = `${result.itemName}::${result.wasteStream}`;
-              if (cacheKey !== lastCachedRef.current) {
-                cacheResult(result);
-                lastCachedRef.current = cacheKey;
+              if (result) {
+                console.log(`[yolo] LOCAL HIT: ${best.className} (${(best.confidence * 100).toFixed(1)}%) → ${result.wasteStream} in ${yoloMs}ms`);
+                // YOLO won — abort the speculative API call
+                apiController.abort();
+                handleClassificationResult(result, undefined);
+                return;
               }
-              inFlightRef.current = false;
-              return;
+              console.log(`[yolo] No rule for "${best.className}" — waiting for API`);
+            } else {
+              console.log(`[yolo] No detections (${yoloMs}ms) — waiting for API`);
             }
 
-            console.log(`[yolo] No rule for "${best.className}" — falling back to API`);
-          } else {
-            console.log(`[yolo] No detections (${yoloMs}ms) — falling back to API`);
-          }
+            // YOLO miss — await the already-in-flight API call
+            apiPromise
+              .then(({ result: r, requestId }) => { if (r) handleClassificationResult(r, requestId); })
+              .catch(handleClassificationError);
+          })
+          .catch(() => {
+            // YOLO error — await API
+            apiPromise
+              .then(({ result: r, requestId }) => { if (r) handleClassificationResult(r, requestId); })
+              .catch(handleClassificationError);
+          });
+      } else {
+        // No YOLO — just await API
+        apiPromise
+          .then(({ result: r, requestId }) => { if (r) handleClassificationResult(r, requestId); })
+          .catch(handleClassificationError);
+      }
+    }
 
-          // YOLO didn't match — fall through to API
-          classifyViaApi(video, analysis);
-        }).catch(() => {
-          // YOLO error — fall through to API
-          classifyViaApi(video, analysis);
-        });
+    /** Shared result handler for both YOLO and API paths. */
+    function handleClassificationResult(
+      result: ClassificationResponse & { requestId?: string },
+      requestId: string | undefined,
+    ) {
+      if (
+        result.itemName.toLowerCase() === "nothing detected" ||
+        result.confidence === 0
+      ) {
+        cooldownStartRef.current = Date.now();
+        transition("cooldown");
+        inFlightRef.current = false;
         return;
       }
 
-      // YOLO not available — go straight to API
-      classifyViaApi(video, analysis);
+      setStableResult(result);
+      setResultRequestId(requestId ?? result.requestId);
+      setError(null);
+      goneCountRef.current = 0;
+      resultEnterTimeRef.current = Date.now();
+      transition("result");
+
+      const cacheKey = `${result.itemName}::${result.wasteStream}`;
+      if (cacheKey !== lastCachedRef.current) {
+        cacheResult(result);
+        lastCachedRef.current = cacheKey;
+      }
+      inFlightRef.current = false;
     }
 
-    /** Capture ROI frame and classify via OpenAI Vision API. */
-    function classifyViaApi(video: HTMLVideoElement, analysis: FrameAnalysis) {
+    /** Shared error handler for API failures. */
+    function handleClassificationError(err: unknown) {
+      // Ignore aborts caused by YOLO winning the race
+      if (err instanceof DOMException && err.name === "AbortError") {
+        return;
+      }
+      const msg = T("classificationFailed");
+      console.error("[classify] API error:", err);
+      setError(msg);
+      errorSetAtRef.current = Date.now();
+      cooldownStartRef.current = Date.now();
+      transition("cooldown");
+      inFlightRef.current = false;
+    }
+
+    /** Capture ROI frame and classify via OpenAI Vision API (async, returns result). */
+    async function classifyViaApiAsync(
+      video: HTMLVideoElement,
+      analysis: FrameAnalysis,
+      signal?: AbortSignal,
+    ): Promise<{ result: (ClassificationResponse & { requestId?: string }) | null; requestId?: string }> {
       const procStart = Date.now();
       const vw = video.videoWidth;
       const vh = video.videoHeight;
@@ -555,86 +554,48 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
 
       const cropCanvas = new OffscreenCanvas(outW, outH);
       const cropCtx = cropCanvas.getContext("2d");
-      if (!cropCtx) {
-        inFlightRef.current = false;
-        transition("idle");
-        return;
-      }
+      if (!cropCtx) return { result: null };
+
       cropCtx.drawImage(video, roiX, roiY, roiW, roiH, 0, 0, outW, outH);
       const cropMs = Date.now() - procStart;
 
-      // Convert to blob then base64
-      cropCanvas.convertToBlob({ type: "image/jpeg", quality: 0.82 }).then((blob) => {
-        const blobMs = Date.now() - procStart - cropMs;
+      // Check if aborted before expensive blob conversion
+      if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+
+      const blob = await cropCanvas.convertToBlob({ type: "image/jpeg", quality: 0.82 });
+      const blobMs = Date.now() - procStart - cropMs;
+
+      const dataUrl = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
-        reader.onloadend = () => {
-          const base64Ms = Date.now() - procStart - cropMs - blobMs;
-          const dataUrl = reader.result as string;
-          const frame = dataUrl.split(",")[1];
-          if (!frame) {
-            inFlightRef.current = false;
-            return;
-          }
-
-          const meta: ClassifyMeta = {
-            skinRatio: analysis.skinRatio,
-            sharpnessScore: analysis.sharpnessScore,
-            imageQuality: imageQualityBand(analysis),
-          };
-
-          console.log(`[classify] IMAGE PROCESSING:`, {
-            crop_ms: cropMs,
-            convertToBlob_ms: blobMs,
-            base64_ms: base64Ms,
-            frameSize_bytes: frame.length,
-            totalProcMs: Date.now() - procStart,
-          });
-
-          classify(frame, meta)
-        .then((result) => {
-          if (
-            result.itemName.toLowerCase() === "nothing detected" ||
-            result.confidence === 0
-          ) {
-            cooldownStartRef.current = Date.now();
-            transition("cooldown");
-            return;
-          }
-
-          setStableResult(result);
-          setResultRequestId(result.requestId);
-          setError(null);
-          goneCountRef.current = 0;
-          resultEnterTimeRef.current = Date.now();
-          transition("result");
-
-          const cacheKey = `${result.itemName}::${result.wasteStream}`;
-          if (cacheKey !== lastCachedRef.current) {
-            cacheResult(result);
-            lastCachedRef.current = cacheKey;
-          }
-        })
-        .catch((err) => {
-          const isTimeout = err instanceof DOMException && err.name === "AbortError";
-          const msg = isTimeout
-            ? T("connectionSlow")
-            : T("classificationFailed");
-          if (isTimeout) {
-            console.error(`[classify] TIMEOUT after ${API_TIMEOUT_MS}ms:`, err);
-          } else {
-            console.error("[classify] API error:", err);
-          }
-          setError(msg);
-          errorSetAtRef.current = Date.now();
-          cooldownStartRef.current = Date.now();
-          transition("cooldown");
-        })
-        .finally(() => {
-          inFlightRef.current = false;
-        });
-        };
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = reject;
         reader.readAsDataURL(blob);
       });
+
+      const frame = dataUrl.split(",")[1];
+      if (!frame) return { result: null };
+
+      const base64Ms = Date.now() - procStart - cropMs - blobMs;
+
+      const meta: ClassifyMeta = {
+        skinRatio: analysis.skinRatio,
+        sharpnessScore: analysis.sharpnessScore,
+        imageQuality: imageQualityBand(analysis),
+      };
+
+      console.log(`[classify] IMAGE PROCESSING:`, {
+        crop_ms: cropMs,
+        convertToBlob_ms: blobMs,
+        base64_ms: base64Ms,
+        frameSize_bytes: frame.length,
+        totalProcMs: Date.now() - procStart,
+      });
+
+      // Check if aborted before API call
+      if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+
+      const result = await classify(frame, meta);
+      return { result, requestId: result.requestId };
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [classify, transition, T]);
@@ -654,10 +615,8 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
     setError(null);
     fgPersistRef.current = 0;
     pendingItemRef.current = false;
-    stableCountRef.current = 0;
     goneCountRef.current = 0;
     objectDetectedFrameRef.current = 0;
-    stabilizingFramesRef.current = 0;
     inFlightRef.current = false;
     transition("idle");
   }, [transition]);
@@ -665,8 +624,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
   // ── Derive UI signals from pipeline state ──
   if (!mounted) return null;
   const scanning = pipelineState === "classifying";
-  const unstable =
-    pipelineState === "object_detected" || pipelineState === "stabilizing";
+  const unstable = pipelineState === "object_detected";
 
   return (
     <div className="h-screen w-screen bg-neutral-950 flex overflow-hidden select-none">
@@ -693,8 +651,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
                   ? "bg-amber-500"
                   : pipelineState === "result"
                     ? "bg-emerald-500"
-                    : pipelineState === "object_detected" ||
-                        pipelineState === "stabilizing"
+                    : pipelineState === "object_detected"
                       ? "bg-blue-500"
                       : "bg-emerald-500"
               }`}
@@ -703,8 +660,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           <span className="text-sm text-white/70 font-medium">
             {scanning
               ? T("identifyingItem")
-              : pipelineState === "object_detected" ||
-                  pipelineState === "stabilizing"
+              : pipelineState === "object_detected"
                 ? T("itemDetected")
                 : pipelineState === "result"
                   ? T("detectedItem")

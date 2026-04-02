@@ -74,6 +74,23 @@ export function isYoloReady(): boolean {
 }
 
 /**
+ * Run a warm-up inference with a blank tensor to prime WASM JIT compilation.
+ * The first real inference after a cold start can be 2-5x slower; this
+ * eliminates that penalty so the first user-facing classification is fast.
+ */
+export async function warmUpYolo(): Promise<void> {
+  if (!session || !ort) return;
+  try {
+    const dummy = new Float32Array(3 * MODEL_INPUT_SIZE * MODEL_INPUT_SIZE);
+    const tensor = new ort.Tensor("float32", dummy, [1, 3, MODEL_INPUT_SIZE, MODEL_INPUT_SIZE]);
+    await session.run({ images: tensor });
+    console.log("[yolo] Warm-up inference complete");
+  } catch (err) {
+    console.warn("[yolo] Warm-up failed (non-fatal):", err);
+  }
+}
+
+/**
  * Run YOLO inference on a video frame.
  *
  * @param video - The HTMLVideoElement to capture a frame from

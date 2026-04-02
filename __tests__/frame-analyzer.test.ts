@@ -78,7 +78,7 @@ describe("FrameAnalyzer", () => {
     });
 
     it("returns sharp=true when laplacian variance is high", () => {
-      const analysis = makeAnalysis({ sharpnessScore: 500, skinRatio: 0.1 });
+      const analysis = makeAnalysis({ sharpnessScore: 500, skinRatio: 0.9 });
       const quality = imageQualityBand(analysis);
       expect(quality).toBe("good");
     });
@@ -134,15 +134,15 @@ describe("HSV-based skin detection", () => {
 });
 
 describe("imageQualityBand", () => {
-  it("returns 'good' for high sharpness and low skin ratio", () => {
-    expect(imageQualityBand(makeAnalysis({ sharpnessScore: 500, skinRatio: 0.1 }))).toBe("good");
+  it("returns 'good' for high sharpness (skin ratio irrelevant)", () => {
+    expect(imageQualityBand(makeAnalysis({ sharpnessScore: 500, skinRatio: 0.9 }))).toBe("good");
   });
 
-  it("returns 'fair' for moderate sharpness", () => {
-    expect(imageQualityBand(makeAnalysis({ sharpnessScore: 200, skinRatio: 0.4 }))).toBe("fair");
+  it("returns 'fair' for moderate sharpness (skin ratio irrelevant)", () => {
+    expect(imageQualityBand(makeAnalysis({ sharpnessScore: 200, skinRatio: 0.9 }))).toBe("fair");
   });
 
   it("returns 'poor' for low sharpness", () => {
-    expect(imageQualityBand(makeAnalysis({ sharpnessScore: 100, skinRatio: 0.6 }))).toBe("poor");
+    expect(imageQualityBand(makeAnalysis({ sharpnessScore: 100, skinRatio: 0.0 }))).toBe("poor");
   });
 });

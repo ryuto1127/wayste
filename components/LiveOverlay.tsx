@@ -119,16 +119,6 @@ export default function LiveOverlay({
                 {T("holdForScan")}
               </p>
             </>
-          ) : pipelineState === "stabilizing" ? (
-            <>
-              <div className="text-4xl mb-4 animate-pulse text-blue-500">
-                ...
-              </div>
-              <p className="text-lg text-blue-400">{T("readingItem")}</p>
-              <p className="text-sm text-neutral-500 mt-2">
-                {T("holdSteadyCam")}
-              </p>
-            </>
           ) : (
             <>
               <div className="text-5xl mb-4 animate-pulse">?</div>

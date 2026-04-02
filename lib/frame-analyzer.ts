@@ -37,7 +37,7 @@ const FG_PIXEL_THRESHOLD = 40; // per-pixel diff threshold for foreground classi
  * Paired with ROI_BLOB_THRESHOLD in KioskDisplay for coherence gating.
  */
 export const ROI_FG_THRESHOLD = 0.06;
-export const MOTION_RATIO_THRESHOLD = 0.08; // <8% inter-frame change → stable (very forgiving of hand tremor)
+export const MOTION_RATIO_THRESHOLD = 0.12; // <12% inter-frame change → stable (forgiving of natural hand sway while holding item)
 export const MAX_SKIN_RATIO = 0.80; // >80% skin in foreground → too much hand
 
 const MOTION_PIXEL_THRESHOLD = 35;
@@ -285,7 +285,7 @@ export class FrameAnalyzer {
     // Rate is set externally by the pipeline state machine via setBgRate().
     // During init frames, always update fast regardless of the external rate.
     // After init, use exactly the rate the state machine requested:
-    //   0     → frozen (object_detected / stabilizing / classifying)
+    //   0     → frozen (object_detected / classifying)
     //   ~0.001 → micro (result — slowly absorbs persistent stuck objects)
     //   ~0.008 → full  (idle / cooldown — normal continuous adaptation)
     const effectiveBgRate = this.frameCount <= BG_INIT_FRAMES
@@ -323,7 +323,7 @@ export class FrameAnalyzer {
 
 // ── Utility: derive image quality band from analysis ──
 export function imageQualityBand(a: FrameAnalysis): ImageQuality {
-  if (a.sharpnessScore > 400 && a.skinRatio < 0.35) return "good";
-  if (a.sharpnessScore > 150 && a.skinRatio < 0.50) return "fair";
+  if (a.sharpnessScore > 400) return "good";
+  if (a.sharpnessScore > 150) return "fair";
   return "poor";
 }

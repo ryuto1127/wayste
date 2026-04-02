@@ -1,0 +1,149 @@
+{
+  "confidence_threshold": 0.65,
+  "min_box_area": 5000,
+  "rules": {
+    "bottle": {
+      "itemName": "Plastic Bottle",
+      "wasteStream": "recycling",
+      "reasoning": "Plastic bottles are recyclable — rinse before disposing.",
+      "preAction": "Empty and rinse before recycling"
+    },
+    "wine glass": {
+      "itemName": "Glass",
+      "wasteStream": "recycling",
+      "reasoning": "Glass is recyclable."
+    },
+    "cup": {
+      "itemName": "Cup",
+      "wasteStream": "landfill",
+      "reasoning": "Most disposable cups have a plastic lining and are not recyclable."
+    },
+    "fork": {
+      "itemName": "Fork",
+      "wasteStream": "landfill",
+      "reasoning": "Plastic utensils are not recyclable."
+    },
+    "knife": {
+      "itemName": "Knife",
+      "wasteStream": "landfill",
+      "reasoning": "Plastic utensils are not recyclable."
+    },
+    "spoon": {
+      "itemName": "Spoon",
+      "wasteStream": "landfill",
+      "reasoning": "Plastic utensils are not recyclable."
+    },
+    "bowl": {
+      "itemName": "Bowl",
+      "wasteStream": "landfill",
+      "reasoning": "Disposable bowls are typically not recyclable."
+    },
+    "banana": {
+      "itemName": "Banana",
+      "wasteStream": "compost",
+      "reasoning": "Banana peels and scraps are compostable."
+    },
+    "apple": {
+      "itemName": "Apple",
+      "wasteStream": "compost",
+      "reasoning": "Apple cores and scraps are compostable."
+    },
+    "orange": {
+      "itemName": "Orange",
+      "wasteStream": "compost",
+      "reasoning": "Orange peels and scraps are compostable."
+    },
+    "broccoli": {
+      "itemName": "Broccoli",
+      "wasteStream": "compost",
+      "reasoning": "Vegetable scraps are compostable."
+    },
+    "carrot": {
+      "itemName": "Carrot",
+      "wasteStream": "compost",
+      "reasoning": "Vegetable scraps are compostable."
+    },
+    "sandwich": {
+      "itemName": "Sandwich",
+      "wasteStream": "compost",
+      "reasoning": "Food waste is compostable."
+    },
+    "cake": {
+      "itemName": "Cake",
+      "wasteStream": "compost",
+      "reasoning": "Food waste is compostable."
+    },
+    "donut": {
+      "itemName": "Donut",
+      "wasteStream": "compost",
+      "reasoning": "Food waste is compostable."
+    },
+    "pizza": {
+      "itemName": "Pizza",
+      "wasteStream": "compost",
+      "reasoning": "Food waste is compostable. Pizza boxes go to compost if grease-soiled."
+    },
+    "hot dog": {
+      "itemName": "Hot Dog",
+      "wasteStream": "compost",
+      "reasoning": "Food waste is compostable."
+    },
+    "cell phone": {
+      "itemName": "Cell Phone",
+      "wasteStream": "special",
+      "reasoning": "Electronics require special disposal — contains batteries and hazardous materials."
+    },
+    "remote": {
+      "itemName": "Remote Control",
+      "wasteStream": "special",
+      "reasoning": "Electronics with batteries require special disposal.",
+      "preAction": "Remove batteries before disposing"
+    },
+    "keyboard": {
+      "itemName": "Keyboard",
+      "wasteStream": "special",
+      "reasoning": "Electronics require special e-waste disposal."
+    },
+    "mouse": {
+      "itemName": "Mouse",
+      "wasteStream": "special",
+      "reasoning": "Electronics require special e-waste disposal."
+    },
+    "laptop": {
+      "itemName": "Laptop",
+      "wasteStream": "special",
+      "reasoning": "Electronics require special e-waste disposal."
+    },
+    "book": {
+      "itemName": "Book",
+      "wasteStream": "recycling",
+      "reasoning": "Paper products are recyclable. Remove any plastic covers first.",
+      "preAction": "Remove plastic covers if present"
+    },
+    "scissors": {
+      "itemName": "Scissors",
+      "wasteStream": "landfill",
+      "reasoning": "Mixed-material items (metal + plastic) go to landfill."
+    },
+    "toothbrush": {
+      "itemName": "Toothbrush",
+      "wasteStream": "landfill",
+      "reasoning": "Plastic toothbrushes are not recyclable."
+    },
+    "vase": {
+      "itemName": "Vase",
+      "wasteStream": "landfill",
+      "reasoning": "Ceramics and decorative glass are not recyclable in curbside programs."
+    },
+    "handbag": {
+      "itemName": "Handbag",
+      "wasteStream": "landfill",
+      "reasoning": "Mixed-material bags are not recyclable."
+    },
+    "umbrella": {
+      "itemName": "Umbrella",
+      "wasteStream": "landfill",
+      "reasoning": "Mixed-material items are not recyclable."
+    }
+  }
+}

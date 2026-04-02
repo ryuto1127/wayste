@@ -6,6 +6,7 @@ import type {
   PipelineState,
   FrameAnalysis,
   ClassifyMeta,
+  SiteConfig,
 } from "@/lib/types";
 import type { Locale } from "@/lib/i18n";
 import { t } from "@/lib/i18n";
@@ -16,6 +17,8 @@ import {
   ROI_FG_THRESHOLD,
   MOTION_RATIO_THRESHOLD,
 } from "@/lib/frame-analyzer";
+import { initYolo, isYoloReady, runYoloInference } from "@/lib/yolo-inference";
+import { loadYoloRules, resolveYoloDetection } from "@/lib/yolo-rules";
 import CameraFeed, { type CameraFeedHandle } from "./CameraFeed";
 import LiveOverlay from "./LiveOverlay";
 
@@ -129,25 +132,57 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
   /** Mirror of `error` state as a ref so the CV interval can read it without a stale closure. */
   const errorRef = useRef<string | null>(null);
 
+  /** Site config fetched from the API — used for client-side rule application with YOLO. */
+  const siteConfigRef = useRef<SiteConfig | null>(null);
+
   // Prevent SSR — this component requires browser APIs (camera, OffscreenCanvas)
   useEffect(() => setMounted(true), []);
 
+  // ── Initialize YOLO model + rules + site config (client-side) ──
+  useEffect(() => {
+    // Load YOLO model, rules, and site config in parallel.
+    // Failures are non-fatal — the pipeline falls back to the API.
+    Promise.all([
+      initYolo(),
+      loadYoloRules(),
+      fetch("/api/site-config")
+        .then((r) => r.json())
+        .then((data: SiteConfig) => {
+          siteConfigRef.current = data;
+        })
+        .catch(() => {}),
+    ]);
+  }, []);
+
   // Fetch defaultLocale from site-config API as a fallback (handles cases where
-  // the prop wasn't passed server-side).
+  // the prop wasn't passed server-side). The YOLO init useEffect above also
+  // fetches site-config and stores the full config in siteConfigRef.
   useEffect(() => {
     if (defaultLocale) return; // already provided via prop
-    fetch("/api/site-config")
-      .then((r) => r.json())
-      .then((data: { defaultLocale?: string }) => {
-        if (
-          data.defaultLocale &&
-          data.defaultLocale !== locale &&
-          !userHasToggledRef.current
-        ) {
-          setLocale(data.defaultLocale as Locale);
-        }
-      })
-      .catch(() => {});
+    // Wait briefly for the YOLO init fetch to populate siteConfigRef
+    const check = () => {
+      const cfg = siteConfigRef.current;
+      if (cfg?.defaultLocale && cfg.defaultLocale !== locale && !userHasToggledRef.current) {
+        setLocale(cfg.defaultLocale as Locale);
+      }
+    };
+    // If site config is already loaded, use it; otherwise fetch
+    if (siteConfigRef.current) {
+      check();
+    } else {
+      fetch("/api/site-config")
+        .then((r) => r.json())
+        .then((data: { defaultLocale?: string }) => {
+          if (
+            data.defaultLocale &&
+            data.defaultLocale !== locale &&
+            !userHasToggledRef.current
+          ) {
+            setLocale(data.defaultLocale as Locale);
+          }
+        })
+        .catch(() => {});
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -453,13 +488,58 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       const video = cameraRef.current?.getVideo();
       if (!video) return;
 
-      /**
-       * Crop to ROI before sending to OpenAI:
-       * - Reduces payload size and API cost
-       * - Focuses the model on the object in the central region
-       * - Does NOT affect the local CV detection pipeline which runs
-       *   on its own downscaled canvas independently
-       */
+      inFlightRef.current = true;
+      transition("classifying");
+
+      // ── Try YOLO local inference first ──
+      if (isYoloReady() && siteConfigRef.current) {
+        const yoloStart = Date.now();
+        runYoloInference(video, CAPTURE_ROI_MARGIN).then((detections) => {
+          const yoloMs = Date.now() - yoloStart;
+
+          if (detections.length > 0) {
+            const best = detections[0];
+            const result = resolveYoloDetection(best, siteConfigRef.current!);
+
+            if (result) {
+              console.log(`[yolo] LOCAL HIT: ${best.className} (${(best.confidence * 100).toFixed(1)}%) → ${result.wasteStream} in ${yoloMs}ms`);
+
+              setStableResult(result);
+              setResultRequestId(undefined);
+              setError(null);
+              goneCountRef.current = 0;
+              resultEnterTimeRef.current = Date.now();
+              transition("result");
+
+              const cacheKey = `${result.itemName}::${result.wasteStream}`;
+              if (cacheKey !== lastCachedRef.current) {
+                cacheResult(result);
+                lastCachedRef.current = cacheKey;
+              }
+              inFlightRef.current = false;
+              return;
+            }
+
+            console.log(`[yolo] No rule for "${best.className}" — falling back to API`);
+          } else {
+            console.log(`[yolo] No detections (${yoloMs}ms) — falling back to API`);
+          }
+
+          // YOLO didn't match — fall through to API
+          classifyViaApi(video, analysis);
+        }).catch(() => {
+          // YOLO error — fall through to API
+          classifyViaApi(video, analysis);
+        });
+        return;
+      }
+
+      // YOLO not available — go straight to API
+      classifyViaApi(video, analysis);
+    }
+
+    /** Capture ROI frame and classify via OpenAI Vision API. */
+    function classifyViaApi(video: HTMLVideoElement, analysis: FrameAnalysis) {
       const procStart = Date.now();
       const vw = video.videoWidth;
       const vh = video.videoHeight;
@@ -475,7 +555,11 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
 
       const cropCanvas = new OffscreenCanvas(outW, outH);
       const cropCtx = cropCanvas.getContext("2d");
-      if (!cropCtx) return;
+      if (!cropCtx) {
+        inFlightRef.current = false;
+        transition("idle");
+        return;
+      }
       cropCtx.drawImage(video, roiX, roiY, roiW, roiH, 0, 0, outW, outH);
       const cropMs = Date.now() - procStart;
 
@@ -487,10 +571,10 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           const base64Ms = Date.now() - procStart - cropMs - blobMs;
           const dataUrl = reader.result as string;
           const frame = dataUrl.split(",")[1];
-          if (!frame) return;
-
-          inFlightRef.current = true;
-          transition("classifying");
+          if (!frame) {
+            inFlightRef.current = false;
+            return;
+          }
 
           const meta: ClassifyMeta = {
             skinRatio: analysis.skinRatio,
@@ -508,9 +592,6 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
 
           classify(frame, meta)
         .then((result) => {
-          // If "nothing detected" came back, go through cooldown before retrying.
-          // Going straight to idle would immediately re-trigger the same false
-          // foreground, creating a live→detect→identify loop.
           if (
             result.itemName.toLowerCase() === "nothing detected" ||
             result.confidence === 0
@@ -527,7 +608,6 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           resultEnterTimeRef.current = Date.now();
           transition("result");
 
-          // Cache high-confidence results
           const cacheKey = `${result.itemName}::${result.wasteStream}`;
           if (cacheKey !== lastCachedRef.current) {
             cacheResult(result);
@@ -546,7 +626,6 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           }
           setError(msg);
           errorSetAtRef.current = Date.now();
-          // Stay in cooldown so the error is visible for ERROR_HOLD_MS
           cooldownStartRef.current = Date.now();
           transition("cooldown");
         })

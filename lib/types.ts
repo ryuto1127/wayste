@@ -55,7 +55,7 @@ export interface ClassifyMeta {
 // ── Pilot log entry (server-side) ──
 export interface PilotLogEntry {
   timestamp: string;
-  modelUsed: "nano" | "mini";
+  modelUsed: "nano" | "mini" | "yolo-local";
   escalated: boolean;
   itemName: string;
   wasteStream: string;
@@ -112,8 +112,31 @@ export interface ClassificationResponse {
   isCompound: boolean;
   components?: ComponentPart[];
   siteNote?: string;
-  modelUsed?: "nano" | "mini";
+  modelUsed?: "nano" | "mini" | "yolo-local";
   imageUrl?: string;  // Vercel Blob URL of the captured frame
+}
+
+// ── YOLO edge inference types ──
+
+export interface YoloDetection {
+  classId: number;
+  className: string;
+  confidence: number;
+  /** [x, y, width, height] in pixel coordinates of the input image. */
+  bbox: [number, number, number, number];
+}
+
+export interface YoloClassRule {
+  itemName: string;
+  wasteStream: WasteStream;
+  reasoning: string;
+  preAction?: string;
+}
+
+export interface YoloRulesConfig {
+  confidence_threshold: number;
+  min_box_area: number;
+  rules: Record<string, YoloClassRule>;
 }
 
 export interface SiteConfig {

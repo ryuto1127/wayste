@@ -7,10 +7,13 @@ export async function GET() {
 
   return NextResponse.json({
     defaultLocale: config.defaultLocale ?? "en",
-    streams: config.streams.map((s) => ({
-      id: s.id,
-      label: s.label,
-      color: s.color,
-    })),
+    streams: config.streams,
+    overrides: config.overrides,
+    siteRules: config.siteRules ?? [],
+    staffHandlingItems: config.staffHandlingItems ?? [],
+    reviewThreshold: config.reviewThreshold,
+    defaultStream: config.defaultStream,
+    siteName: config.siteName,
+    siteId: config.siteId,
   });
 }

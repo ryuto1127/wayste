@@ -3,9 +3,9 @@
   "min_box_area": 5000,
   "rules": {
     "bottle": {
-      "itemName": "Plastic Bottle",
+      "itemName": "Bottle",
       "wasteStream": "recycling",
-      "reasoning": "Plastic bottles are recyclable — rinse before disposing.",
+      "reasoning": "Bottles are recyclable — empty and rinse before disposing.",
       "preAction": "Empty and rinse before recycling"
     },
     "wine glass": {
@@ -24,7 +24,7 @@
       "reasoning": "Plastic utensils are not recyclable."
     },
     "knife": {
-      "itemName": "Knife",
+      "itemName": "Knife (utensil)",
       "wasteStream": "landfill",
       "reasoning": "Plastic utensils are not recyclable."
     },
@@ -81,7 +81,7 @@
     "pizza": {
       "itemName": "Pizza",
       "wasteStream": "compost",
-      "reasoning": "Food waste is compostable. Pizza boxes go to compost if grease-soiled."
+      "reasoning": "Food waste is compostable."
     },
     "hot dog": {
       "itemName": "Hot Dog",
@@ -91,7 +91,7 @@
     "cell phone": {
       "itemName": "Cell Phone",
       "wasteStream": "special",
-      "reasoning": "Electronics require special disposal — contains batteries and hazardous materials."
+      "reasoning": "Electronics require special disposal."
     },
     "remote": {
       "itemName": "Remote Control",
@@ -117,33 +117,13 @@
     "book": {
       "itemName": "Book",
       "wasteStream": "recycling",
-      "reasoning": "Paper products are recyclable. Remove any plastic covers first.",
+      "reasoning": "Paper products are recyclable.",
       "preAction": "Remove plastic covers if present"
-    },
-    "scissors": {
-      "itemName": "Scissors",
-      "wasteStream": "landfill",
-      "reasoning": "Mixed-material items (metal + plastic) go to landfill."
     },
     "toothbrush": {
       "itemName": "Toothbrush",
       "wasteStream": "landfill",
       "reasoning": "Plastic toothbrushes are not recyclable."
-    },
-    "vase": {
-      "itemName": "Vase",
-      "wasteStream": "landfill",
-      "reasoning": "Ceramics and decorative glass are not recyclable in curbside programs."
-    },
-    "handbag": {
-      "itemName": "Handbag",
-      "wasteStream": "landfill",
-      "reasoning": "Mixed-material bags are not recyclable."
-    },
-    "umbrella": {
-      "itemName": "Umbrella",
-      "wasteStream": "landfill",
-      "reasoning": "Mixed-material items are not recyclable."
     }
   }
 }

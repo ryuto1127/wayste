@@ -1,6 +1,10 @@
 /**
  * YOLO26n edge inference using ONNX Runtime Web.
  *
+ * Uses COCO-80 pre-trained YOLO26n with a curated rules file that maps
+ * waste-relevant classes to disposal streams. Non-waste COCO detections
+ * (furniture, vehicles, etc.) have no rules and trigger API fallback.
+ *
  * Runs entirely in the browser — no server calls required.
  * Falls back gracefully (returns empty array) if the model fails to load.
  */
@@ -121,97 +125,54 @@ export async function runYoloInference(
     const results = await session.run({ images: inputTensor });
 
     // ── Postprocess ──
-    // YOLO output shape: [1, 84, 8400] — (batch, 4 bbox + 80 classes, detections)
+    // Fine-tuned YOLO output shape: [1, 300, 6]
+    //   Each row: [x1, y1, x2, y2, confidence, classId]
+    //   300 = max detections (NMS already applied by the model)
     const output = results[Object.keys(results)[0]];
     if (!output) return [];
 
     const outputData = output.data as Float32Array;
-    const numDetections = 8400;
-    const numClasses = 80;
+    const shape = output.dims;
 
     const detections: YoloDetection[] = [];
 
+    // Shape: [1, 300, 6] — post-NMS format
+    const numDetections = shape[1] as number;
+    const stride = shape[2] as number; // 6
+
     for (let i = 0; i < numDetections; i++) {
-      // Extract bbox (cx, cy, w, h) — each value is at stride numDetections
-      const cx = outputData[0 * numDetections + i];
-      const cy = outputData[1 * numDetections + i];
-      const w = outputData[2 * numDetections + i];
-      const h = outputData[3 * numDetections + i];
+      const base = i * stride;
+      const x1 = outputData[base + 0];
+      const y1 = outputData[base + 1];
+      const x2 = outputData[base + 2];
+      const y2 = outputData[base + 3];
+      const confidence = outputData[base + 4];
+      const classId = Math.round(outputData[base + 5]);
 
-      // Find best class
-      let maxScore = 0;
-      let maxClassId = 0;
-      for (let c = 0; c < numClasses; c++) {
-        const score = outputData[(4 + c) * numDetections + i];
-        if (score > maxScore) {
-          maxScore = score;
-          maxClassId = c;
-        }
-      }
+      // Skip empty/invalid detections and persons
+      if (confidence < confidenceThreshold) continue;
+      if (classId < 0 || classId >= COCO_CLASSES.length) continue;
+      if (classId === 0) continue; // Skip "person"
 
-      // Apply filters
-      if (maxScore < confidenceThreshold) continue;
-
+      const w = x2 - x1;
+      const h = y2 - y1;
       const boxArea = w * h;
       if (boxArea < minBoxArea) continue;
 
-      // Skip "person" detections (class 0)
-      if (maxClassId === 0) continue;
-
-      const x = cx - w / 2;
-      const y = cy - h / 2;
-
       detections.push({
-        classId: maxClassId,
-        className: COCO_CLASSES[maxClassId] ?? `class_${maxClassId}`,
-        confidence: maxScore,
-        bbox: [x, y, w, h],
+        classId,
+        className: COCO_CLASSES[classId],
+        confidence,
+        bbox: [x1, y1, w, h],
       });
     }
 
     // Sort by confidence descending
     detections.sort((a, b) => b.confidence - a.confidence);
 
-    // Simple NMS: suppress overlapping detections of the same class
-    return nms(detections, 0.5);
+    return detections;
   } catch (err) {
     console.warn("[yolo] Inference error:", err);
     return [];
   }
-}
-
-/** Non-maximum suppression — removes overlapping boxes of the same class. */
-function nms(detections: YoloDetection[], iouThreshold: number): YoloDetection[] {
-  const kept: YoloDetection[] = [];
-
-  for (const det of detections) {
-    let suppressed = false;
-    for (const k of kept) {
-      if (k.classId === det.classId && iou(k.bbox, det.bbox) > iouThreshold) {
-        suppressed = true;
-        break;
-      }
-    }
-    if (!suppressed) kept.push(det);
-  }
-
-  return kept;
-}
-
-/** Intersection-over-Union for [x, y, w, h] boxes. */
-function iou(
-  a: [number, number, number, number],
-  b: [number, number, number, number],
-): number {
-  const x1 = Math.max(a[0], b[0]);
-  const y1 = Math.max(a[1], b[1]);
-  const x2 = Math.min(a[0] + a[2], b[0] + b[2]);
-  const y2 = Math.min(a[1] + a[3], b[1] + b[3]);
-
-  const intersection = Math.max(0, x2 - x1) * Math.max(0, y2 - y1);
-  if (intersection === 0) return 0;
-
-  const areaA = a[2] * a[3];
-  const areaB = b[2] * b[3];
-  return intersection / (areaA + areaB - intersection);
 }

@@ -35,7 +35,7 @@ export async function GET(request: Request) {
         .map((item) => (typeof item === "string" ? item : JSON.stringify(item)))
         .join("\n");
       await put(`archives/${date}/pilot-log.jsonl`, jsonl, {
-        access: "private",
+        access: "public",
         contentType: "application/jsonl",
         addRandomSuffix: false,
       });
@@ -48,7 +48,7 @@ export async function GET(request: Request) {
         .map((item) => (typeof item === "string" ? item : JSON.stringify(item)))
         .join("\n");
       await put(`archives/${date}/feedback.jsonl`, jsonl, {
-        access: "private",
+        access: "public",
         contentType: "application/jsonl",
         addRandomSuffix: false,
       });

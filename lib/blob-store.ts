@@ -1,13 +1,14 @@
 /**
- * Uploads a base64-encoded JPEG frame to Vercel Blob (private access).
+ * Uploads a base64-encoded JPEG frame to Vercel Blob.
  * Returns the blob URL, or undefined if the upload fails or is disabled.
  * Always best-effort — never throws.
  *
- * PRIVACY: Images are stored with `access: "private"` — the returned URL
- * cannot be accessed directly. Use `getSignedImageUrl()` to generate a
- * temporary signed download URL for admin pages (review, dashboard).
- *
- * Set BLOB_ENABLED=false to disable image uploads entirely.
+ * PRIVACY: @vercel/blob v2 does not support server-side download of private
+ * blobs, so images use public access. Security is enforced at the app layer:
+ *   - URLs include a random suffix (non-guessable / non-enumerable)
+ *   - URLs are only exposed through admin-authenticated routes (/review)
+ *   - Images are auto-deleted after BLOB_RETENTION_DAYS (default: 7)
+ *   - Set BLOB_ENABLED=false to disable image uploads entirely
  */
 
 import { put, head } from "@vercel/blob";
@@ -30,7 +31,7 @@ export async function uploadFrameToBlob(
     const filename = `pilot-images/${timestamp.replace(/[:.]/g, "-")}-${safe(itemName)}-${safe(wasteStream)}.jpg`;
 
     const blob = await put(filename, buffer, {
-      access: "private",
+      access: "public",
       contentType: "image/jpeg",
       addRandomSuffix: true,
     });

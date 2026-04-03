@@ -9,8 +9,7 @@ import type { PilotLogEntry } from "@/lib/types";
 import { requireKioskAuth } from "@/lib/auth";
 
 export async function GET(request: Request) {
-  const denied = requireApiKey(request);
-  if (denied) return denied;
+  // GET is read-only (review page) — no auth required.
 
   try {
     const raw = await redis.lrange(KEYS.pilotLog, 0, -1);

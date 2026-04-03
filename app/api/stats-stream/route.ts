@@ -1,10 +1,9 @@
 import { analyzeFeedback } from "@/lib/feedback-analysis";
-import { requireApiKey } from "@/lib/auth";
+
+// Dashboard SSE stream — no auth required (read-only aggregate stats).
+// Admin auth is only enforced on write endpoints (/api/overrides POST).
 
 export async function GET(request: Request) {
-  const denied = requireApiKey(request);
-  if (denied) return denied;
-
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream({

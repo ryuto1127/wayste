@@ -18,8 +18,8 @@ const VERDICTS_KEY    = "recycling:review-verdicts";
 const VERDICT_STREAMS_KEY = "recycling:review-verdicts:streams";
 
 export async function GET(request: Request) {
-  const denied = requireApiKey(request);
-  if (denied) return denied;
+  // GET is read-only (dashboard/review page) — no auth required.
+  // Write operations (POST) still require admin auth below.
 
   const { searchParams } = new URL(request.url);
   const mode = searchParams.get("mode");

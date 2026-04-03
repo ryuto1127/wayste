@@ -158,6 +158,8 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
   const objectDetectedFrameRef = useRef(0);
   const resultEnterTimeRef = useRef(0);
   const classifyStartRef = useRef(0);
+  /** Consecutive "nothing detected" results — suppresses reclassification of persistent non-waste objects. */
+  const nothingDetectedCountRef = useRef(0);
   const cooldownStartRef = useRef(0);
   const inFlightRef = useRef(false);
   const lastAnalysisRef = useRef<FrameAnalysis | null>(null);
@@ -419,6 +421,10 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
           fgPersistRef.current++;
         } else {
           fgPersistRef.current = 0;
+          // Scene cleared — reset nothing-detected suppression
+          if (nothingDetectedCountRef.current > 0) {
+            nothingDetectedCountRef.current = 0;
+          }
         }
         return;
       }
@@ -475,7 +481,12 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
       }
 
       if (state === "cooldown") {
-        const cooldownElapsed = Date.now() - cooldownStartRef.current >= COOLDOWN_MS;
+        // After repeated "nothing detected", use progressively longer cooldowns
+        // to let the background model absorb persistent non-waste objects.
+        const effectiveCooldown = nothingDetectedCountRef.current > 1
+          ? Math.min(COOLDOWN_MS * nothingDetectedCountRef.current, 10_000)
+          : COOLDOWN_MS;
+        const cooldownElapsed = Date.now() - cooldownStartRef.current >= effectiveCooldown;
         const errorHeld = !errorRef.current || (Date.now() - errorSetAtRef.current >= ERROR_HOLD_MS);
 
         // If a new item is pending, skip cooldown wait (fast-path to next scan)
@@ -875,6 +886,10 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
         result.itemName.toLowerCase() === "nothing detected" ||
         result.confidence === 0
       ) {
+        nothingDetectedCountRef.current++;
+        // Clear pending-item flag so the same persistent object doesn't
+        // immediately re-trigger classification via the cooldown fast path.
+        pendingItemRef.current = false;
         inferenceRef.current?.resumeContinuous();
         cooldownStartRef.current = Date.now();
         transition("cooldown");
@@ -882,6 +897,8 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
         return;
       }
 
+      // Successful classification — reset the nothing-detected counter
+      nothingDetectedCountRef.current = 0;
       setStableResult(result);
       setResultRequestId(requestId ?? result.requestId);
       setError(null);

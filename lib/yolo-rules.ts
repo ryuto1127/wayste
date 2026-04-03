@@ -20,6 +20,16 @@ let rulesLoading: Promise<YoloRulesConfig | null> | null = null;
 let worldRulesCache: YoloRulesConfig | null = null;
 let worldRulesLoading: Promise<YoloRulesConfig | null> | null = null;
 
+/** Inject rules cache directly (for testing). */
+export function _setRulesCache(config: YoloRulesConfig | null): void {
+  rulesCache = config;
+}
+
+/** Inject YOLO World rules cache directly (for testing). */
+export function _setWorldRulesCache(config: YoloRulesConfig | null): void {
+  worldRulesCache = config;
+}
+
 /**
  * Load yolo-rules.json from the public directory. Cached after first fetch.
  */

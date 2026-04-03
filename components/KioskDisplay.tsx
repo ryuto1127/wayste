@@ -342,6 +342,7 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
         if (Date.now() - classifyStartRef.current >= CLASSIFYING_TIMEOUT_MS) {
           console.error("[classify] Timed out in classifying state — forcing recovery");
           inferenceRef.current?.resumeContinuous();
+          analyzer.boostBackgroundAdaptation();
           inFlightRef.current = false;
           cooldownStartRef.current = Date.now();
           transition("cooldown");
@@ -459,8 +460,10 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
         if (!roiHasFg) {
           goneCountRef.current++;
           if (goneCountRef.current >= OBJECT_GONE_FRAMES) {
-            // Item removed — resume YOLO for next item detection
+            // Item removed — resume YOLO and boost BG adaptation so the
+            // model rapidly absorbs the current scene (was frozen during result).
             inferenceRef.current?.resumeContinuous();
+            analyzer.boostBackgroundAdaptation();
             cooldownStartRef.current = Date.now();
             transition("cooldown");
           }
@@ -472,6 +475,7 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
             setStableResult(null); setResultRequestId(undefined);
             goneCountRef.current = 0;
             inferenceRef.current?.resumeContinuous();
+            analyzer.boostBackgroundAdaptation();
             cooldownStartRef.current = Date.now();
             transition("cooldown");
             return;
@@ -890,6 +894,8 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
         // Clear pending-item flag so the same persistent object doesn't
         // immediately re-trigger classification via the cooldown fast path.
         pendingItemRef.current = false;
+        // Boost BG adaptation to absorb whatever triggered the false detection
+        analyzerRef.current?.boostBackgroundAdaptation();
         inferenceRef.current?.resumeContinuous();
         cooldownStartRef.current = Date.now();
         transition("cooldown");

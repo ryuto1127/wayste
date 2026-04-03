@@ -80,6 +80,19 @@ export class FrameAnalyzer {
     this.bgRate = rate;
   }
 
+  /**
+   * Boost the BG adaptation rate for N upcoming frames so the model
+   * rapidly absorbs the current scene. Used after classification when
+   * the BG model was frozen and may be stale.
+   */
+  private bgBoostFrames = 0;
+  private static readonly BG_BOOST_RATE = 0.15; // same as BG_INIT_RATE — fast absorption
+  private static readonly BG_BOOST_DURATION = 10; // ~500ms at 50ms intervals
+
+  boostBackgroundAdaptation(): void {
+    this.bgBoostFrames = FrameAnalyzer.BG_BOOST_DURATION;
+  }
+
   /** Analyse a single video frame. Returns null if video isn't ready. */
   analyze(video: HTMLVideoElement): FrameAnalysis | null {
     if (video.readyState < 2) return null;
@@ -303,7 +316,9 @@ export class FrameAnalyzer {
     // Boost is capped at 3x the base rate to avoid overshooting.
     let effectiveBgRate = this.frameCount <= BG_INIT_FRAMES
       ? BG_INIT_RATE
-      : this.bgRate;
+      : this.bgBoostFrames > 0
+        ? (this.bgBoostFrames--, FrameAnalyzer.BG_BOOST_RATE)
+        : this.bgRate;
     if (this.frameCount > BG_INIT_FRAMES && effectiveBgRate > 0 && lumDelta > 5) {
       const boost = Math.min(3.0, 1.0 + (lumDelta - 5) / 10);
       effectiveBgRate = Math.min(effectiveBgRate * boost, BG_INIT_RATE);

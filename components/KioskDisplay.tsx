@@ -390,11 +390,12 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
 
       if (state === "idle") {
         // ── Option 4: YOLO fast gate ──
-        // If the continuous YOLO loop already has a detection, skip the
-        // frame-analyzer FG persistence gate and trigger immediately
-        // (provided image quality is acceptable).
+        // If the continuous YOLO loop already has a detection AND the frame
+        // analyzer confirms foreground in the ROI, trigger classification
+        // immediately. Both checks are required to avoid triggering on
+        // stale YOLO detections or items outside the scan area.
         const yoloDetections = inferenceRef.current?.getLatestDetections() ?? [];
-        if (yoloDetections.length > 0 && imageQualityBand(analysis) !== "poor") {
+        if (roiHasFg && yoloDetections.length > 0 && imageQualityBand(analysis) !== "poor") {
           console.log(`[fast-gate] YOLO pre-detected ${yoloDetections[0].className} (${(yoloDetections[0].confidence * 100).toFixed(1)}%) — skipping FG gate`);
           fgPersistRef.current = 0;
           goneCountRef.current = 0;
@@ -488,7 +489,7 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
 
           // YOLO fast gate: if YOLO already detected the new item, classify immediately
           const yoloDets = inferenceRef.current?.getLatestDetections() ?? [];
-          if (yoloDets.length > 0 && imageQualityBand(analysis) !== "poor") {
+          if (roiHasFg && yoloDets.length > 0 && imageQualityBand(analysis) !== "poor") {
             console.log(`[fast-gate] Pending item with YOLO detection — skipping object_detected`);
             triggerClassification(analysis);
           } else {

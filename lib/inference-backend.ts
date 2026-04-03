@@ -141,7 +141,10 @@ class OnnxBackend implements InferenceBackend {
       clearTimeout(this.continuousTimer);
       this.continuousTimer = null;
     }
-    console.log("[inference] Continuous YOLO loop paused (freeing CPU for YOLO World)");
+    // Clear buffered detections so stale results from the previous item
+    // don't trigger the YOLO fast gate when the loop resumes.
+    this.latestDetections = [];
+    console.log("[inference] Continuous YOLO loop paused");
   }
 
   resumeContinuous(): void {

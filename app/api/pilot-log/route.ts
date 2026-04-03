@@ -159,10 +159,6 @@ export async function DELETE(request: Request) {
       }
     }
 
-    if (toDelete.length === 0) {
-      return NextResponse.json({ deleted: 0, kept: toKeep.length, blobsDeleted: 0 });
-    }
-
     // ── Delete Blob images (best-effort) ──
     let blobsDeleted = 0;
     const imageUrls = toDelete
@@ -175,15 +171,6 @@ export async function DELETE(request: Request) {
         blobsDeleted++;
       } catch {
         // Blob may already be deleted — ignore
-      }
-    }
-
-    // ── Rebuild Redis list with remaining entries ──
-    const pipeline = redis.pipeline();
-    pipeline.del(KEYS.pilotLog);
-    if (toKeep.length > 0) {
-      for (const entry of toKeep) {
-        pipeline.rpush(KEYS.pilotLog, JSON.stringify(entry));
       }
     }
 
@@ -207,6 +194,20 @@ export async function DELETE(request: Request) {
         }
       } catch {
         feedbackToKeep.push(typeof item === "string" ? item : JSON.stringify(item));
+      }
+    }
+
+    // Nothing to delete in either list
+    if (toDelete.length === 0 && deletedFeedbackIds.length === 0 && !deleteAll) {
+      return NextResponse.json({ deleted: 0, kept: toKeep.length, blobsDeleted: 0 });
+    }
+
+    // ── Rebuild Redis lists with remaining entries ──
+    const pipeline = redis.pipeline();
+    pipeline.del(KEYS.pilotLog);
+    if (toKeep.length > 0) {
+      for (const entry of toKeep) {
+        pipeline.rpush(KEYS.pilotLog, JSON.stringify(entry));
       }
     }
 
@@ -242,10 +243,11 @@ export async function DELETE(request: Request) {
 
     await pipeline.exec();
 
-    console.log(`[pilot-log] Purged ${toDelete.length} entries, ${blobsDeleted} blobs`);
+    const totalDeleted = toDelete.length + deletedFeedbackIds.length;
+    console.log(`[pilot-log] Purged ${toDelete.length} log entries, ${deletedFeedbackIds.length} feedback, ${blobsDeleted} blobs`);
 
     return NextResponse.json({
-      deleted: toDelete.length,
+      deleted: totalDeleted,
       kept: toKeep.length,
       blobsDeleted,
     });

@@ -446,7 +446,7 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
       const roiY = Math.round(vh * CAPTURE_ROI_MARGIN);
       const roiW = Math.round(vw * (1 - CAPTURE_ROI_MARGIN * 2));
       const roiH = Math.round(vh * (1 - CAPTURE_ROI_MARGIN * 2));
-      const scale = Math.min(1, 320 / Math.max(roiW, roiH));
+      const scale = Math.min(1, 768 / Math.max(roiW, roiH));
       const outW = Math.round(roiW * scale);
       const outH = Math.round(roiH * scale);
 
@@ -692,7 +692,7 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
       const roiW = Math.round(vw * (1 - CAPTURE_ROI_MARGIN * 2));
       const roiH = Math.round(vh * (1 - CAPTURE_ROI_MARGIN * 2));
 
-      const scale = Math.min(1, 320 / Math.max(roiW, roiH));
+      const scale = Math.min(1, 768 / Math.max(roiW, roiH));
       const outW = Math.round(roiW * scale);
       const outH = Math.round(roiH * scale);
 

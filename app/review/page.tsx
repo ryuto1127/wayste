@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useRef, Suspense } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
+import { AdminNav } from "@/components/AdminNav";
 import type { FeedbackEntry, PilotLogEntry } from "@/lib/types";
 import type { Locale } from "@/lib/i18n";
 import { t } from "@/lib/i18n";
@@ -127,33 +128,13 @@ function FullReviewPage() {
     <div className="h-full bg-neutral-950 text-white p-8 overflow-y-auto">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
           <div>
             <h1 className="text-3xl font-bold">{T("fullReview")}</h1>
             <p className="text-neutral-400 text-sm mt-1">{T("fullReviewSubtitle")}</p>
           </div>
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => setLocale(locale === "en" ? "ja" : "en")}
-              className="px-3 py-1.5 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-sm transition-colors"
-            >
-              {T("switchLang")}
-            </button>
-            <Link
-              href="/review"
-              className="px-4 py-2 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-sm transition-colors"
-            >
-              {T("imageReview")}
-            </Link>
-            <Link
-              href="/"
-              className="px-4 py-2 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-sm transition-colors"
-            >
-              {T("backToKiosk")}
-            </Link>
-          </div>
+          <AdminNav locale={locale} onToggleLocale={() => setLocale(locale === "en" ? "ja" : "en")} />
         </div>
-
         {/* Stats bar */}
         <div className="flex items-center gap-4 mb-6 flex-wrap">
           <div className="bg-neutral-900 rounded-xl px-4 py-2">
@@ -458,34 +439,17 @@ function LegacyReviewPage() {
     <div className="h-full bg-neutral-950 text-white p-8 overflow-y-auto">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
-        <div className="flex items-center justify-between mb-8">
+        <div className="flex items-center justify-between mb-8 flex-wrap gap-3">
           <div>
             <h1 className="text-3xl font-bold">{T("imageReview")}</h1>
             <p className="text-neutral-400 text-sm mt-1">{T("imageReviewSubtitle")}</p>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
             <div className="flex gap-3 text-sm">
               <span className="text-orange-400 font-medium">{pending.length} {T("pendingCount")}</span>
               <span className="text-emerald-400 font-medium">{corrected.length} {T("correctedCount")}</span>
             </div>
-            <Link
-              href="/review?mode=full"
-              className="px-4 py-2 rounded-lg bg-purple-700 hover:bg-purple-600 text-sm font-medium transition-colors"
-            >
-              {T("fullReview")}
-            </Link>
-            <button
-              onClick={() => setLocale(locale === "en" ? "ja" : "en")}
-              className="px-3 py-1.5 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-sm transition-colors"
-            >
-              {T("switchLang")}
-            </button>
-            <Link
-              href="/"
-              className="px-4 py-2 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-sm transition-colors"
-            >
-              {T("backToKiosk")}
-            </Link>
+            <AdminNav locale={locale} onToggleLocale={() => setLocale(locale === "en" ? "ja" : "en")} />
           </div>
         </div>
 

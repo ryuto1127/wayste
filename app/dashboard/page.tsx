@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef, useMemo } from "react";
+import { useEffect, useState, useCallback, useRef, useMemo, Suspense } from "react";
 import type { FeedbackStats } from "@/lib/feedback-analysis";
 import type { Locale } from "@/lib/i18n";
 import { t } from "@/lib/i18n";
 import Link from "next/link";
+import { AdminNav } from "@/components/AdminNav";
 
 export default function DashboardPage() {
   const [stats, setStats] = useState<FeedbackStats | null>(null);
@@ -74,7 +75,7 @@ export default function DashboardPage() {
     <div className="h-full bg-neutral-950 text-white p-8 overflow-y-auto">
       <div className="max-w-5xl mx-auto">
         {/* Header */}
-        <div className="flex items-center justify-between mb-8">
+        <div className="flex items-center justify-between mb-8 flex-wrap gap-3">
           <div className="flex items-center gap-3">
             <h1 className="text-3xl font-bold">{T("feedbackDashboard")}</h1>
             {isLive && (
@@ -87,20 +88,9 @@ export default function DashboardPage() {
               </span>
             )}
           </div>
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => setLocale(locale === "en" ? "ja" : "en")}
-              className="px-3 py-1.5 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-sm transition-colors"
-            >
-              {T("switchLang")}
-            </button>
-            <Link
-              href="/"
-              className="px-4 py-2 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-sm transition-colors"
-            >
-              {T("backToKiosk")}
-            </Link>
-          </div>
+          <Suspense fallback={null}>
+            <AdminNav locale={locale} onToggleLocale={() => setLocale(locale === "en" ? "ja" : "en")} />
+          </Suspense>
         </div>
 
         {!stats || stats.total === 0 ? (

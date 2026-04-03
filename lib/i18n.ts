@@ -110,6 +110,35 @@ const translations = {
     saveName: "Save",
     cancelEdit: "Cancel",
     correctedName: "Corrected name",
+
+    // Idle screen
+    todaysStats: "Today's Stats",
+    itemsSorted: "items sorted",
+    successRateLabel: "success rate",
+    firstUserWelcome: "You're the first user today!",
+    sortingTip: "Sorting Tip",
+
+    // Camera screen
+    holdSteadyDetecting: "Item detected — Hold steady...",
+    analyzingPleaseWait: "Analyzing...",
+
+    // Result screen
+    putThisInBin: "Put this in the",
+
+    // Full review page
+    fullReview: "Full Review",
+    fullReviewSubtitle: "Review all classifications and mark each as correct, wrong, or false detection",
+    reviewed: "reviewed",
+    falseDetection: "Nothing / False",
+    markCorrect: "Correct",
+    markWrong: "Wrong",
+    exportData: "Export JSONL",
+    allEntries: "All Entries",
+    pendingReview: "Pending Review",
+    verdictCorrect: "Verified correct",
+    verdictWrong: "Verified wrong",
+    verdictFalse: "False detection",
+    selectCorrectStream: "Select the correct bin:",
   },
   ja: {
     analyzing: "分析中...",
@@ -213,6 +242,35 @@ const translations = {
     saveName: "保存",
     cancelEdit: "キャンセル",
     correctedName: "修正済み名前",
+
+    // Idle screen
+    todaysStats: "今日の統計",
+    itemsSorted: "件 分類済み",
+    successRateLabel: "成功率",
+    firstUserWelcome: "あなたは今日最初のユーザーです！",
+    sortingTip: "分別のヒント",
+
+    // Camera screen
+    holdSteadyDetecting: "アイテムを検出 — 動かさないでください...",
+    analyzingPleaseWait: "分析中...",
+
+    // Result screen
+    putThisInBin: "こちらへ捨ててください：",
+
+    // Full review page
+    fullReview: "全件レビュー",
+    fullReviewSubtitle: "全ての分類結果を確認し、正解・不正解・誤検出を判定します",
+    reviewed: "件 レビュー済み",
+    falseDetection: "誤検出",
+    markCorrect: "正解",
+    markWrong: "不正解",
+    exportData: "JSONL出力",
+    allEntries: "全エントリー",
+    pendingReview: "レビュー待ち",
+    verdictCorrect: "正解と確認済み",
+    verdictWrong: "不正解と確認済み",
+    verdictFalse: "誤検出と確認済み",
+    selectCorrectStream: "正しいゴミ箱を選択：",
   },
 } as const;
 

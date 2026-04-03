@@ -233,6 +233,97 @@ export default function DashboardPage() {
               </div>
             )}
 
+            {/* Per-stream accuracy */}
+            {stats.perStreamAccuracy.length > 0 && (
+              <div className="bg-neutral-900 rounded-2xl p-6">
+                <h2 className="text-lg font-semibold mb-4">
+                  {locale === "ja" ? "カテゴリ別正解率" : "Accuracy by Category"}
+                </h2>
+                <div className="space-y-3">
+                  {stats.perStreamAccuracy.map((s) => (
+                    <div key={s.stream}>
+                      <div className="flex items-center justify-between text-sm mb-1">
+                        <div className="flex items-center gap-2">
+                          <StreamPill stream={s.stream} />
+                          <span className="text-neutral-400 text-xs">
+                            ({s.total} {locale === "ja" ? "件" : "items"})
+                          </span>
+                        </div>
+                        <span
+                          className={`font-bold text-xs ${
+                            s.rate >= 0.8
+                              ? "text-emerald-400"
+                              : s.rate >= 0.6
+                                ? "text-amber-400"
+                                : "text-red-400"
+                          }`}
+                        >
+                          {Math.round(s.rate * 100)}%
+                        </span>
+                      </div>
+                      <div className="w-full h-2 bg-neutral-800 rounded-full overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all duration-500 ${
+                            s.rate >= 0.8
+                              ? "bg-emerald-500"
+                              : s.rate >= 0.6
+                                ? "bg-amber-500"
+                                : "bg-red-500"
+                          }`}
+                          style={{ width: `${Math.round(s.rate * 100)}%` }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* 24-hour trend */}
+            {stats.hourlyTrend.some((h) => h.total > 0) && (
+              <div className="bg-neutral-900 rounded-2xl p-6">
+                <h2 className="text-lg font-semibold mb-4">
+                  {locale === "ja" ? "24時間の推移" : "24-Hour Activity"}
+                </h2>
+                <div className="flex items-end gap-1 h-24">
+                  {stats.hourlyTrend.map((h) => {
+                    const maxTotal = Math.max(
+                      ...stats.hourlyTrend.map((x) => x.total),
+                      1,
+                    );
+                    const heightPct = (h.total / maxTotal) * 100;
+                    const correctPct = h.total > 0 ? (h.correct / h.total) : 0;
+                    return (
+                      <div
+                        key={h.hour}
+                        className="flex-1 flex flex-col items-center gap-0.5"
+                        title={`${h.hour}: ${h.total} items, ${Math.round(correctPct * 100)}% correct`}
+                      >
+                        <div
+                          className={`w-full rounded-t transition-all duration-300 ${
+                            correctPct >= 0.8
+                              ? "bg-emerald-600"
+                              : correctPct >= 0.6
+                                ? "bg-amber-600"
+                                : h.total > 0
+                                  ? "bg-red-600"
+                                  : "bg-neutral-800"
+                          }`}
+                          style={{
+                            height: `${Math.max(heightPct, h.total > 0 ? 4 : 1)}%`,
+                          }}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="flex justify-between mt-1 text-[9px] text-neutral-600">
+                  <span>{stats.hourlyTrend[0]?.hour}</span>
+                  <span>{stats.hourlyTrend[stats.hourlyTrend.length - 1]?.hour}</span>
+                </div>
+              </div>
+            )}
+
             {/* Recent feedback */}
             <div className="bg-neutral-900 rounded-2xl p-6">
               <h2 className="text-lg font-semibold mb-4">

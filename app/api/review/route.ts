@@ -1,17 +1,63 @@
 /**
- * GET  /api/review         — all "wrong" feedback entries, merged with saved corrections + pilot log images
- * POST /api/review         — save a human correction { id, actualStream }
+ * GET  /api/review              — "wrong" feedback entries (legacy default)
+ * GET  /api/review?mode=full    — ALL pilot log entries for full human review
+ * POST /api/review              — save a human correction or review verdict
  */
 
 import { NextResponse } from "next/server";
 import { z } from "zod/v4";
 import { redis, KEYS } from "@/lib/redis";
+import { requireApiKey } from "@/lib/auth";
 import type { FeedbackEntry, PilotLogEntry } from "@/lib/types";
 
 const CORRECTIONS_KEY = "recycling:corrections";       // Redis hash: id → actualStream
 const NAMES_KEY       = "recycling:corrections:names"; // Redis hash: id → actualItemName
+/** Human review verdicts for pilot log entries: requestId → "correct" | "wrong" | "false_detection" */
+const VERDICTS_KEY    = "recycling:review-verdicts";
+/** When verdict is "wrong", the correct stream: requestId → stream */
+const VERDICT_STREAMS_KEY = "recycling:review-verdicts:streams";
 
-export async function GET() {
+export async function GET(request: Request) {
+  const denied = requireApiKey(request);
+  if (denied) return denied;
+
+  const { searchParams } = new URL(request.url);
+  const mode = searchParams.get("mode");
+
+  // ── Full review mode: return ALL pilot log entries with review verdicts ──
+  if (mode === "full") {
+    try {
+      const [pilotRaw, verdicts, verdictStreams] = await Promise.all([
+        redis.lrange(KEYS.pilotLog, 0, -1),
+        redis.hgetall(VERDICTS_KEY) as Promise<Record<string, string> | null>,
+        redis.hgetall(VERDICT_STREAMS_KEY) as Promise<Record<string, string> | null>,
+      ]);
+
+      const entries = pilotRaw
+        .map((item) => {
+          try {
+            return (typeof item === "string" ? JSON.parse(item) : item) as PilotLogEntry;
+          } catch { return null; }
+        })
+        .filter((e): e is PilotLogEntry => e !== null)
+        .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+        .map((entry) => ({
+          ...entry,
+          verdict: entry.requestId ? (verdicts?.[entry.requestId] ?? null) : null,
+          verdictStream: entry.requestId ? (verdictStreams?.[entry.requestId] ?? null) : null,
+        }));
+
+      const reviewed = entries.filter((e) => e.verdict !== null).length;
+      const total = entries.length;
+
+      return NextResponse.json({ entries, reviewed, total });
+    } catch (err) {
+      console.error("[review] GET full failed:", err);
+      return NextResponse.json({ error: "Failed to load entries." }, { status: 500 });
+    }
+  }
+
+  // ── Legacy mode: only "wrong" feedback entries ──
   try {
     // Load feedback entries and pilot log in parallel
     const [feedbackRaw, pilotRaw] = await Promise.all([
@@ -98,9 +144,16 @@ const CorrectionSchema = z.object({
   id: z.string(),
   actualStream:   z.string().optional(),
   actualItemName: z.string().optional(),
+  // Full-review fields (keyed by requestId, not feedback id)
+  requestId: z.string().optional(),
+  verdict:   z.enum(["correct", "wrong", "false_detection"]).optional(),
+  verdictStream: z.string().optional(), // correct stream when verdict is "wrong"
 });
 
 export async function POST(request: Request) {
+  const denied = requireApiKey(request);
+  if (denied) return denied;
+
   let body: unknown;
   try {
     body = await request.json();
@@ -114,10 +167,21 @@ export async function POST(request: Request) {
   }
 
   try {
-    const { id, actualStream, actualItemName } = parsed.data;
+    const { id, actualStream, actualItemName, requestId, verdict, verdictStream } = parsed.data;
     const ops: Promise<unknown>[] = [];
+
+    // Legacy feedback corrections (keyed by feedback entry id)
     if (actualStream   !== undefined) ops.push(redis.hset(CORRECTIONS_KEY, { [id]: actualStream }));
     if (actualItemName !== undefined) ops.push(redis.hset(NAMES_KEY,       { [id]: actualItemName }));
+
+    // Full-review verdicts (keyed by requestId from pilot log)
+    if (requestId && verdict) {
+      ops.push(redis.hset(VERDICTS_KEY, { [requestId]: verdict }));
+      if (verdict === "wrong" && verdictStream) {
+        ops.push(redis.hset(VERDICT_STREAMS_KEY, { [requestId]: verdictStream }));
+      }
+    }
+
     await Promise.all(ops);
     return NextResponse.json({ saved: true });
   } catch (err) {

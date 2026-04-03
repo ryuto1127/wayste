@@ -43,3 +43,8 @@ next-env.d.ts
 
 # Training data and artifacts (not deployed)
 training/
+# Keep scripts (exclude data, models, and outputs)
+!training/prepare_dataset.py
+!training/prepare_pilot_data.py
+!training/supplement_and_train.py
+!training/finetune_yolo26n.ipynb

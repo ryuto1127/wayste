@@ -11,7 +11,7 @@ import { ROI_FG_THRESHOLD } from "@/lib/frame-analyzer";
 // Constants matching KioskDisplay.tsx
 const FG_PERSIST_FRAMES = 2;
 const SHARP_FRAMES_REQUIRED = 2;
-const RESULT_TIMEOUT_MS = 4_000;
+const RESULT_TIMEOUT_MS = 30_000;
 const OBJECT_GONE_FRAMES = 2;
 const ROI_BLOB_THRESHOLD = 0.05;
 const COOLDOWN_MS = 1500;
@@ -40,6 +40,7 @@ class StateMachineSimulator {
   resultEnterTime = 0;
   cooldownStart = 0;
   classifyTriggered = false;
+  pendingItem = false;
 
   tick(analysis: FrameAnalysis): void {
     if (!analysis.isSettled) return;
@@ -106,6 +107,15 @@ class StateMachineSimulator {
     }
 
     if (this.state === "cooldown") {
+      // New item pending → skip cooldown wait, fast-path to object_detected
+      if (this.pendingItem) {
+        this.pendingItem = false;
+        this.fgPersist = 0;
+        this.goneCount = 0;
+        this.objectDetectedFrames = 0;
+        this.state = "object_detected";
+        return;
+      }
       if (Date.now() - this.cooldownStart >= COOLDOWN_MS) {
         this.state = "idle";
       }
@@ -229,7 +239,7 @@ describe("State machine", () => {
     expect(sim.state).toBe("cooldown");
   });
 
-  it("result -> cooldown when object leaves", () => {
+  it("result -> cooldown when object leaves (no minimum display time)", () => {
     const sim = new StateMachineSimulator();
     sim.enterResult();
 
@@ -243,5 +253,54 @@ describe("State machine", () => {
     }
 
     expect(sim.state).toBe("cooldown");
+  });
+
+  it("cooldown with pendingItem skips wait and transitions to object_detected", () => {
+    const sim = new StateMachineSimulator();
+    sim.state = "cooldown";
+    sim.cooldownStart = Date.now(); // just started cooldown
+    sim.pendingItem = true;
+
+    const objectFrame = makeAnalysis();
+    sim.tick(objectFrame);
+
+    expect(sim.state).toBe("object_detected");
+    expect(sim.pendingItem).toBe(false);
+  });
+
+  it("cooldown without pendingItem waits for COOLDOWN_MS", () => {
+    const sim = new StateMachineSimulator();
+    sim.state = "cooldown";
+    sim.cooldownStart = Date.now();
+    sim.pendingItem = false;
+
+    const objectFrame = makeAnalysis();
+    sim.tick(objectFrame);
+
+    // Should still be in cooldown (time hasn't elapsed)
+    expect(sim.state).toBe("cooldown");
+
+    // Now simulate time passing
+    sim.cooldownStart = Date.now() - COOLDOWN_MS - 1;
+    sim.tick(objectFrame);
+
+    expect(sim.state).toBe("idle");
+  });
+
+  it("UI screen derivation: cooldown maps to idle screen", () => {
+    // This tests the uiScreen derivation logic from KioskDisplay
+    function deriveUiScreen(state: PipelineState): "idle" | "camera" | "result" {
+      return state === "result"
+        ? "result"
+        : state === "object_detected" || state === "classifying"
+          ? "camera"
+          : "idle";
+    }
+
+    expect(deriveUiScreen("idle")).toBe("idle");
+    expect(deriveUiScreen("cooldown")).toBe("idle");
+    expect(deriveUiScreen("object_detected")).toBe("camera");
+    expect(deriveUiScreen("classifying")).toBe("camera");
+    expect(deriveUiScreen("result")).toBe("result");
   });
 });

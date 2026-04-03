@@ -154,4 +154,22 @@ describe("normalizeKey", () => {
   it("handles already normalized input", () => {
     expect(normalizeKey("bottle")).toBe("bottle");
   });
+
+  it("prepends locale when provided", () => {
+    expect(normalizeKey("bottle", "en")).toBe("en::bottle");
+    expect(normalizeKey("bottle", "ja")).toBe("ja::bottle");
+  });
+
+  it("different locales produce different keys", () => {
+    const enKey = normalizeKey("Plastic Bottle", "en");
+    const jaKey = normalizeKey("Plastic Bottle", "ja");
+    expect(enKey).not.toBe(jaKey);
+    expect(enKey).toBe("en::plastic bottle");
+    expect(jaKey).toBe("ja::plastic bottle");
+  });
+
+  it("omitting locale preserves backward compatibility", () => {
+    expect(normalizeKey("bottle")).toBe("bottle");
+    expect(normalizeKey("bottle", undefined)).toBe("bottle");
+  });
 });

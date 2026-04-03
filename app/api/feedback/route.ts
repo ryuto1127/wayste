@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod/v4";
 import { redis, KEYS, MAX_ENTRIES } from "@/lib/redis";
+import { runInBackground } from "@/lib/background-task";
+import { checkAndApplyAutoOverride } from "@/lib/auto-override";
 
 const FeedbackSchema = z.object({
   itemName: z.string(),
@@ -44,6 +46,13 @@ export async function POST(request: Request) {
     return NextResponse.json(
       { error: "Failed to save feedback." },
       { status: 500 }
+    );
+  }
+
+  // Auto-apply override if enough consistent corrections exist (fire-and-forget)
+  if (parsed.data.feedback === "wrong" && parsed.data.actualStream) {
+    runInBackground(
+      checkAndApplyAutoOverride(entry.siteId, entry.itemName, parsed.data.actualStream)
     );
   }
 

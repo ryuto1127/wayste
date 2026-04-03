@@ -51,6 +51,17 @@ export interface ClassifyMeta {
   imageQuality: ImageQuality;
 }
 
+// ── YOLO detection log (for fine-tuning dataset) ──
+export interface YoloDetectionLog {
+  classId: number;
+  className: string;
+  confidence: number;
+  /** Bounding box in model-space pixels [x1, y1, width, height] (640×640). */
+  bbox: [number, number, number, number];
+  /** Normalized YOLO format [x_center, y_center, width, height] (0-1). */
+  bboxNorm: [number, number, number, number];
+}
+
 // ── Pilot log entry (server-side) ──
 export interface PilotLogEntry {
   timestamp: string;
@@ -65,6 +76,10 @@ export interface PilotLogEntry {
   blobUploadFailed?: boolean;
   requestId?: string;
   meta?: ClassifyMeta;
+  /** YOLO detections for this frame (if YOLO ran). Used for fine-tuning dataset export. */
+  yoloDetections?: YoloDetectionLog[];
+  /** Whether an override was applied to change the model's original prediction. */
+  overrideApplied?: boolean;
 }
 
 /**
@@ -155,6 +170,8 @@ export interface SiteConfig {
    * so text on packages reads correctly.
    */
   mirrorCamera?: boolean;
+  /** Sorting tips shown on the idle screen. Language should match defaultLocale. */
+  tips?: { text: string }[];
 }
 
 export interface StreamDefinition {

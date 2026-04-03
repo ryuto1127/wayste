@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
-import { waitUntil } from "@vercel/functions";
 import OpenAI from "openai";
 import { z } from "zod/v4";
-import type { ClassifyMeta, ComponentPart } from "@/lib/types";
+import type { ClassifyMeta, ComponentPart, YoloDetectionLog } from "@/lib/types";
 import {
   loadSiteConfig,
   buildNanoPrompt,
@@ -10,6 +9,7 @@ import {
   buildClassificationResult,
 } from "@/lib/waste-rules";
 import { logPilotEntry } from "@/lib/pilot-log";
+import { runInBackground } from "@/lib/background-task";
 import { uploadFrameToBlob } from "@/lib/blob-store";
 import { redis } from "@/lib/redis";
 import { generateRequestId } from "@/lib/request-id";
@@ -25,6 +25,17 @@ const RequestSchema = z.object({
       sharpnessScore: z.number(),
       imageQuality: z.enum(["good", "fair", "poor"]),
     })
+    .optional(),
+  yoloDetections: z
+    .array(
+      z.object({
+        classId: z.number(),
+        className: z.string(),
+        confidence: z.number(),
+        bbox: z.tuple([z.number(), z.number(), z.number(), z.number()]),
+        bboxNorm: z.tuple([z.number(), z.number(), z.number(), z.number()]),
+      })
+    )
     .optional(),
 });
 
@@ -150,8 +161,10 @@ function shouldEscalate(
 
 export async function POST(request: Request) {
   // ── Redis-based rate limiting ──
-  const forwarded = request.headers.get("x-forwarded-for");
-  const clientId = forwarded?.split(",")[0]?.trim() || "unknown";
+  const clientId =
+    request.headers.get("x-real-ip")
+    ?? request.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
+    ?? "unknown";
   const rlKey = `rl:classify:${clientId}`;
   try {
     const count = await redis.incr(rlKey);
@@ -188,7 +201,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const { image, siteId, locale = "en", meta } = parsed.data;
+  const { image, siteId, locale = "en", meta, yoloDetections } = parsed.data;
   const siteConfig = loadSiteConfig(siteId ?? process.env.SITE_ID ?? "default");
   const openai = new OpenAI();
   const startMs = Date.now();
@@ -260,7 +273,7 @@ export async function POST(request: Request) {
       latencyMs: totalServerMs,
     });
 
-    waitUntil(
+    runInBackground(
       uploadFrameToBlob(image, result.itemName, result.wasteStream, logTimestamp)
         .then((imageUrl) =>
           logPilotEntry({
@@ -276,6 +289,8 @@ export async function POST(request: Request) {
             blobUploadFailed: !imageUrl,
             requestId,
             meta: meta as ClassifyMeta | undefined,
+            yoloDetections: yoloDetections as YoloDetectionLog[] | undefined,
+            overrideApplied: result.wasteStream !== raw.wasteStream,
           })
         )
     );

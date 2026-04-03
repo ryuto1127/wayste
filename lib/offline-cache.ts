@@ -22,10 +22,13 @@ interface CacheStore {
  *   meaningfully affect classification (e.g., "empty bottle" vs "bottle"
  *   may route differently when contamination matters).
  */
-export function normalizeKey(itemName: string): string {
+export function normalizeKey(itemName: string, locale?: string): string {
   let key = itemName.toLowerCase().trim();
   key = key.replace(/\s+/g, " ");
   key = key.replace(/^(a |an |the )/, "");
+  // Prepend locale to prevent cross-language collisions
+  // (e.g., "bottle" in en vs "ボトル" in ja are different API results)
+  if (locale) key = `${locale}::${key}`;
   return key;
 }
 
@@ -50,10 +53,11 @@ function saveCache(store: CacheStore): void {
 }
 
 export function getCachedResult(
-  itemName: string
+  itemName: string,
+  locale?: string,
 ): ClassificationResponse | null {
   const store = loadCache();
-  const key = normalizeKey(itemName);
+  const key = normalizeKey(itemName, locale);
   const entry = store.entries[key];
 
   if (!entry) return null;
@@ -75,12 +79,12 @@ export function getCachedResult(
   return entry.result;
 }
 
-export function cacheResult(result: ClassificationResponse): void {
+export function cacheResult(result: ClassificationResponse, locale?: string): void {
   // Only cache high-confidence, non-review results
   if (result.confidence < 0.75 || result.needsReview) return;
 
   const store = loadCache();
-  const key = normalizeKey(result.itemName);
+  const key = normalizeKey(result.itemName, locale);
 
   store.entries[key] = {
     result,

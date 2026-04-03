@@ -1,6 +1,10 @@
 import { analyzeFeedback } from "@/lib/feedback-analysis";
+import { requireApiKey } from "@/lib/auth";
 
 export async function GET(request: Request) {
+  const denied = requireApiKey(request);
+  if (denied) return denied;
+
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream({

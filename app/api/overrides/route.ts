@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod/v4";
 import { redis } from "@/lib/redis";
+import { requireApiKey } from "@/lib/auth";
 import type { ItemOverride, WasteStream } from "@/lib/types";
 
 const OverrideSchema = z.object({
@@ -21,6 +22,9 @@ async function loadOverrides(siteId: string): Promise<ItemOverride[]> {
 }
 
 export async function POST(request: Request) {
+  const denied = requireApiKey(request);
+  if (denied) return denied;
+
   let body: unknown;
   try {
     body = await request.json();
@@ -62,6 +66,9 @@ export async function POST(request: Request) {
 }
 
 export async function GET(request: Request) {
+  const denied = requireApiKey(request);
+  if (denied) return denied;
+
   const { searchParams } = new URL(request.url);
   const siteId = searchParams.get("siteId") ?? "default";
 

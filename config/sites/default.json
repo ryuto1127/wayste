@@ -129,5 +129,15 @@
   ],
   "siteRules": [],
   "staffHandlingItems": [],
-  "defaultStream": "landfill"
+  "defaultStream": "landfill",
+  "tips": [
+    { "text": "Rinse containers before recycling — food residue contaminates the whole batch." },
+    { "text": "Flatten cardboard boxes so they take up less space in the recycling bin." },
+    { "text": "Plastic bags jam sorting machines. Bring them to a grocery store drop-off instead." },
+    { "text": "Paper coffee cups have a plastic lining — they go in landfill, not recycling." },
+    { "text": "When in doubt, landfill is safer than contaminating the recycling stream." },
+    { "text": "Remove caps and lids before recycling bottles — they are often a different material." },
+    { "text": "Pizza boxes with grease stains go in compost, not recycling." },
+    { "text": "Batteries and electronics need special disposal — never put them in regular bins." }
+  ]
 }

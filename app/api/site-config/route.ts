@@ -15,5 +15,6 @@ export async function GET() {
     defaultStream: config.defaultStream,
     siteName: config.siteName,
     siteId: config.siteId,
+    tips: config.tips ?? [],
   });
 }

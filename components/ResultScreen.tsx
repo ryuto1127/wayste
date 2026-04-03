@@ -4,7 +4,7 @@ import React, { useState, useCallback } from "react";
 import type { ClassificationResponse } from "@/lib/types";
 import type { Locale, TranslationKey } from "@/lib/i18n";
 import { t } from "@/lib/i18n";
-import { kioskAuthHeaders } from "@/lib/kiosk-auth-client";
+// Auth is handled via session token passed as a prop
 
 /** Map a waste stream ID to its localised display label. */
 function streamLabel(locale: Locale, streamId: string): string {
@@ -56,6 +56,7 @@ interface ResultScreenProps {
   onFeedbackGiven: () => void;
   onToggleLocale: () => void;
   voiceEnabled?: boolean;
+  sessionToken?: string;
 }
 
 export default function ResultScreen({
@@ -65,6 +66,7 @@ export default function ResultScreen({
   onFeedbackGiven,
   onToggleLocale,
   voiceEnabled = false,
+  sessionToken,
 }: ResultScreenProps) {
   const T = useCallback(
     (key: TranslationKey) => t(locale, key),
@@ -234,6 +236,7 @@ export default function ResultScreen({
             requestId={requestId}
             onFeedbackGiven={onFeedbackGiven}
             locale={locale}
+            sessionToken={sessionToken}
           />
         </div>
       </div>
@@ -310,11 +313,13 @@ function FeedbackButtons({
   requestId,
   onFeedbackGiven,
   locale,
+  sessionToken,
 }: {
   result: ClassificationResponse;
   requestId?: string;
   onFeedbackGiven: () => void;
   locale: Locale;
+  sessionToken?: string;
 }) {
   const T = useCallback(
     (key: TranslationKey) => t(locale, key),
@@ -329,7 +334,7 @@ function FeedbackButtons({
       try {
         await fetch("/api/feedback", {
           method: "POST",
-          headers: { "Content-Type": "application/json", ...kioskAuthHeaders() },
+          headers: { "Content-Type": "application/json", ...(sessionToken ? { "x-session-token": sessionToken } : {}) },
           body: JSON.stringify({
             itemName: result.itemName,
             predictedStream: result.wasteStream,

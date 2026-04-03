@@ -13,7 +13,7 @@ import { runInBackground } from "@/lib/background-task";
 import { uploadFrameToBlob } from "@/lib/blob-store";
 import { redis } from "@/lib/redis";
 import { generateRequestId } from "@/lib/request-id";
-import { requireKioskAuth } from "@/lib/auth";
+import { validateSessionToken } from "@/lib/session-token";
 
 // ── Request validation ──
 const RequestSchema = z.object({
@@ -182,9 +182,18 @@ function shouldEscalate(
 }
 
 export async function POST(request: Request) {
-  // ── Kiosk token auth ──
-  const authDenied = requireKioskAuth(request);
-  if (authDenied) return authDenied;
+  // ── Session token validation ──
+  const sessionToken = request.headers.get("x-session-token");
+  if (sessionToken) {
+    const result = validateSessionToken(sessionToken);
+    if (!result.valid) {
+      return NextResponse.json(
+        { error: "Invalid or expired session. Please reload the page.", reason: result.reason },
+        { status: 401 }
+      );
+    }
+  }
+  // If no session token is provided, fall through to rate limiting only (dev mode)
 
   // ── Redis-based rate limiting ──
   const clientId =

@@ -1,12 +1,11 @@
 import { NextResponse } from "next/server";
 import { redis, KEYS, MAX_ENTRIES } from "@/lib/redis";
-import { requireApiKey } from "@/lib/auth";
 import { logPilotEntry } from "@/lib/pilot-log";
 import { uploadFrameToBlob } from "@/lib/blob-store";
 import { runInBackground } from "@/lib/background-task";
 import { generateRequestId } from "@/lib/request-id";
 import type { PilotLogEntry } from "@/lib/types";
-import { requireKioskAuth } from "@/lib/auth";
+import { validateSessionToken } from "@/lib/session-token";
 
 export async function GET(request: Request) {
   // GET is read-only (review page) — no auth required.
@@ -36,9 +35,17 @@ export async function GET(request: Request) {
  * Called by the client when YOLO wins the race and the API is aborted.
  */
 export async function POST(request: Request) {
-  // ── Kiosk token auth ──
-  const authDenied = requireKioskAuth(request);
-  if (authDenied) return authDenied;
+  // ── Session token validation ──
+  const sessionToken = request.headers.get("x-session-token");
+  if (sessionToken) {
+    const result = validateSessionToken(sessionToken);
+    if (!result.valid) {
+      return NextResponse.json(
+        { error: "Invalid or expired session.", reason: result.reason },
+        { status: 401 }
+      );
+    }
+  }
 
   let body: unknown;
   try {

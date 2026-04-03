@@ -20,7 +20,7 @@ import {
 } from "@/lib/frame-analyzer";
 import { initYolo, isYoloReady, runYoloInference, warmUpYolo } from "@/lib/yolo-inference";
 import { loadYoloRules, resolveYoloDetection } from "@/lib/yolo-rules";
-import { kioskAuthHeaders } from "@/lib/kiosk-auth-client";
+// kioskAuthHeaders replaced by session token (server-generated, HMAC-signed)
 import CameraFeed, { type CameraFeedHandle } from "./CameraFeed";
 import IdleScreen from "./IdleScreen";
 import CameraScreen from "./CameraScreen";
@@ -84,11 +84,18 @@ function toDetectionLogs(detections: YoloDetection[]): YoloDetectionLog[] {
 
 interface KioskDisplayProps {
   defaultLocale?: Locale;
+  /** Server-generated session token for API authentication. */
+  sessionToken?: string;
 }
 
-export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
+/** How often to refresh the session token (3 hours — token TTL is 4 hours). */
+const TOKEN_REFRESH_MS = 3 * 60 * 60 * 1000;
+
+export default function KioskDisplay({ defaultLocale, sessionToken: initialToken }: KioskDisplayProps) {
   const cameraRef = useRef<CameraFeedHandle>(null);
   const analyzerRef = useRef<FrameAnalyzer | null>(null);
+  /** Current session token — refreshed periodically. */
+  const sessionTokenRef = useRef<string>(initialToken ?? "");
 
   // ── Pipeline state ──
   const stateRef = useRef<PipelineState>("idle");
@@ -117,6 +124,20 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       return next;
     });
   }, []);
+
+  // ── Session token refresh (runs every 3 hours) ──
+  useEffect(() => {
+    if (!initialToken) return; // dev mode — no token
+    const id = setInterval(() => {
+      fetch("/api/session")
+        .then((r) => r.json())
+        .then((data: { token?: string }) => {
+          if (data.token) sessionTokenRef.current = data.token;
+        })
+        .catch(() => {});
+    }, TOKEN_REFRESH_MS);
+    return () => clearInterval(id);
+  }, [initialToken]);
 
   // ── CV counters (refs to avoid re-renders) ──
   const goneCountRef = useRef(0);
@@ -216,7 +237,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           const reqBody = { image: frame, meta, locale, yoloDetections };
           const res = await fetch("/api/classify", {
             method: "POST",
-            headers: { "Content-Type": "application/json", ...kioskAuthHeaders() },
+            headers: { "Content-Type": "application/json", ...(sessionTokenRef.current ? { "x-session-token": sessionTokenRef.current } : {}) },
             body: JSON.stringify(reqBody),
             signal: controller.signal,
           });
@@ -228,7 +249,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
             const retryStart = Date.now();
             const retryRes = await fetch("/api/classify", {
               method: "POST",
-              headers: { "Content-Type": "application/json", ...kioskAuthHeaders() },
+              headers: { "Content-Type": "application/json", ...(sessionTokenRef.current ? { "x-session-token": sessionTokenRef.current } : {}) },
               body: JSON.stringify(reqBody),
             });
             const retryMs = Date.now() - retryStart;
@@ -439,7 +460,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           if (!frame) return;
           fetch("/api/pilot-log", {
             method: "POST",
-            headers: { "Content-Type": "application/json", ...kioskAuthHeaders() },
+            headers: { "Content-Type": "application/json", ...(sessionTokenRef.current ? { "x-session-token": sessionTokenRef.current } : {}) },
             body: JSON.stringify({
               image: frame,
               entry: {
@@ -788,6 +809,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           onFeedbackGiven={handleFeedbackGiven}
           onToggleLocale={toggleLocale}
           voiceEnabled={voiceEnabled}
+          sessionToken={sessionTokenRef.current || undefined}
         />
       )}
     </div>

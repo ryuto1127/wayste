@@ -235,7 +235,7 @@ export default function DashboardPage() {
 
             {/* Per-stream accuracy */}
             {stats.perStreamAccuracy.length > 0 && (
-              <div className="bg-neutral-900 rounded-2xl p-6">
+              <div className="bg-neutral-900 rounded-2xl p-6 mb-6">
                 <h2 className="text-lg font-semibold mb-4">
                   {locale === "ja" ? "カテゴリ別正解率" : "Accuracy by Category"}
                 </h2>
@@ -281,7 +281,7 @@ export default function DashboardPage() {
 
             {/* 24-hour trend */}
             {stats.hourlyTrend.some((h) => h.total > 0) && (
-              <div className="bg-neutral-900 rounded-2xl p-6">
+              <div className="bg-neutral-900 rounded-2xl p-6 mb-6">
                 <h2 className="text-lg font-semibold mb-4">
                   {locale === "ja" ? "24時間の推移" : "24-Hour Activity"}
                 </h2>

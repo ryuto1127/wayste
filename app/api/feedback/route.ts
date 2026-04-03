@@ -3,7 +3,7 @@ import { z } from "zod/v4";
 import { redis, KEYS, MAX_ENTRIES } from "@/lib/redis";
 import { runInBackground } from "@/lib/background-task";
 import { checkAndApplyAutoOverride } from "@/lib/auto-override";
-import { requireKioskAuth } from "@/lib/auth";
+import { validateSessionToken } from "@/lib/session-token";
 
 const FeedbackSchema = z.object({
   itemName: z.string(),
@@ -22,9 +22,17 @@ const FEEDBACK_RL_MAX = 3;
 const FEEDBACK_RL_TTL_S = 300; // 5 minutes
 
 export async function POST(request: Request) {
-  // ── Kiosk token auth ──
-  const authDenied = requireKioskAuth(request);
-  if (authDenied) return authDenied;
+  // ── Session token validation ──
+  const sessionToken = request.headers.get("x-session-token");
+  if (sessionToken) {
+    const result = validateSessionToken(sessionToken);
+    if (!result.valid) {
+      return NextResponse.json(
+        { error: "Invalid or expired session.", reason: result.reason },
+        { status: 401 }
+      );
+    }
+  }
 
   let body: unknown;
   try {

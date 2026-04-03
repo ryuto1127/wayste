@@ -49,6 +49,3 @@ training/
 !training/supplement_and_train.py
 !training/finetune_yolo26n.ipynb
 !training/export_yolo_world.py
-
-# Large ONNX models (downloaded/exported locally, not committed)
-public/models/yolo-world-s.onnx

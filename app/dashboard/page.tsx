@@ -133,35 +133,6 @@ export default function DashboardPage() {
               />
             </div>
 
-            {/* Adaptive threshold */}
-            {stats.total >= 20 && (
-              <div className="bg-neutral-900 rounded-2xl p-6 mb-6">
-                <h2 className="text-lg font-semibold mb-3">
-                  {T("adaptiveThreshold")}
-                </h2>
-                <div className="flex items-center gap-6">
-                  <div>
-                    <span className="text-xs text-neutral-500 uppercase tracking-wider">
-                      {T("currentThreshold")}
-                    </span>
-                    <p className="text-2xl font-bold text-neutral-300">55%</p>
-                  </div>
-                  <div className="text-2xl text-neutral-600">→</div>
-                  <div>
-                    <span className="text-xs text-neutral-500 uppercase tracking-wider">
-                      {T("suggestedThreshold")}
-                    </span>
-                    <p className="text-2xl font-bold text-emerald-400">
-                      {Math.round(stats.suggestedThreshold * 100)}%
-                    </p>
-                  </div>
-                  <p className="text-sm text-neutral-500 ml-4">
-                    {T("basedOnFeedback")}
-                  </p>
-                </div>
-              </div>
-            )}
-
             {/* Suggested overrides */}
             {stats.suggestedOverrides.length > 0 && (
               <div className="bg-neutral-900 rounded-2xl p-6 mb-6">

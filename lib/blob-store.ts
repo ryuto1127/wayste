@@ -4,7 +4,7 @@
  * Always best-effort — never throws.
  */
 
-import { put } from "@vercel/blob";
+import { put, head } from "@vercel/blob";
 
 export async function uploadFrameToBlob(
   base64Image: string,
@@ -28,5 +28,18 @@ export async function uploadFrameToBlob(
   } catch (err) {
     console.error("[blob-store] upload failed:", err);
     return undefined;
+  }
+}
+
+/**
+ * Verify that a blob URL is valid and accessible.
+ * Returns true if the blob exists, false otherwise.
+ */
+export async function verifyBlobExists(url: string): Promise<boolean> {
+  try {
+    await head(url);
+    return true;
+  } catch {
+    return false;
   }
 }

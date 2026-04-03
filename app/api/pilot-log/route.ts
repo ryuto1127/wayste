@@ -6,6 +6,7 @@ import { uploadFrameToBlob } from "@/lib/blob-store";
 import { runInBackground } from "@/lib/background-task";
 import { generateRequestId } from "@/lib/request-id";
 import type { PilotLogEntry } from "@/lib/types";
+import { requireKioskAuth } from "@/lib/auth";
 
 export async function GET(request: Request) {
   const denied = requireApiKey(request);
@@ -36,6 +37,10 @@ export async function GET(request: Request) {
  * Called by the client when YOLO wins the race and the API is aborted.
  */
 export async function POST(request: Request) {
+  // ── Kiosk token auth ──
+  const authDenied = requireKioskAuth(request);
+  if (authDenied) return authDenied;
+
   let body: unknown;
   try {
     body = await request.json();

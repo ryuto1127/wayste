@@ -32,6 +32,26 @@ export function normalizeKey(itemName: string, locale?: string): string {
   return key;
 }
 
+/**
+ * Compute token-based similarity between two normalized cache keys.
+ * Returns 0.0–1.0 where 1.0 is identical.
+ * Used for fuzzy cache lookups when exact match fails.
+ */
+function tokenSimilarity(a: string, b: string): number {
+  // Strip locale prefix for comparison
+  const stripLocale = (s: string) => s.includes("::") ? s.split("::").slice(1).join("::") : s;
+  const tokA = new Set(stripLocale(a).split(" ").filter(Boolean));
+  const tokB = new Set(stripLocale(b).split(" ").filter(Boolean));
+  if (tokA.size === 0 || tokB.size === 0) return 0;
+  let overlap = 0;
+  for (const t of tokA) {
+    if (tokB.has(t)) overlap++;
+  }
+  // Jaccard similarity
+  const union = new Set([...tokA, ...tokB]).size;
+  return union > 0 ? overlap / union : 0;
+}
+
 function loadCache(): CacheStore {
   if (typeof window === "undefined") return { entries: {} };
   try {
@@ -58,9 +78,27 @@ export function getCachedResult(
 ): ClassificationResponse | null {
   const store = loadCache();
   const key = normalizeKey(itemName, locale);
-  const entry = store.entries[key];
+  let entry = store.entries[key];
 
-  if (!entry) return null;
+  // Fuzzy match: if exact key miss, try token-based similarity
+  if (!entry) {
+    const FUZZY_THRESHOLD = 0.7;
+    let bestScore = 0;
+    let bestKey: string | null = null;
+    for (const candidateKey of Object.keys(store.entries)) {
+      // Only match within same locale
+      if (locale && !candidateKey.startsWith(`${locale}::`)) continue;
+      const score = tokenSimilarity(key, candidateKey);
+      if (score > bestScore && score >= FUZZY_THRESHOLD) {
+        bestScore = score;
+        bestKey = candidateKey;
+      }
+    }
+    if (bestKey) {
+      entry = store.entries[bestKey];
+    }
+    if (!entry) return null;
+  }
 
   // Check TTL
   if (Date.now() - entry.timestamp > CACHE_TTL_MS) {

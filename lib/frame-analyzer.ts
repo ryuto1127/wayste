@@ -64,6 +64,8 @@ export class FrameAnalyzer {
   private canvas: OffscreenCanvas | null = null;
   private ctx: OffscreenCanvasRenderingContext2D | null = null;
   private frameCount = 0;
+  /** Mean luminance of the previous frame (0-255), used for adaptive BG rate. */
+  private prevMeanLuminance = 128;
 
   /**
    * Controls how fast the background model adapts on this frame.
@@ -288,9 +290,25 @@ export class FrameAnalyzer {
     //   0     → frozen (object_detected / classifying)
     //   ~0.001 → micro (result — slowly absorbs persistent stuck objects)
     //   ~0.008 → full  (idle / cooldown — normal continuous adaptation)
-    const effectiveBgRate = this.frameCount <= BG_INIT_FRAMES
+    // Compute mean luminance for adaptive rate adjustment
+    let lumSum = 0;
+    for (let i = 0; i < PIXEL_COUNT; i++) lumSum += gray[i];
+    const meanLuminance = lumSum / PIXEL_COUNT;
+    const lumDelta = Math.abs(meanLuminance - this.prevMeanLuminance);
+    this.prevMeanLuminance = meanLuminance;
+
+    // Adaptive BG rate: boost learning rate during sudden global illumination
+    // changes (e.g. fluorescent flicker, clouds passing, lights toggled).
+    // A lumDelta > 5 indicates a global brightness shift (not a local object).
+    // Boost is capped at 3x the base rate to avoid overshooting.
+    let effectiveBgRate = this.frameCount <= BG_INIT_FRAMES
       ? BG_INIT_RATE
       : this.bgRate;
+    if (this.frameCount > BG_INIT_FRAMES && effectiveBgRate > 0 && lumDelta > 5) {
+      const boost = Math.min(3.0, 1.0 + (lumDelta - 5) / 10);
+      effectiveBgRate = Math.min(effectiveBgRate * boost, BG_INIT_RATE);
+    }
+
     if (effectiveBgRate > 0) {
       for (let i = 0; i < PIXEL_COUNT; i++) {
         bg[i] = bg[i] * (1 - effectiveBgRate) + gray[i] * effectiveBgRate;
@@ -318,6 +336,7 @@ export class FrameAnalyzer {
     this.bgModel = null;
     this.prevGray = null;
     this.frameCount = 0;
+    this.prevMeanLuminance = 128;
   }
 }
 

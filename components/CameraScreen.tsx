@@ -42,7 +42,7 @@ export default function CameraScreen({
             }`}
           />
         </span>
-        <span className="text-sm text-white/70 font-medium">
+        <span className="text-sm text-white/70 font-medium" role="status" aria-live="polite">
           {isClassifying ? T("analyzingPleaseWait") : T("itemDetected")}
         </span>
       </div>

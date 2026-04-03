@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import React, { useState, useCallback } from "react";
 import type { ClassificationResponse } from "@/lib/types";
 import type { Locale, TranslationKey } from "@/lib/i18n";
 import { t } from "@/lib/i18n";
+import { kioskAuthHeaders } from "@/lib/kiosk-auth-client";
 
 /** Map a waste stream ID to its localised display label. */
 function streamLabel(locale: Locale, streamId: string): string {
@@ -23,6 +24,23 @@ function streamLabel(locale: Locale, streamId: string): string {
   return key ? t(locale, key) : streamId;
 }
 
+/** Map a waste stream ID to its emoji icon for triple-encoding (color + icon + text). */
+function streamIcon(streamId: string): string {
+  const map: Record<string, string> = {
+    recycling: "\u267B\uFE0F",
+    compost: "\uD83C\uDF42",
+    landfill: "\uD83D\uDDD1\uFE0F",
+    special: "\u26A0\uFE0F",
+    ewaste: "\uD83D\uDD0C",
+    needs_review: "\u2753",
+    burnable: "\uD83D\uDD25",
+    "non-burnable": "\uD83E\uDDCA",
+    recyclable: "\u267B\uFE0F",
+    plastic: "\uD83E\uDED9",
+  };
+  return map[streamId] ?? "\uD83D\uDCE6";
+}
+
 type TrustLevel = "high" | "medium" | "low";
 
 function getTrustLevel(confidence: number, needsReview: boolean): TrustLevel {
@@ -37,6 +55,7 @@ interface ResultScreenProps {
   locale: Locale;
   onFeedbackGiven: () => void;
   onToggleLocale: () => void;
+  voiceEnabled?: boolean;
 }
 
 export default function ResultScreen({
@@ -45,6 +64,7 @@ export default function ResultScreen({
   locale,
   onFeedbackGiven,
   onToggleLocale,
+  voiceEnabled = false,
 }: ResultScreenProps) {
   const T = useCallback(
     (key: TranslationKey) => t(locale, key),
@@ -71,8 +91,50 @@ export default function ResultScreen({
         ? "bg-amber-600"
         : "bg-red-600";
 
+  // ── Voice announcement via Web Speech API ──
+  const announcedRef = React.useRef(false);
+  React.useEffect(() => {
+    if (!voiceEnabled || announcedRef.current) return;
+    if (typeof window === "undefined" || !window.speechSynthesis) return;
+    announcedRef.current = true;
+
+    // Cancel any ongoing speech
+    window.speechSynthesis.cancel();
+
+    const binName = streamLabel(locale, result.wasteStream);
+    const announcement = result.needsReview
+      ? T("voiceNeedsReview")
+      : T("voiceResultAnnouncement")
+          .replace("{item}", result.itemName)
+          .replace("{bin}", binName);
+
+    const utterance = new SpeechSynthesisUtterance(announcement);
+    utterance.lang = locale === "ja" ? "ja-JP" : "en-US";
+    utterance.rate = 0.95;
+    utterance.volume = 0.8;
+    window.speechSynthesis.speak(utterance);
+
+    // Pre-action follow-up
+    if (result.preAction && !result.needsReview) {
+      const preUtterance = new SpeechSynthesisUtterance(
+        T("voicePreAction").replace("{action}", result.preAction)
+      );
+      preUtterance.lang = locale === "ja" ? "ja-JP" : "en-US";
+      preUtterance.rate = 0.95;
+      preUtterance.volume = 0.8;
+      window.speechSynthesis.speak(preUtterance);
+    }
+
+    return () => { window.speechSynthesis.cancel(); };
+  }, [voiceEnabled, result, locale, T]);
+
   return (
-    <div className="absolute inset-0 z-20 flex flex-col bg-neutral-950/90 backdrop-blur-sm overflow-y-auto select-none animate-[fadeIn_0.3s_ease-out]">
+    <div
+      className="absolute inset-0 z-20 flex flex-col bg-neutral-950/90 backdrop-blur-sm overflow-y-auto select-none animate-[fadeIn_0.3s_ease-out]"
+      role="alert"
+      aria-live="assertive"
+      aria-atomic="true"
+    >
       {/* Language toggle */}
       <button
         onClick={onToggleLocale}
@@ -82,6 +144,13 @@ export default function ResultScreen({
       </button>
 
       <div className="flex-1 flex flex-col p-6 pt-14 gap-4 max-w-2xl mx-auto w-full">
+        {/* Screen reader summary */}
+        <span className="sr-only">
+          {result.itemName}: {streamLabel(locale, result.wasteStream)}.
+          {result.preAction && ` ${result.preAction}.`}
+          {result.reasoning && ` ${result.reasoning}`}
+        </span>
+
         {/* Item name + trust badge */}
         <div className="flex items-start gap-3">
           <div className="text-3xl font-bold text-white leading-tight flex-1">
@@ -107,7 +176,8 @@ export default function ResultScreen({
           <div className="text-xs font-semibold uppercase tracking-widest text-white/70 mb-2">
             {T("putThisInBin")}
           </div>
-          <div className="text-5xl font-black text-white uppercase">
+          <div className="text-5xl font-black text-white uppercase flex items-center gap-3">
+            <span aria-hidden="true">{streamIcon(result.wasteStream)}</span>
             {streamLabel(locale, result.wasteStream)}
           </div>
         </div>
@@ -229,6 +299,7 @@ function StreamBadge({ stream }: { stream: string }) {
     <span
       className={`${bg} text-white text-[10px] font-bold uppercase px-2 py-0.5 rounded-md whitespace-nowrap mt-0.5`}
     >
+      <span aria-hidden="true">{streamIcon(stream)} </span>
       {stream}
     </span>
   );
@@ -258,7 +329,7 @@ function FeedbackButtons({
       try {
         await fetch("/api/feedback", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...kioskAuthHeaders() },
           body: JSON.stringify({
             itemName: result.itemName,
             predictedStream: result.wasteStream,

@@ -13,6 +13,7 @@ import { runInBackground } from "@/lib/background-task";
 import { uploadFrameToBlob } from "@/lib/blob-store";
 import { redis } from "@/lib/redis";
 import { generateRequestId } from "@/lib/request-id";
+import { requireKioskAuth } from "@/lib/auth";
 
 // ── Request validation ──
 const RequestSchema = z.object({
@@ -75,7 +76,7 @@ interface RawClassification {
   components?: ComponentPart[];
 }
 
-// ── Call a model and parse its JSON response ──
+// ── Call a model with Structured Outputs ──
 async function callModel(
   openai: OpenAI,
   model: string,
@@ -85,7 +86,39 @@ async function callModel(
   const response = await openai.chat.completions.create({
     model,
     max_completion_tokens: model.includes("nano") ? 200 : 400,
-    response_format: { type: "json_object" },
+    response_format: {
+      type: "json_schema",
+      json_schema: {
+        name: "waste_classification",
+        strict: true,
+        schema: {
+          type: "object",
+          properties: {
+            itemName: { type: "string" },
+            wasteStream: { type: "string" },
+            confidence: { type: "number" },
+            reasoning: { type: "string" },
+            preAction: { type: "string" },
+            isCompound: { type: "boolean" },
+            components: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  partName: { type: "string" },
+                  wasteStream: { type: "string" },
+                  instruction: { type: "string" },
+                },
+                required: ["partName", "wasteStream", "instruction"],
+                additionalProperties: false,
+              },
+            },
+          },
+          required: ["itemName", "wasteStream", "confidence", "reasoning", "preAction", "isCompound", "components"],
+          additionalProperties: false,
+        },
+      },
+    },
     messages: [
       {
         role: "user",
@@ -106,23 +139,12 @@ async function callModel(
   const text = response.choices[0]?.message?.content;
   if (!text) throw new Error("No text response from model");
 
-  // Parse JSON — with response_format: "json_object" the output should be valid JSON,
-  // but we still extract defensively in case the model wraps it in markdown fences.
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    // Fallback: extract the first JSON object from the response
-    const jsonMatch = text.match(/\{[\s\S]*?\}(?=[^}]*$)/);
-    if (!jsonMatch) throw new Error("No JSON found in response");
-    parsed = JSON.parse(jsonMatch[0]);
-  }
+  const parsed = JSON.parse(text);
 
   // Validate and provide defaults for missing fields
   const validated = RawClassificationSchema.safeParse(parsed);
   if (!validated.success) {
     console.warn("[callModel] Schema validation failed, using raw parse:", validated.error.issues);
-    // Graceful degradation: use raw parse but enforce minimum shape
     const raw = parsed as Record<string, unknown>;
     return {
       itemName: typeof raw.itemName === "string" ? raw.itemName : "unknown",
@@ -160,6 +182,10 @@ function shouldEscalate(
 }
 
 export async function POST(request: Request) {
+  // ── Kiosk token auth ──
+  const authDenied = requireKioskAuth(request);
+  if (authDenied) return authDenied;
+
   // ── Redis-based rate limiting ──
   const clientId =
     request.headers.get("x-real-ip")

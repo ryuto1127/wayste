@@ -20,6 +20,7 @@ import {
 } from "@/lib/frame-analyzer";
 import { initYolo, isYoloReady, runYoloInference, warmUpYolo } from "@/lib/yolo-inference";
 import { loadYoloRules, resolveYoloDetection } from "@/lib/yolo-rules";
+import { kioskAuthHeaders } from "@/lib/kiosk-auth-client";
 import CameraFeed, { type CameraFeedHandle } from "./CameraFeed";
 import IdleScreen from "./IdleScreen";
 import CameraScreen from "./CameraScreen";
@@ -103,6 +104,19 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
   /** Incremented each time the pipeline returns to idle after a classification.
    *  Drives idle-screen stats refresh. */
   const [statsVersion, setStatsVersion] = useState(0);
+
+  // ── Voice guidance state (persisted in localStorage) ──
+  const [voiceEnabled, setVoiceEnabled] = useState(() => {
+    if (typeof window === "undefined") return false;
+    try { return localStorage.getItem("rb-voice") === "1"; } catch { return false; }
+  });
+  const toggleVoice = useCallback(() => {
+    setVoiceEnabled((v) => {
+      const next = !v;
+      try { localStorage.setItem("rb-voice", next ? "1" : "0"); } catch {}
+      return next;
+    });
+  }, []);
 
   // ── CV counters (refs to avoid re-renders) ──
   const goneCountRef = useRef(0);
@@ -202,7 +216,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           const reqBody = { image: frame, meta, locale, yoloDetections };
           const res = await fetch("/api/classify", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: { "Content-Type": "application/json", ...kioskAuthHeaders() },
             body: JSON.stringify(reqBody),
             signal: controller.signal,
           });
@@ -214,7 +228,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
             const retryStart = Date.now();
             const retryRes = await fetch("/api/classify", {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
+              headers: { "Content-Type": "application/json", ...kioskAuthHeaders() },
               body: JSON.stringify(reqBody),
             });
             const retryMs = Date.now() - retryStart;
@@ -425,7 +439,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           if (!frame) return;
           fetch("/api/pilot-log", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: { "Content-Type": "application/json", ...kioskAuthHeaders() },
             body: JSON.stringify({
               image: frame,
               entry: {
@@ -512,7 +526,17 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
                 handleClassificationResult(result, undefined);
                 return;
               }
-              console.log(`[yolo] No rule for "${best.className}" — waiting for API`);
+
+              // ── Optimistic UI: show YOLO detection name immediately while API loads ──
+              // YOLO detected a class but has no waste-stream rule for it.
+              // Show a provisional "analyzing" result so the user sees instant feedback,
+              // then overwrite with the API result when it arrives.
+              console.log(`[yolo] No rule for "${best.className}" — showing optimistic result while API loads`);
+              const optimisticResult = buildOptimisticResult(best.className, best.confidence);
+              setStableResult(optimisticResult);
+              resultEnterTimeRef.current = Date.now();
+              // Don't transition to "result" yet — stay in "classifying" so the
+              // camera overlay remains visible, signaling that refinement is in progress.
             } else {
               console.log(`[yolo] No detections (${yoloMs}ms) — waiting for API`);
             }
@@ -541,6 +565,29 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           .then(({ result: r, requestId }) => { if (r) handleClassificationResult(r, requestId); })
           .catch(handleClassificationError);
       }
+    }
+
+    /** Build a provisional result shown instantly while the API processes. */
+    function buildOptimisticResult(
+      className: string,
+      confidence: number,
+    ): ClassificationResponse {
+      const streams = siteConfigRef.current?.streams ?? [];
+      const defaultStream = siteConfigRef.current?.defaultStream ?? "landfill";
+      const sd = streams.find((s) => s.id === defaultStream);
+      return {
+        itemName: className,
+        wasteStream: defaultStream,
+        confidence: Math.min(confidence, 0.4),
+        reasoning: localeRef.current === "ja"
+          ? "AI が詳細を分析中です..."
+          : "AI is refining the classification...",
+        binColor: sd?.color ?? "#525252",
+        binLabel: sd?.label ?? defaultStream,
+        needsReview: false,
+        isCompound: false,
+        modelUsed: "yolo-local",
+      };
     }
 
     /** Build a minimal classification result for offline/fallback scenarios. */
@@ -720,6 +767,8 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           tips={tips}
           onToggleLocale={toggleLocale}
           statsVersion={statsVersion}
+          voiceEnabled={voiceEnabled}
+          onToggleVoice={toggleVoice}
         />
       )}
 
@@ -738,6 +787,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           locale={locale}
           onFeedbackGiven={handleFeedbackGiven}
           onToggleLocale={toggleLocale}
+          voiceEnabled={voiceEnabled}
         />
       )}
     </div>

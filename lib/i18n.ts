@@ -139,6 +139,26 @@ const translations = {
     verdictWrong: "Verified wrong",
     verdictFalse: "False detection",
     selectCorrectStream: "Select the correct bin:",
+
+    // Voice guidance
+    voiceOn: "Sound On",
+    voiceOff: "Sound Off",
+    voiceResultAnnouncement: "Put {item} in {bin}",
+    voicePreAction: "First: {action}",
+    voiceNeedsReview: "Not sure about this item. Please check with staff.",
+    voiceItemDetected: "Item detected. Hold steady.",
+
+    // Stream icons (used alongside color + text for triple encoding)
+    streamIconRecycling: "♻️",
+    streamIconCompost: "🍂",
+    streamIconLandfill: "🗑️",
+    streamIconSpecial: "⚠️",
+    streamIconEwaste: "🔌",
+    streamIconNeedsReview: "❓",
+    streamIconBurnable: "🔥",
+    streamIconNonBurnable: "🧊",
+    streamIconRecyclable: "♻️",
+    streamIconPlastic: "🫙",
   },
   ja: {
     analyzing: "分析中...",
@@ -271,6 +291,26 @@ const translations = {
     verdictWrong: "不正解と確認済み",
     verdictFalse: "誤検出と確認済み",
     selectCorrectStream: "正しいゴミ箱を選択：",
+
+    // Voice guidance
+    voiceOn: "音声オン",
+    voiceOff: "音声オフ",
+    voiceResultAnnouncement: "{item}は{bin}に捨ててください",
+    voicePreAction: "まず：{action}",
+    voiceNeedsReview: "この品目は不明です。スタッフに確認してください。",
+    voiceItemDetected: "アイテムを検出しました。動かさないでください。",
+
+    // Stream icons
+    streamIconRecycling: "♻️",
+    streamIconCompost: "🍂",
+    streamIconLandfill: "🗑️",
+    streamIconSpecial: "⚠️",
+    streamIconEwaste: "🔌",
+    streamIconNeedsReview: "❓",
+    streamIconBurnable: "🔥",
+    streamIconNonBurnable: "🧊",
+    streamIconRecyclable: "♻️",
+    streamIconPlastic: "🫙",
   },
 } as const;
 

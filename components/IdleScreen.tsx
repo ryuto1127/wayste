@@ -11,6 +11,8 @@ interface IdleScreenProps {
   onToggleLocale: () => void;
   /** Incremented each time the pipeline returns to idle after a classification. */
   statsVersion: number;
+  voiceEnabled: boolean;
+  onToggleVoice: () => void;
 }
 
 export default function IdleScreen({
@@ -18,6 +20,8 @@ export default function IdleScreen({
   tips,
   onToggleLocale,
   statsVersion,
+  voiceEnabled,
+  onToggleVoice,
 }: IdleScreenProps) {
   const T = useCallback(
     (key: TranslationKey) => t(locale, key),
@@ -55,13 +59,27 @@ export default function IdleScreen({
 
   return (
     <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-neutral-950 px-8 py-12 select-none animate-[fadeIn_0.3s_ease-out]">
-      {/* Language toggle */}
-      <button
-        onClick={onToggleLocale}
-        className="absolute top-6 right-6 px-3 py-1.5 text-neutral-500 hover:text-neutral-300 text-xs font-medium transition-colors"
-      >
-        {T("switchLang")}
-      </button>
+      {/* Top-right controls: voice toggle + language toggle */}
+      <div className="absolute top-6 right-6 flex items-center gap-3">
+        <button
+          onClick={onToggleVoice}
+          className={`px-3 py-1.5 text-xs font-medium transition-colors rounded-lg ${
+            voiceEnabled
+              ? "bg-blue-600/20 text-blue-400 hover:bg-blue-600/30"
+              : "text-neutral-500 hover:text-neutral-300"
+          }`}
+          aria-label={voiceEnabled ? T("voiceOff") : T("voiceOn")}
+          aria-pressed={voiceEnabled}
+        >
+          {voiceEnabled ? "\uD83D\uDD0A" : "\uD83D\uDD07"} {voiceEnabled ? T("voiceOn") : T("voiceOff")}
+        </button>
+        <button
+          onClick={onToggleLocale}
+          className="px-3 py-1.5 text-neutral-500 hover:text-neutral-300 text-xs font-medium transition-colors"
+        >
+          {T("switchLang")}
+        </button>
+      </div>
 
       {/* Branding */}
       <div className="mb-10 text-center">

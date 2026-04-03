@@ -65,31 +65,15 @@ export async function checkAndApplyAutoOverride(
       return false;
     }
 
-    // All gates passed — auto-apply
-    const overrideKey = `recycling:dynamic-overrides:${siteId}`;
-    const existingRaw = await redis.get(overrideKey);
-    const existing: ItemOverride[] = existingRaw
-      ? (typeof existingRaw === "string" ? JSON.parse(existingRaw) : existingRaw) as ItemOverride[]
-      : [];
-
-    // Don't duplicate
-    const alreadyExists = existing.some(
-      (o) => o.pattern.toLowerCase() === itemName.toLowerCase()
-    );
-    if (alreadyExists) return false;
-
-    existing.push({
-      pattern: itemName,
-      stream: actualStream as WasteStream,
-      note: `Auto-applied: ${wrongToSameStream}/${totalForItem} corrections (${Math.round(errorRate * 100)}% error rate)`,
-    });
-
-    await redis.set(overrideKey, JSON.stringify(existing));
+    // All gates passed — log suggestion (do NOT auto-apply in production)
+    // Auto-applying overrides risks data pollution from feedback gaming.
+    // Instead, surface the suggestion on the dashboard for admin review.
     console.log(
-      `[auto-override] Applied: "${itemName}" → ${actualStream} ` +
-      `(${wrongToSameStream} corrections, ${Math.round(errorRate * 100)}% error rate)`
+      `[auto-override] SUGGESTION: "${itemName}" → ${actualStream} ` +
+      `(${wrongToSameStream}/${totalForItem} corrections, ${Math.round(errorRate * 100)}% error rate). ` +
+      `Review on dashboard before applying.`
     );
-    return true;
+    return false;
   } catch (err) {
     console.warn("[auto-override] Failed:", err);
     return false;

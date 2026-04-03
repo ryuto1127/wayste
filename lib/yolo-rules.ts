@@ -1,9 +1,10 @@
 /**
  * YOLO class-name → waste-stream lookup.
  *
- * Loads rules from /models/yolo-rules.json and produces a full
- * ClassificationResponse by running the same override/site-rule pipeline
- * as the server-side API route.
+ * Loads rules from /models/yolo-rules.json (COCO-80) and
+ * /models/yolo-world-rules.json (recycling-specific open-vocabulary classes).
+ * Produces a full ClassificationResponse by running the same override/site-rule
+ * pipeline as the server-side API route.
  */
 import type {
   ClassificationResponse,
@@ -15,6 +16,9 @@ import { buildClassificationResult } from "./waste-rules-core";
 
 let rulesCache: YoloRulesConfig | null = null;
 let rulesLoading: Promise<YoloRulesConfig | null> | null = null;
+
+let worldRulesCache: YoloRulesConfig | null = null;
+let worldRulesLoading: Promise<YoloRulesConfig | null> | null = null;
 
 /**
  * Load yolo-rules.json from the public directory. Cached after first fetch.
@@ -41,6 +45,33 @@ export function loadYoloRules(): Promise<YoloRulesConfig | null> {
     });
 
   return rulesLoading;
+}
+
+/**
+ * Load yolo-world-rules.json for YOLO World classes. Cached after first fetch.
+ */
+export function loadYoloWorldRules(): Promise<YoloRulesConfig | null> {
+  if (worldRulesCache) return Promise.resolve(worldRulesCache);
+  if (worldRulesLoading) return worldRulesLoading;
+
+  worldRulesLoading = fetch("/models/yolo-world-rules.json")
+    .then((r) => {
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.json() as Promise<YoloRulesConfig>;
+    })
+    .then((config) => {
+      worldRulesCache = config;
+      console.log(
+        `[yolo-world-rules] Loaded ${Object.keys(config.rules).length} class rules`
+      );
+      return config;
+    })
+    .catch((err) => {
+      console.warn("[yolo-world-rules] Failed to load rules:", err);
+      return null;
+    });
+
+  return worldRulesLoading;
 }
 
 /**
@@ -72,5 +103,33 @@ export function resolveYoloDetection(
   );
 
   result.modelUsed = "yolo-local";
+  return result;
+}
+
+/**
+ * Resolve a YOLO World detection into a ClassificationResponse.
+ * Uses yolo-world-rules.json for the class→stream mapping.
+ */
+export function resolveYoloWorldDetection(
+  detection: YoloDetection,
+  siteConfig: SiteConfig,
+): ClassificationResponse | null {
+  if (!worldRulesCache) return null;
+
+  const rule = worldRulesCache.rules[detection.className];
+  if (!rule) return null;
+
+  const result = buildClassificationResult(
+    {
+      itemName: rule.itemName,
+      wasteStream: rule.wasteStream,
+      confidence: detection.confidence,
+      reasoning: rule.reasoning,
+      preAction: rule.preAction,
+    },
+    siteConfig,
+  );
+
+  result.modelUsed = "yolo-world";
   return result;
 }

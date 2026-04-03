@@ -65,7 +65,7 @@ export interface YoloDetectionLog {
 // ── Pilot log entry (server-side) ──
 export interface PilotLogEntry {
   timestamp: string;
-  modelUsed: "nano" | "mini" | "yolo-local";
+  modelUsed: "nano" | "mini" | "yolo-local" | "yolo-world";
   escalated: boolean;
   itemName: string;
   wasteStream: string;
@@ -126,7 +126,7 @@ export interface ClassificationResponse {
   isCompound: boolean;
   components?: ComponentPart[];
   siteNote?: string;
-  modelUsed?: "nano" | "mini" | "yolo-local";
+  modelUsed?: "nano" | "mini" | "yolo-local" | "yolo-world";
   imageUrl?: string;  // Vercel Blob URL of the captured frame
 }
 

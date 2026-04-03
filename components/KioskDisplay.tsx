@@ -18,8 +18,14 @@ import {
   imageQualityBand,
   ROI_FG_THRESHOLD,
 } from "@/lib/frame-analyzer";
-import { getInferenceBackend, type InferenceBackend } from "@/lib/inference-backend";
-import { loadYoloRules, resolveYoloDetection } from "@/lib/yolo-rules";
+import {
+  getInferenceBackend,
+  type InferenceBackend,
+  YOLO_FALLBACK_THRESHOLD,
+  YOLO_API_PARALLEL_THRESHOLD,
+  YOLO_WORLD_ACCEPT_THRESHOLD,
+} from "@/lib/inference-backend";
+import { loadYoloRules, loadYoloWorldRules, resolveYoloDetection, resolveYoloWorldDetection } from "@/lib/yolo-rules";
 // kioskAuthHeaders replaced by session token (server-generated, HMAC-signed)
 import CameraFeed, { type CameraFeedHandle } from "./CameraFeed";
 import IdleScreen from "./IdleScreen";
@@ -165,8 +171,16 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
   // ── Initialize inference backend + rules + site config (client-side) ──
   useEffect(() => {
     Promise.all([
-      getInferenceBackend().then((backend) => { inferenceRef.current = backend; }),
+      getInferenceBackend().then((backend) => {
+        inferenceRef.current = backend;
+        // Eagerly start loading YOLO World in the background (lazy init)
+        backend.initYoloWorld().then((ok) => {
+          if (ok) console.log("[init] YOLO World ready for fallback");
+          else console.log("[init] YOLO World not available — will skip tier 2");
+        });
+      }),
       loadYoloRules(),
+      loadYoloWorldRules(),
       fetch("/api/site-config")
         .then((r) => r.json())
         .then((data: SiteConfig) => {
@@ -294,9 +308,18 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
     }
     const analyzer = analyzerRef.current;
 
+    /** Track whether continuous YOLO loop has been started. */
+    let continuousStarted = false;
+
     const interval = setInterval(() => {
       const video = cameraRef.current?.getVideo();
       if (!video) return;
+
+      // Start continuous YOLO loop once video and backend are both ready
+      if (!continuousStarted && inferenceRef.current?.isReady()) {
+        inferenceRef.current.startContinuous(video, CAPTURE_ROI_MARGIN);
+        continuousStarted = true;
+      }
 
       // Set BG adaptation rate based on pipeline state
       const currentState = stateRef.current;
@@ -429,7 +452,11 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
       }
     }, ANALYSIS_INTERVAL_MS);
 
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      // Stop continuous YOLO loop on unmount
+      inferenceRef.current?.stopContinuous();
+    };
 
     /** Log a YOLO-only classification to the server (fire-and-forget).
      *  Needed because YOLO wins skip the /api/classify route entirely. */
@@ -482,7 +509,12 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
       }).catch(() => {});
     }
 
-    // ── Trigger classification ──
+    // ── Trigger classification (Tiered Pipeline) ──
+    //
+    // Tier 1: YOLO26n (always-on buffer) → instant, handles COCO-80 items
+    // Tier 2: YOLO World (on-demand)     → ~200-800ms, handles recycling-specific items
+    // Tier 3: OpenAI API (last resort)   → ~1-3s, handles anything
+    //
     function triggerClassification(analysis: FrameAnalysis) {
       if (inFlightRef.current) return;
 
@@ -496,99 +528,228 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
       const yoloReady = backend?.isReady() && siteConfigRef.current;
       const isOffline = typeof navigator !== "undefined" && !navigator.onLine;
 
-      // If offline, skip API entirely and rely on YOLO
-      if (isOffline && yoloReady && backend) {
-        backend.detect(video, CAPTURE_ROI_MARGIN)
-          .then((detections) => {
-            if (detections.length > 0) {
-              const best = detections[0];
-              const result = resolveYoloDetection(best, siteConfigRef.current!);
-              if (result) {
-                console.log(`[yolo] OFFLINE HIT: ${best.className} → ${result.wasteStream}`);
-                handleClassificationResult(result, undefined);
-                return;
-              }
-              // YOLO detected but no rule → show needs_review with the class name
-              handleClassificationResult(buildOfflineFallback(best.className, best.confidence), undefined);
-            } else {
-              handleClassificationResult(buildOfflineFallback("unknown item", 0.1), undefined);
-            }
-          })
-          .catch(() => {
-            handleClassificationResult(buildOfflineFallback("unknown item", 0.1), undefined);
-          });
+      // If offline, use local models only (YOLO → YOLO World → offline fallback)
+      if (isOffline) {
+        handleOfflineClassification(video, backend, yoloReady);
         return;
       }
 
       const apiController = new AbortController();
-      // yoloDetectionLogs is populated if YOLO runs, then sent to API for logging
       let yoloDetectionLogs: YoloDetectionLog[] | undefined;
       const apiPromise = () => classifyViaApiAsync(video, analysis, apiController.signal, yoloDetectionLogs);
 
-      if (yoloReady && backend) {
-        const yoloStart = Date.now();
-        let yoloBestDetection: { className: string; confidence: number } | null = null;
+      if (!yoloReady || !backend) {
+        // No YOLO at all — straight to API
+        apiPromise()
+          .then(({ result: r, requestId }) => { if (r) handleClassificationResult(r, requestId); })
+          .catch(handleClassificationError);
+        return;
+      }
 
-        backend.detect(video, CAPTURE_ROI_MARGIN)
-          .then((detections) => {
-            const yoloMs = Date.now() - yoloStart;
-            // Save detection logs for API request
-            if (detections.length > 0) {
-              yoloDetectionLogs = toDetectionLogs(detections);
-            }
+      // ── Tier 1: Get buffered YOLO detections (instant — always-on loop) ──
+      const bufferedDetections = backend.getLatestDetections();
 
-            if (detections.length > 0) {
-              const best = detections[0];
-              yoloBestDetection = { className: best.className, confidence: best.confidence };
+      // Also run a fresh detection for accuracy (the buffer may be 100ms stale)
+      const yoloStart = Date.now();
+      backend.detect(video, CAPTURE_ROI_MARGIN)
+        .then((freshDetections) => {
+          // Prefer fresh, fall back to buffered
+          const detections = freshDetections.length > 0 ? freshDetections : bufferedDetections;
+          const yoloMs = Date.now() - yoloStart;
+
+          if (detections.length > 0) {
+            yoloDetectionLogs = toDetectionLogs(detections);
+          }
+
+          if (detections.length > 0) {
+            const best = detections[0];
+
+            // ── High confidence: YOLO wins ──
+            if (best.confidence >= YOLO_FALLBACK_THRESHOLD) {
               const result = resolveYoloDetection(best, siteConfigRef.current!);
-
               if (result) {
-                console.log(`[yolo] LOCAL HIT: ${best.className} (${(best.confidence * 100).toFixed(1)}%) → ${result.wasteStream} in ${yoloMs}ms`);
-                apiController.abort();
-                // Log YOLO-only win to server (fire-and-forget)
+                console.log(`[tier1] YOLO HIT: ${best.className} (${(best.confidence * 100).toFixed(1)}%) → ${result.wasteStream} in ${yoloMs}ms`);
                 logYoloOnlyResult(video, result, detections, yoloMs);
                 handleClassificationResult(result, undefined);
                 return;
               }
-
-              // ── Optimistic UI: show YOLO detection name immediately while API loads ──
-              // YOLO detected a class but has no waste-stream rule for it.
-              // Show a provisional "analyzing" result so the user sees instant feedback,
-              // then overwrite with the API result when it arrives.
-              console.log(`[yolo] No rule for "${best.className}" — showing optimistic result while API loads`);
-              const optimisticResult = buildOptimisticResult(best.className, best.confidence);
-              setStableResult(optimisticResult);
-              resultEnterTimeRef.current = Date.now();
-              // Don't transition to "result" yet — stay in "classifying" so the
-              // camera overlay remains visible, signaling that refinement is in progress.
-            } else {
-              console.log(`[yolo] No detections (${yoloMs}ms) — waiting for API`);
             }
 
-            apiPromise()
-              .then(({ result: r, requestId }) => { if (r) handleClassificationResult(r, requestId); })
-              .catch((err) => {
-                if (yoloBestDetection) {
-                  console.warn(`[classify] API failed, using YOLO fallback: ${yoloBestDetection.className}`);
-                  handleClassificationResult(
-                    buildOfflineFallback(yoloBestDetection.className, yoloBestDetection.confidence),
-                    undefined,
-                  );
-                } else {
-                  handleClassificationError(err);
-                }
-              });
-          })
-          .catch(() => {
-            apiPromise()
-              .then(({ result: r, requestId }) => { if (r) handleClassificationResult(r, requestId); })
-              .catch(handleClassificationError);
-          });
-      } else {
-        apiPromise()
-          .then(({ result: r, requestId }) => { if (r) handleClassificationResult(r, requestId); })
-          .catch(handleClassificationError);
+            // ── Low-to-mid confidence or no rule: try YOLO World (Tier 2) ──
+            // Show optimistic UI immediately
+            console.log(`[tier1] YOLO conf=${(best.confidence * 100).toFixed(1)}% — escalating to YOLO World`);
+            const optimisticResult = buildOptimisticResult(best.className, best.confidence);
+            setStableResult(optimisticResult);
+            resultEnterTimeRef.current = Date.now();
+
+            // If very low confidence, fire API in parallel with YOLO World
+            const fireApiInParallel = best.confidence < YOLO_API_PARALLEL_THRESHOLD;
+
+            escalateToYoloWorld(
+              video, backend, best, apiPromise, apiController, fireApiInParallel, detections, yoloMs,
+            );
+          } else {
+            // ── No YOLO detections at all: try YOLO World, then API ──
+            console.log(`[tier1] No YOLO detections (${yoloMs}ms) — escalating to YOLO World`);
+            escalateToYoloWorld(
+              video, backend, null, apiPromise, apiController, true, [], yoloMs,
+            );
+          }
+        })
+        .catch(() => {
+          // YOLO failed entirely — skip to API
+          apiPromise()
+            .then(({ result: r, requestId }) => { if (r) handleClassificationResult(r, requestId); })
+            .catch(handleClassificationError);
+        });
+    }
+
+    /**
+     * Tier 2: YOLO World fallback.
+     * Pauses the continuous YOLO loop to free CPU, runs YOLO World inference,
+     * and resumes YOLO afterwards.
+     */
+    function escalateToYoloWorld(
+      video: HTMLVideoElement,
+      backend: InferenceBackend,
+      yoloBest: { className: string; confidence: number } | null,
+      apiPromise: () => Promise<{ result: (ClassificationResponse & { requestId?: string }) | null; requestId?: string }>,
+      apiController: AbortController,
+      fireApiInParallel: boolean,
+      yoloDetections: YoloDetection[],
+      yoloMs: number,
+    ) {
+      // Start API call in parallel if confidence is very low
+      let apiInflight: ReturnType<typeof apiPromise> | null = null;
+      if (fireApiInParallel) {
+        apiInflight = apiPromise();
       }
+
+      if (!backend.isYoloWorldReady()) {
+        // YOLO World not available — fall through to API
+        console.log("[tier2] YOLO World not ready — falling through to API");
+        const promise = apiInflight ?? apiPromise();
+        promise
+          .then(({ result: r, requestId }) => { if (r) handleClassificationResult(r, requestId); })
+          .catch((err) => {
+            if (yoloBest) {
+              handleClassificationResult(buildOfflineFallback(yoloBest.className, yoloBest.confidence), undefined);
+            } else {
+              handleClassificationError(err);
+            }
+          });
+        return;
+      }
+
+      // Pause continuous YOLO to free CPU for YOLO World
+      backend.pauseContinuous();
+      const worldStart = Date.now();
+
+      backend.detectWorld(video, CAPTURE_ROI_MARGIN)
+        .then((worldDetections) => {
+          const worldMs = Date.now() - worldStart;
+
+          if (worldDetections.length > 0) {
+            const worldBest = worldDetections[0];
+
+            if (worldBest.confidence >= YOLO_WORLD_ACCEPT_THRESHOLD) {
+              const result = resolveYoloWorldDetection(worldBest, siteConfigRef.current!);
+              if (result) {
+                console.log(`[tier2] YOLO World HIT: ${worldBest.className} (${(worldBest.confidence * 100).toFixed(1)}%) → ${result.wasteStream} in ${worldMs}ms`);
+                apiController.abort();
+                logYoloOnlyResult(video, result, yoloDetections, yoloMs + worldMs);
+                backend.resumeContinuous();
+                handleClassificationResult(result, undefined);
+                return;
+              }
+            }
+
+            console.log(`[tier2] YOLO World conf=${(worldBest.confidence * 100).toFixed(1)}% — falling through to API (${worldMs}ms)`);
+          } else {
+            console.log(`[tier2] YOLO World no detections (${worldMs}ms) — falling through to API`);
+          }
+
+          // Resume YOLO before API call (API doesn't need CPU)
+          backend.resumeContinuous();
+
+          // Tier 3: API
+          const promise = apiInflight ?? apiPromise();
+          promise
+            .then(({ result: r, requestId }) => { if (r) handleClassificationResult(r, requestId); })
+            .catch((err) => {
+              // Fallback: use whatever local detection we had
+              const fallbackName = yoloBest?.className ?? (worldDetections[0]?.className);
+              const fallbackConf = yoloBest?.confidence ?? (worldDetections[0]?.confidence ?? 0.1);
+              if (fallbackName) {
+                handleClassificationResult(buildOfflineFallback(fallbackName, fallbackConf), undefined);
+              } else {
+                handleClassificationError(err);
+              }
+            });
+        })
+        .catch(() => {
+          // YOLO World failed — resume YOLO and fall through to API
+          backend.resumeContinuous();
+          const promise = apiInflight ?? apiPromise();
+          promise
+            .then(({ result: r, requestId }) => { if (r) handleClassificationResult(r, requestId); })
+            .catch(handleClassificationError);
+        });
+    }
+
+    /** Handle offline classification: YOLO → YOLO World → offline fallback. */
+    function handleOfflineClassification(
+      video: HTMLVideoElement,
+      backend: InferenceBackend | null,
+      yoloReady: boolean | SiteConfig | null | undefined,
+    ) {
+      if (!yoloReady || !backend) {
+        handleClassificationResult(buildOfflineFallback("unknown item", 0.1), undefined);
+        return;
+      }
+
+      backend.detect(video, CAPTURE_ROI_MARGIN)
+        .then((detections) => {
+          if (detections.length > 0) {
+            const best = detections[0];
+            const result = resolveYoloDetection(best, siteConfigRef.current!);
+            if (result) {
+              console.log(`[offline] YOLO HIT: ${best.className} → ${result.wasteStream}`);
+              handleClassificationResult(result, undefined);
+              return;
+            }
+
+            // Try YOLO World offline
+            if (backend.isYoloWorldReady()) {
+              backend.pauseContinuous();
+              backend.detectWorld(video, CAPTURE_ROI_MARGIN)
+                .then((worldDets) => {
+                  backend.resumeContinuous();
+                  if (worldDets.length > 0) {
+                    const worldResult = resolveYoloWorldDetection(worldDets[0], siteConfigRef.current!);
+                    if (worldResult) {
+                      console.log(`[offline] YOLO World HIT: ${worldDets[0].className} → ${worldResult.wasteStream}`);
+                      handleClassificationResult(worldResult, undefined);
+                      return;
+                    }
+                  }
+                  handleClassificationResult(buildOfflineFallback(best.className, best.confidence), undefined);
+                })
+                .catch(() => {
+                  backend.resumeContinuous();
+                  handleClassificationResult(buildOfflineFallback(best.className, best.confidence), undefined);
+                });
+              return;
+            }
+
+            handleClassificationResult(buildOfflineFallback(best.className, best.confidence), undefined);
+          } else {
+            handleClassificationResult(buildOfflineFallback("unknown item", 0.1), undefined);
+          }
+        })
+        .catch(() => {
+          handleClassificationResult(buildOfflineFallback("unknown item", 0.1), undefined);
+        });
     }
 
     /** Build a provisional result shown instantly while the API processes. */

@@ -1,0 +1,166 @@
+{
+  "confidence_threshold": 0.45,
+  "min_box_area": 5000,
+  "rules": {
+    "aluminum can": {
+      "itemName": "Aluminum Can",
+      "wasteStream": "recycling",
+      "reasoning": "Aluminum cans are highly recyclable — rinse before recycling.",
+      "preAction": "Empty and rinse before recycling"
+    },
+    "tin can": {
+      "itemName": "Tin Can",
+      "wasteStream": "recycling",
+      "reasoning": "Metal cans are recyclable — rinse and remove labels if possible.",
+      "preAction": "Empty and rinse before recycling"
+    },
+    "cardboard box": {
+      "itemName": "Cardboard Box",
+      "wasteStream": "recycling",
+      "reasoning": "Cardboard is recyclable — flatten before recycling.",
+      "preAction": "Flatten and remove tape if possible"
+    },
+    "cardboard": {
+      "itemName": "Cardboard",
+      "wasteStream": "recycling",
+      "reasoning": "Cardboard is recyclable — flatten before recycling.",
+      "preAction": "Flatten before recycling"
+    },
+    "paper bag": {
+      "itemName": "Paper Bag",
+      "wasteStream": "recycling",
+      "reasoning": "Paper bags are recyclable."
+    },
+    "plastic bag": {
+      "itemName": "Plastic Bag",
+      "wasteStream": "landfill",
+      "reasoning": "Plastic bags jam recycling machinery and must go to landfill or a dedicated drop-off."
+    },
+    "napkin": {
+      "itemName": "Napkin",
+      "wasteStream": "compost",
+      "reasoning": "Used napkins are compostable as soiled paper."
+    },
+    "tissue paper": {
+      "itemName": "Tissue Paper",
+      "wasteStream": "compost",
+      "reasoning": "Used tissue paper is compostable."
+    },
+    "food wrapper": {
+      "itemName": "Food Wrapper",
+      "wasteStream": "landfill",
+      "reasoning": "Food-soiled wrappers are not recyclable."
+    },
+    "candy wrapper": {
+      "itemName": "Candy Wrapper",
+      "wasteStream": "landfill",
+      "reasoning": "Small mixed-material wrappers are not recyclable."
+    },
+    "drinking straw": {
+      "itemName": "Straw",
+      "wasteStream": "landfill",
+      "reasoning": "Plastic straws are too small to recycle."
+    },
+    "plastic straw": {
+      "itemName": "Plastic Straw",
+      "wasteStream": "landfill",
+      "reasoning": "Plastic straws are too small to recycle."
+    },
+    "styrofoam container": {
+      "itemName": "Styrofoam Container",
+      "wasteStream": "landfill",
+      "reasoning": "Styrofoam (EPS) is not accepted in most recycling programs."
+    },
+    "styrofoam cup": {
+      "itemName": "Styrofoam Cup",
+      "wasteStream": "landfill",
+      "reasoning": "Styrofoam cups are not recyclable."
+    },
+    "plastic food container": {
+      "itemName": "Plastic Food Container",
+      "wasteStream": "landfill",
+      "reasoning": "Food-soiled plastic containers are generally not recyclable."
+    },
+    "takeout container": {
+      "itemName": "Takeout Container",
+      "wasteStream": "landfill",
+      "reasoning": "Food-soiled takeout containers are not recyclable."
+    },
+    "milk carton": {
+      "itemName": "Milk Carton",
+      "wasteStream": "recycling",
+      "reasoning": "Cartons are recyclable in many programs — rinse before recycling.",
+      "preAction": "Empty and rinse before recycling"
+    },
+    "juice box": {
+      "itemName": "Juice Box",
+      "wasteStream": "recycling",
+      "reasoning": "Juice boxes (cartons) are recyclable — empty and rinse.",
+      "preAction": "Empty and remove straw"
+    },
+    "paper plate": {
+      "itemName": "Paper Plate",
+      "wasteStream": "compost",
+      "reasoning": "Soiled paper plates are compostable."
+    },
+    "paper cup": {
+      "itemName": "Paper Cup",
+      "wasteStream": "landfill",
+      "reasoning": "Most paper cups have a plastic lining and are not recyclable."
+    },
+    "aluminum foil": {
+      "itemName": "Aluminum Foil",
+      "wasteStream": "recycling",
+      "reasoning": "Clean aluminum foil is recyclable — scrunch into a ball first.",
+      "preAction": "Clean and scrunch into a ball"
+    },
+    "paper towel": {
+      "itemName": "Paper Towel",
+      "wasteStream": "compost",
+      "reasoning": "Used paper towels are compostable."
+    },
+    "egg carton": {
+      "itemName": "Egg Carton",
+      "wasteStream": "recycling",
+      "reasoning": "Paper/cardboard egg cartons are recyclable."
+    },
+    "coffee cup sleeve": {
+      "itemName": "Coffee Cup Sleeve",
+      "wasteStream": "compost",
+      "reasoning": "Cardboard coffee sleeves are compostable."
+    },
+    "plastic bottle cap": {
+      "itemName": "Plastic Bottle Cap",
+      "wasteStream": "recycling",
+      "reasoning": "Plastic caps can be recycled — leave them on the bottle if possible."
+    },
+    "glass jar": {
+      "itemName": "Glass Jar",
+      "wasteStream": "recycling",
+      "reasoning": "Glass jars are recyclable — rinse and remove the lid.",
+      "preAction": "Rinse and remove lid"
+    },
+    "yogurt cup": {
+      "itemName": "Yogurt Cup",
+      "wasteStream": "recycling",
+      "reasoning": "Clean plastic yogurt cups are recyclable.",
+      "preAction": "Rinse thoroughly before recycling"
+    },
+    "chip bag": {
+      "itemName": "Chip Bag",
+      "wasteStream": "landfill",
+      "reasoning": "Chip bags are mixed-material packaging and not recyclable."
+    },
+    "cigarette butt": {
+      "itemName": "Cigarette Butt",
+      "wasteStream": "landfill",
+      "reasoning": "Cigarette butts contain toxic chemicals and must go to landfill."
+    },
+    "battery": {
+      "itemName": "Battery",
+      "wasteStream": "special",
+      "reasoning": "Batteries contain hazardous materials and require special disposal.",
+      "preAction": "Tape the terminals before disposing"
+    }
+  }
+}

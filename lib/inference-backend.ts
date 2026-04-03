@@ -1,26 +1,26 @@
 /**
- * Inference backend abstraction layer.
+ * Inference backend abstraction layer — Tiered Detection Pipeline.
  *
- * Decouples the kiosk pipeline from the specific YOLO runtime.
- * Two backends are planned:
+ * Three tiers, each progressively heavier:
  *
- *   1. **Browser ONNX** (default) — runs YOLO26n via ONNX Runtime Web/WASM.
- *      Works on any device with a modern browser. Used for Vercel-hosted demo
- *      and desktop/laptop kiosks.
+ *   1. **YOLO26n (always-on)** — Runs continuously in the background, buffering
+ *      the latest detection. When classification triggers, the result is available
+ *      instantly (zero latency). Paused during YOLO World inference to free CPU.
  *
- *   2. **Local HTTP** (future) — calls a lightweight inference server running
- *      on the same device (e.g. FastAPI + NCNN on Raspberry Pi 5).
- *      Set NEXT_PUBLIC_INFERENCE_BACKEND=http and NEXT_PUBLIC_INFERENCE_URL
- *      to enable.
+ *   2. **YOLO World (on-demand fallback)** — Open-vocabulary detector with
+ *      pre-baked recycling classes. Runs when YOLO26n confidence is low or it
+ *      detects no waste-relevant class. ~200-800ms on CPU.
  *
- * Both backends return the same YoloDetection[] array, so the rest of the
- * pipeline (yolo-rules.ts, KioskDisplay.tsx) is unaffected by the swap.
+ *   3. **OpenAI API (last resort)** — Handled in KioskDisplay.tsx, not here.
+ *
+ * Two physical backends are supported:
+ *   - **Browser ONNX** (default) — YOLO via ONNX Runtime Web/WASM.
+ *   - **Local HTTP** (future) — inference server on same device (Raspberry Pi).
  */
 
 import type { YoloDetection } from "./types";
 
 // ── Backend selection ──
-// Checked at module load time (client-side env vars via NEXT_PUBLIC_ prefix).
 const BACKEND = (typeof window !== "undefined"
   ? (globalThis as Record<string, unknown>).NEXT_PUBLIC_INFERENCE_BACKEND
   : undefined) as string | undefined
@@ -28,6 +28,14 @@ const BACKEND = (typeof window !== "undefined"
   ?? "onnx";
 
 const INFERENCE_URL = process.env.NEXT_PUBLIC_INFERENCE_URL ?? "http://localhost:8000/detect";
+
+// ── Confidence thresholds for tiered fallback ──
+/** YOLO26n confidence below this triggers YOLO World fallback. */
+export const YOLO_FALLBACK_THRESHOLD = 0.65;
+/** YOLO26n confidence below this fires API in parallel with YOLO World. */
+export const YOLO_API_PARALLEL_THRESHOLD = 0.3;
+/** YOLO World confidence below this falls through to API. */
+export const YOLO_WORLD_ACCEPT_THRESHOLD = 0.45;
 
 // ── Backend interface ──
 export interface InferenceBackend {
@@ -42,11 +50,48 @@ export interface InferenceBackend {
     minBoxArea?: number,
     confidenceThreshold?: number,
   ): Promise<YoloDetection[]>;
+
+  // ── Always-on YOLO loop ──
+  /** Start continuous YOLO detection loop, buffering the latest result. */
+  startContinuous(video: HTMLVideoElement, roiMargin?: number): void;
+  /** Stop the continuous detection loop. */
+  stopContinuous(): void;
+  /** Pause the continuous loop (e.g., during YOLO World inference). */
+  pauseContinuous(): void;
+  /** Resume the continuous loop after pause. */
+  resumeContinuous(): void;
+  /** Get the latest buffered detection from the continuous loop. */
+  getLatestDetections(): YoloDetection[];
+  /** Whether the continuous loop is currently running (not paused). */
+  isContinuousRunning(): boolean;
+
+  // ── YOLO World ──
+  /** Initialize YOLO World model (lazy — only loads when first needed). */
+  initYoloWorld(): Promise<boolean>;
+  /** Check if YOLO World is ready. */
+  isYoloWorldReady(): boolean;
+  /** Run YOLO World inference (on-demand). */
+  detectWorld(
+    video: HTMLVideoElement,
+    roiMargin?: number,
+    minBoxArea?: number,
+    confidenceThreshold?: number,
+  ): Promise<YoloDetection[]>;
 }
 
-// ── Browser ONNX backend (delegates to existing yolo-inference.ts) ──
+// ── Browser ONNX backend ──
 class OnnxBackend implements InferenceBackend {
   private yolo: typeof import("./yolo-inference") | null = null;
+  private yoloWorld: typeof import("./yolo-world-inference") | null = null;
+
+  // Continuous loop state
+  private continuousTimer: ReturnType<typeof setTimeout> | null = null;
+  private continuousPaused = false;
+  private latestDetections: YoloDetection[] = [];
+  private continuousVideo: HTMLVideoElement | null = null;
+  private continuousRoiMargin = 0.15;
+  /** Continuous loop interval — run YOLO every ~100ms (10fps). */
+  private static readonly CONTINUOUS_INTERVAL_MS = 100;
 
   async init(): Promise<boolean> {
     this.yolo = await import("./yolo-inference");
@@ -68,9 +113,111 @@ class OnnxBackend implements InferenceBackend {
     if (!this.yolo) return [];
     return this.yolo.runYoloInference(video, roiMargin, minBoxArea, confidenceThreshold);
   }
+
+  // ── Continuous YOLO loop ──
+
+  startContinuous(video: HTMLVideoElement, roiMargin = 0.15): void {
+    if (this.continuousTimer) return; // Already running
+    this.continuousVideo = video;
+    this.continuousRoiMargin = roiMargin;
+    this.continuousPaused = false;
+    this.scheduleNext();
+    console.log("[inference] Continuous YOLO loop started");
+  }
+
+  stopContinuous(): void {
+    if (this.continuousTimer) {
+      clearTimeout(this.continuousTimer);
+      this.continuousTimer = null;
+    }
+    this.continuousVideo = null;
+    this.latestDetections = [];
+    console.log("[inference] Continuous YOLO loop stopped");
+  }
+
+  pauseContinuous(): void {
+    this.continuousPaused = true;
+    if (this.continuousTimer) {
+      clearTimeout(this.continuousTimer);
+      this.continuousTimer = null;
+    }
+    console.log("[inference] Continuous YOLO loop paused (freeing CPU for YOLO World)");
+  }
+
+  resumeContinuous(): void {
+    if (!this.continuousPaused) return;
+    this.continuousPaused = false;
+    this.scheduleNext();
+    console.log("[inference] Continuous YOLO loop resumed");
+  }
+
+  getLatestDetections(): YoloDetection[] {
+    return this.latestDetections;
+  }
+
+  isContinuousRunning(): boolean {
+    return this.continuousTimer !== null && !this.continuousPaused;
+  }
+
+  private scheduleNext(): void {
+    if (this.continuousPaused) return;
+    this.continuousTimer = setTimeout(() => this.runContinuousTick(), OnnxBackend.CONTINUOUS_INTERVAL_MS);
+  }
+
+  private async runContinuousTick(): Promise<void> {
+    if (this.continuousPaused || !this.continuousVideo || !this.yolo) {
+      if (!this.continuousPaused) this.scheduleNext();
+      return;
+    }
+
+    try {
+      // Use a lower confidence threshold for buffered detections —
+      // the tiered pipeline will decide what to do based on confidence.
+      const detections = await this.yolo.runYoloInference(
+        this.continuousVideo,
+        this.continuousRoiMargin,
+        5000,
+        0.25, // Low threshold — capture everything, filter later
+      );
+      this.latestDetections = detections;
+    } catch {
+      // Non-fatal — next tick will retry
+    }
+
+    this.scheduleNext();
+  }
+
+  // ── YOLO World ──
+
+  async initYoloWorld(): Promise<boolean> {
+    if (this.yoloWorld) return this.yoloWorld.isYoloWorldReady();
+    try {
+      this.yoloWorld = await import("./yolo-world-inference");
+      const ok = await this.yoloWorld.initYoloWorld();
+      if (ok) await this.yoloWorld.warmUpYoloWorld();
+      return ok;
+    } catch (err) {
+      console.warn("[inference] YOLO World init failed:", err);
+      return false;
+    }
+  }
+
+  isYoloWorldReady(): boolean {
+    return this.yoloWorld?.isYoloWorldReady() ?? false;
+  }
+
+  async detectWorld(
+    video: HTMLVideoElement,
+    roiMargin = 0.15,
+    minBoxArea = 5000,
+    confidenceThreshold = 0.45,
+  ): Promise<YoloDetection[]> {
+    if (!this.yoloWorld) return [];
+    return this.yoloWorld.runYoloWorldInference(video, roiMargin, minBoxArea, confidenceThreshold);
+  }
 }
 
-// ── Local HTTP backend (for Raspberry Pi + NCNN / FastAPI) ──
+// ── Local HTTP backend ──
 class HttpBackend implements InferenceBackend {
   private ready = false;
 
@@ -101,7 +248,6 @@ class HttpBackend implements InferenceBackend {
     if (!this.ready) return [];
 
     try {
-      // Capture ROI from video and send as JPEG to the inference server
       const vw = video.videoWidth;
       const vh = video.videoHeight;
       const roiX = Math.round(vw * roiMargin);
@@ -136,9 +282,20 @@ class HttpBackend implements InferenceBackend {
       return [];
     }
   }
+
+  // HTTP backend doesn't support continuous mode or YOLO World
+  startContinuous(): void {}
+  stopContinuous(): void {}
+  pauseContinuous(): void {}
+  resumeContinuous(): void {}
+  getLatestDetections(): YoloDetection[] { return []; }
+  isContinuousRunning(): boolean { return false; }
+  async initYoloWorld(): Promise<boolean> { return false; }
+  isYoloWorldReady(): boolean { return false; }
+  async detectWorld(): Promise<YoloDetection[]> { return []; }
 }
 
-// ── Factory: create the configured backend with ONNX fallback ──
+// ── Factory ──
 let _backend: InferenceBackend | null = null;
 
 export async function getInferenceBackend(): Promise<InferenceBackend> {

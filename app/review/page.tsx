@@ -562,6 +562,7 @@ function LegacyEntryCard({
   locale: Locale;
   T: (key: Parameters<typeof t>[1]) => string;
 }) {
+  const [showStreamPicker, setShowStreamPicker] = useState(false);
   const [editingName, setEditingName] = useState(false);
   const [nameValue, setNameValue] = useState(entry.actualItemName ?? entry.itemName);
   const inputRef = useRef<HTMLInputElement>(null);

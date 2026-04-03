@@ -10,7 +10,7 @@
  * Set BLOB_ENABLED=false to disable image uploads entirely.
  */
 
-import { put, head, getDownloadUrl } from "@vercel/blob";
+import { put, head } from "@vercel/blob";
 
 /** Set BLOB_ENABLED=false to disable all image uploads. */
 const BLOB_ENABLED = process.env.BLOB_ENABLED !== "false";
@@ -38,19 +38,6 @@ export async function uploadFrameToBlob(
     return blob.url;
   } catch (err) {
     console.error("[blob-store] upload failed:", err);
-    return undefined;
-  }
-}
-
-/**
- * Generate a temporary signed download URL for a private blob.
- * Returns the signed URL, or undefined on failure.
- */
-export function getSignedImageUrl(blobUrl: string): string | undefined {
-  try {
-    return getDownloadUrl(blobUrl);
-  } catch (err) {
-    console.error("[blob-store] signed URL generation failed:", err);
     return undefined;
   }
 }

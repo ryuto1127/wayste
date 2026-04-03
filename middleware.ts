@@ -34,7 +34,9 @@ const ADMIN_PATHS = [
   "/api/pilot-log",
   "/api/overrides",
   "/api/pilot-image",
-  "/api/kiosk-stats",
+  // NOTE: /api/kiosk-stats is intentionally NOT here — it's fetched by the
+  // public kiosk IdleScreen and only returns aggregate counts (no images/PII).
+  // Protecting it triggers the browser's Basic Auth dialog on the main page.
 ];
 
 function isAdminPath(pathname: string): boolean {
@@ -103,6 +105,5 @@ export const config = {
     "/api/pilot-log",
     "/api/overrides/:path*",
     "/api/pilot-image/:path*",
-    "/api/kiosk-stats",
   ],
 };

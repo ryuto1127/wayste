@@ -184,7 +184,7 @@ function FullReviewPage() {
           )}
           {reviewed > 0 && (
             <a
-              href="/api/review/export"
+              href="/api/review/download"
               className="px-4 py-2 rounded-lg bg-purple-700 hover:bg-purple-600 text-sm font-medium transition-colors"
             >
               {T("exportData")}

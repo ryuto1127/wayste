@@ -6,8 +6,8 @@
 # ファインチューニング用のデータセット収集に使います。
 #
 # 使い方:
-#   1. .env.local から認証情報を読み込むか、環境変数を手動で設定
-#   2. bash kiosk/backup-data.sh
+#   全データ:  bash kiosk/backup-data.sh
+#   日付指定:  bash kiosk/backup-data.sh --from 2026-07-01 --to 2026-08-31
 #
 # 必要な環境変数:
 #   ADMIN_API_KEY       — admin API認証キー
@@ -27,6 +27,23 @@ KIOSK_URL="${KIOSK_URL:-https://recycling-buddy-kiosk.vercel.app}"
 DATE=$(date +%Y-%m-%d)
 BACKUP_DIR="./backup/${DATE}"
 IMAGES_DIR="${BACKUP_DIR}/images"
+
+# ── 日付フィルターの解析 ──
+DATE_FROM=""
+DATE_TO=""
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --from) DATE_FROM="$2"; shift 2 ;;
+    --to)   DATE_TO="$2";   shift 2 ;;
+    *)      shift ;;
+  esac
+done
+
+EXPORT_PARAMS=""
+if [ -n "$DATE_FROM" ]; then EXPORT_PARAMS="${EXPORT_PARAMS}&from=${DATE_FROM}"; fi
+if [ -n "$DATE_TO" ];   then EXPORT_PARAMS="${EXPORT_PARAMS}&to=${DATE_TO}";     fi
+# Remove leading &
+EXPORT_PARAMS="${EXPORT_PARAMS#&}"
 
 # ── 認証キーの取得 ──
 if [ -z "$ADMIN_API_KEY" ]; then
@@ -48,6 +65,9 @@ AUTH_HEADER="x-api-key: ${ADMIN_API_KEY}"
 echo "=== Recycling Buddy Data Backup ==="
 echo "URL:    ${KIOSK_URL}"
 echo "出力先: ${BACKUP_DIR}"
+if [ -n "$DATE_FROM" ] || [ -n "$DATE_TO" ]; then
+  echo "期間:   ${DATE_FROM:-開始} 〜 ${DATE_TO:-現在}"
+fi
 echo ""
 
 mkdir -p "$IMAGES_DIR"
@@ -96,7 +116,7 @@ fi
 echo "[3/4] ファインチューニングデータセットをダウンロード中..."
 HTTP_CODE=$(curl -s -o "${BACKUP_DIR}/finetune-dataset.jsonl" -w "%{http_code}" \
   -H "${AUTH_HEADER}" \
-  "${KIOSK_URL}/api/review/export?format=finetune")
+  "${KIOSK_URL}/api/review/export?format=finetune${EXPORT_PARAMS:+&${EXPORT_PARAMS}}")
 
 if [ "$HTTP_CODE" = "200" ]; then
   LINES=$(wc -l < "${BACKUP_DIR}/finetune-dataset.jsonl" | tr -d ' ')

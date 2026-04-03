@@ -1,6 +1,11 @@
 /**
  * GET /api/review/export — Export reviewed pilot log entries as JSONL.
  *
+ * Date filtering (ISO date strings, inclusive):
+ *   ?from=2026-07-01          — entries from July 1 onward
+ *   ?to=2026-08-31            — entries up to August 31
+ *   ?from=2026-07-01&to=2026-08-31 — entries in July–August only
+ *
  * Two export modes:
  *   ?format=finetune (default) — Dataset for YOLO fine-tuning:
  *     Each line: { imageUrl, itemName, correctStream, verdict, yoloDetections[], confidence, modelUsed }
@@ -23,6 +28,10 @@ export async function GET(request: Request) {
 
   const { searchParams } = new URL(request.url);
   const format = searchParams.get("format") ?? "finetune";
+  const fromDate = searchParams.get("from");
+  const toDate = searchParams.get("to");
+  const fromMs = fromDate ? new Date(fromDate).getTime() : 0;
+  const toMs = toDate ? new Date(toDate + "T23:59:59.999Z").getTime() : Infinity;
 
   try {
     const [pilotRaw, verdicts, verdictStreams] = await Promise.all([
@@ -47,6 +56,11 @@ export async function GET(request: Request) {
       } catch { continue; }
 
       if (!entry.requestId) continue;
+
+      // Date range filter
+      const entryMs = new Date(entry.timestamp).getTime();
+      if (entryMs < fromMs || entryMs > toMs) continue;
+
       const verdict = verdicts[entry.requestId];
       if (!verdict) continue;
 

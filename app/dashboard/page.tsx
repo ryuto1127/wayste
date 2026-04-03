@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import type { FeedbackStats } from "@/lib/feedback-analysis";
 import type { Locale } from "@/lib/i18n";
 import { t } from "@/lib/i18n";
@@ -352,6 +352,9 @@ export default function DashboardPage() {
             </div>
           </>
         )}
+
+        {/* ── Data Management ── */}
+        <DataManagement locale={locale} T={T} />
       </div>
     </div>
   );
@@ -372,6 +375,197 @@ function StatCard({
         {label}
       </div>
       <div className={`text-3xl font-bold ${color}`}>{value}</div>
+    </div>
+  );
+}
+
+function DataManagement({ locale, T }: { locale: Locale; T: (key: Parameters<typeof t>[1]) => string }) {
+  const [mode, setMode] = useState<"before" | "range" | "all">("before");
+  const [beforeDate, setBeforeDate] = useState("");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const [result, setResult] = useState<{ deleted: number; kept: number; blobsDeleted: number } | null>(null);
+  const [confirmText, setConfirmText] = useState("");
+  const dialogRef = useRef<HTMLDialogElement>(null);
+
+  const buildQuery = () => {
+    if (mode === "all") return "?all=true";
+    if (mode === "before" && beforeDate) return `?before=${beforeDate}`;
+    if (mode === "range" && fromDate) {
+      let q = `?from=${fromDate}`;
+      if (toDate) q += `&to=${toDate}`;
+      return q;
+    }
+    return null;
+  };
+
+  const label = mode === "all"
+    ? (locale === "ja" ? "全データを削除" : "Delete all data")
+    : mode === "before"
+      ? (locale === "ja" ? `${beforeDate} より前のデータを削除` : `Delete data before ${beforeDate}`)
+      : (locale === "ja" ? `${fromDate} 〜 ${toDate || "現在"} のデータを削除` : `Delete data from ${fromDate} to ${toDate || "now"}`);
+
+  const openConfirm = () => {
+    if (!buildQuery()) return;
+    setConfirmText("");
+    setResult(null);
+    dialogRef.current?.showModal();
+  };
+
+  const executePurge = async () => {
+    const query = buildQuery();
+    if (!query) return;
+    setDeleting(true);
+    setResult(null);
+    try {
+      const res = await fetch(`/api/pilot-log${query}`, { method: "DELETE" });
+      if (res.ok) {
+        const data = await res.json();
+        setResult(data);
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert((err as { error?: string }).error ?? `Error: ${res.status}`);
+      }
+    } catch {
+      alert("Request failed");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const isReady = !!buildQuery();
+  const needsConfirm = mode === "all";
+
+  return (
+    <div className="bg-neutral-900 rounded-2xl p-6 mt-6">
+      <h2 className="text-lg font-bold mb-4">
+        {locale === "ja" ? "データ管理" : "Data Management"}
+      </h2>
+
+      <div className="flex flex-wrap gap-2 mb-4">
+        <button
+          onClick={() => setMode("before")}
+          className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${mode === "before" ? "bg-red-700 text-white" : "bg-neutral-800 text-neutral-400 hover:bg-neutral-700"}`}
+        >
+          {locale === "ja" ? "日付より前を削除" : "Delete before date"}
+        </button>
+        <button
+          onClick={() => setMode("range")}
+          className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${mode === "range" ? "bg-red-700 text-white" : "bg-neutral-800 text-neutral-400 hover:bg-neutral-700"}`}
+        >
+          {locale === "ja" ? "期間指定で削除" : "Delete date range"}
+        </button>
+        <button
+          onClick={() => setMode("all")}
+          className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${mode === "all" ? "bg-red-700 text-white" : "bg-neutral-800 text-neutral-400 hover:bg-neutral-700"}`}
+        >
+          {locale === "ja" ? "全削除" : "Delete all"}
+        </button>
+      </div>
+
+      <div className="flex flex-wrap items-end gap-3 mb-4">
+        {mode === "before" && (
+          <label className="flex flex-col gap-1 text-sm text-neutral-400">
+            {locale === "ja" ? "この日付より前" : "Before"}
+            <input
+              type="date"
+              value={beforeDate}
+              onChange={(e) => setBeforeDate(e.target.value)}
+              className="bg-neutral-800 text-white rounded-lg px-3 py-2 border border-neutral-700 focus:outline-none focus:border-white"
+            />
+          </label>
+        )}
+        {mode === "range" && (
+          <>
+            <label className="flex flex-col gap-1 text-sm text-neutral-400">
+              {locale === "ja" ? "開始日" : "From"}
+              <input
+                type="date"
+                value={fromDate}
+                onChange={(e) => setFromDate(e.target.value)}
+                className="bg-neutral-800 text-white rounded-lg px-3 py-2 border border-neutral-700 focus:outline-none focus:border-white"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm text-neutral-400">
+              {locale === "ja" ? "終了日" : "To"}
+              <input
+                type="date"
+                value={toDate}
+                onChange={(e) => setToDate(e.target.value)}
+                className="bg-neutral-800 text-white rounded-lg px-3 py-2 border border-neutral-700 focus:outline-none focus:border-white"
+              />
+            </label>
+          </>
+        )}
+
+        <button
+          onClick={openConfirm}
+          disabled={!isReady || deleting}
+          className="px-4 py-2 rounded-lg bg-red-700 hover:bg-red-600 text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+        >
+          {deleting
+            ? (locale === "ja" ? "削除中..." : "Deleting...")
+            : (locale === "ja" ? "削除" : "Delete")}
+        </button>
+      </div>
+
+      {result && (
+        <div className="bg-neutral-800 rounded-lg p-4 text-sm">
+          <p className="text-emerald-400 font-medium">
+            {locale === "ja"
+              ? `${result.deleted} 件のログと ${result.blobsDeleted} 枚の画像を削除しました（${result.kept} 件を保持）`
+              : `Deleted ${result.deleted} entries and ${result.blobsDeleted} images (${result.kept} kept)`}
+          </p>
+        </div>
+      )}
+
+      {/* Confirmation dialog */}
+      <dialog
+        ref={dialogRef}
+        className="bg-neutral-900 text-white rounded-2xl p-6 max-w-md border border-neutral-700 backdrop:bg-black/70"
+      >
+        <h3 className="text-lg font-bold mb-2 text-red-400">
+          {locale === "ja" ? "削除の確認" : "Confirm deletion"}
+        </h3>
+        <p className="text-sm text-neutral-300 mb-4">{label}</p>
+        <p className="text-sm text-neutral-400 mb-1">
+          {locale === "ja"
+            ? "この操作は元に戻せません。ログ・フィードバック・画像が完全に削除されます。"
+            : "This cannot be undone. Logs, feedback, and images will be permanently deleted."}
+        </p>
+
+        {needsConfirm && (
+          <div className="mt-4 mb-4">
+            <p className="text-xs text-neutral-500 mb-1">
+              {locale === "ja" ? "確認のため「delete」と入力してください" : "Type \"delete\" to confirm"}
+            </p>
+            <input
+              type="text"
+              value={confirmText}
+              onChange={(e) => setConfirmText(e.target.value)}
+              placeholder="delete"
+              className="w-full bg-neutral-800 text-white rounded-lg px-3 py-2 border border-neutral-700 focus:outline-none focus:border-red-500 text-sm"
+            />
+          </div>
+        )}
+
+        <div className="flex justify-end gap-3 mt-4">
+          <button
+            onClick={() => dialogRef.current?.close()}
+            className="px-4 py-2 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-sm font-medium"
+          >
+            {locale === "ja" ? "キャンセル" : "Cancel"}
+          </button>
+          <button
+            onClick={() => { dialogRef.current?.close(); executePurge(); }}
+            disabled={needsConfirm && confirmText !== "delete"}
+            className="px-4 py-2 rounded-lg bg-red-700 hover:bg-red-600 text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {locale === "ja" ? "削除する" : "Delete"}
+          </button>
+        </div>
+      </dialog>
     </div>
   );
 }

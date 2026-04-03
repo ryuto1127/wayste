@@ -9,7 +9,8 @@ Built for office and public-space pilots, with full English and Japanese support
 ## What it does
 
 - Detects objects held up to the camera using local computer vision — no cloud needed for detection
-- Captures a frame and classifies the item using OpenAI vision models
+- Runs **YOLO26n** in the browser via ONNX Runtime Web for instant on-device classification
+- Captures a frame and classifies the item using OpenAI vision models when YOLO confidence is low or the class has no waste rule
 - Shows a **clear directive** based on confidence level — no raw percentages shown to users:
   - High confidence → **"Put this in Recycling"**
   - Medium confidence → **"This looks like it goes in Landfill"** + a soft note to check the bin label
@@ -19,6 +20,7 @@ Built for office and public-space pilots, with full English and Japanese support
 - Lets users tap **Correct / Wrong** to give feedback — the "Wrong" correction menu dynamically shows the site's configured streams
 - Logs every scan and all feedback to Redis for post-pilot analysis
 - Saves captured images as **private blobs** served through signed-URL proxy — no public URLs
+- Automatically archives pilot data to Blob and purges old images via a daily cron job
 
 ---
 
@@ -26,7 +28,7 @@ Built for office and public-space pilots, with full English and Japanese support
 
 1. Open the kiosk URL on any device with a camera
 2. Hold one item in front of the camera
-3. Wait for the result — typically 1–3 seconds
+3. Wait for the result — typically under 1 second (YOLO) or 1–3 seconds (API)
 4. Dispose of the item in the indicated bin
 5. Optionally tap **Correct** or **Wrong** to give feedback
 
@@ -48,11 +50,13 @@ Built for office and public-space pilots, with full English and Japanese support
 |-------|-----------|
 | Framework | Next.js 16 (App Router, TypeScript) |
 | Styling | Tailwind CSS v4 |
+| Local inference | YOLO26n (COCO-80) via ONNX Runtime Web — runs entirely in the browser |
 | AI classification | OpenAI GPT vision — nano (fast) with mini escalation (accurate) |
 | Local detection | OffscreenCanvas background subtraction at 160×120, ~7 fps, HSV-based skin filtering |
 | Response validation | Zod schema validation on all model output |
+| API security | HMAC-signed session tokens + two-tier auth (kiosk token / admin key) |
 | Database | Upstash Redis (pilot logs + feedback) |
-| Image storage | Vercel Blob (captured frames) |
+| Image storage | Vercel Blob (captured frames, daily JSONL archives) |
 | Hosting | Vercel |
 
 ---
@@ -126,6 +130,12 @@ vercel env pull
 | `BLOB_ACCESS` | No | `private` (default) or `public`. Private blobs are served via `/api/pilot-image` with signed URLs. |
 | `NEXT_PUBLIC_MIRROR_CAMERA` | No | Set to `true` for front-facing / selfie cameras. Omit or set `false` for outward-facing kiosk cameras. |
 | `RATE_LIMIT_MAX` | No | Max classifications per IP per minute (default: `15`) |
+| `KIOSK_API_TOKEN` | No | Bearer token required by kiosk endpoints (classify, feedback, pilot-log). Omit to skip auth in dev. |
+| `ADMIN_API_KEY` | No | API key required by admin endpoints (overrides, review). Omit to skip auth in dev. |
+| `CRON_SECRET` | No | Vercel Cron authentication secret for `/api/cron/cleanup`. |
+| `BLOB_RETENTION_DAYS` | No | How many days to keep captured images before the cron job deletes them (default: `7`). |
+| `NEXT_PUBLIC_INFERENCE_BACKEND` | No | `onnx` (default, browser ONNX Runtime) or `http` (local inference server). |
+| `NEXT_PUBLIC_INFERENCE_URL` | No | URL of the local inference server when `NEXT_PUBLIC_INFERENCE_BACKEND=http` (default: `http://localhost:8000/detect`). |
 
 ---
 
@@ -139,7 +149,13 @@ Local CV pipeline detects object
         ↓
 5 quality frames accumulated (motion + sharpness gated)
         ↓
-ROI crop captured (70% of frame), scaled to max 320px, sent to /api/classify
+YOLO26n runs on the ROI crop in the browser (ONNX Runtime Web)
+        ↓
+If YOLO detects a waste-relevant COCO class with high confidence
+        → result returned immediately (sub-second, no server call)
+        → YOLO-only log sent to /api/pilot-log (non-blocking)
+        ↓
+Otherwise, ROI crop (70% of frame, scaled to max 320px) sent to /api/classify
         ↓
 GPT nano classifies item + optional preAction guidance (fast path, ~1s)
         ↓
@@ -173,6 +189,25 @@ Result shown to user; frame upload to Blob + Redis logging happen asynchronously
 | **Differentiated errors** | Timeout errors show "connection slow" message; other failures show "classification failed" — never silently swallowed |
 | **Config hot-reload** | Site config is cached for 5 minutes — override updates propagate without restart |
 | **Pending-item queue** | One-slot queue remembers an item detected while busy; cooldown exits directly to `object_detected` so the next scan starts without re-presentation |
+| **Session tokens** | HMAC-signed tokens issued at page load limit classify API abuse; client auto-refreshes via `/api/session` before expiry |
+| **YOLO fallback** | If ONNX Runtime fails to load, the pipeline falls back to the OpenAI API path transparently |
+
+---
+
+## Security
+
+### Session token system
+
+On page load the server component generates an HMAC-SHA256-signed session token and passes it to the kiosk client. Every classify and pilot-log request includes the token in the `x-session-token` header. The server validates the signature and enforces a per-token request limit. The client refreshes the token via `GET /api/session` every few hours without a full page reload.
+
+### Two-tier auth
+
+| Tier | Env var | Endpoints protected |
+|------|---------|---------------------|
+| Kiosk | `KIOSK_API_TOKEN` | `/api/classify`, `/api/feedback`, `/api/pilot-log` (POST) |
+| Admin | `ADMIN_API_KEY` | `/api/overrides`, `/api/review`, `/api/pilot-log` (DELETE) |
+
+Both default to open (no auth) when the env var is unset, so local development requires no configuration.
 
 ---
 
@@ -253,6 +288,14 @@ All raw data is in your Upstash console:
 - `recycling:corrections` — human-assigned correct bins from the review page
 - `recycling:dynamic-overrides:{siteId}` — overrides added via the dashboard
 
+### Data retention
+
+A Vercel Cron job runs daily at 03:00 UTC (`/api/cron/cleanup`). It:
+1. Archives the current pilot log and feedback data as JSONL files to `archives/YYYY-MM-DD/` in Blob
+2. Deletes captured images older than `BLOB_RETENTION_DAYS` days (default: 7)
+
+You can also trigger manual purges from the dashboard using the date-range data management UI, which calls `DELETE /api/pilot-log`.
+
 ---
 
 ## Project structure
@@ -260,42 +303,61 @@ All raw data is in your Upstash console:
 ```
 ├── app/
 │   ├── api/
-│   │   ├── classify/       # Classification endpoint (OpenAI + waste rules + rate limiting)
+│   │   ├── classify/       # Classification endpoint (YOLO + OpenAI + waste rules + rate limiting)
+│   │   ├── cron/
+│   │   │   └── cleanup/    # Daily cron: archive data to Blob, delete old images
 │   │   ├── feedback/       # User feedback endpoint
 │   │   ├── feedback-stats/ # Aggregated stats for dashboard
 │   │   ├── health/         # Service health check
+│   │   ├── kiosk-stats/    # Today's classification success rate
 │   │   ├── overrides/      # Dynamic override management
 │   │   ├── pilot-image/    # Signed URL proxy for private blob images
+│   │   ├── pilot-log/      # Pilot log read/write/purge (GET/POST/DELETE)
 │   │   ├── review/         # Review page data + correction saving
+│   │   ├── session/        # Session token issuance (rate limited)
 │   │   ├── site-config/    # Returns site defaultLocale + streams for client use
 │   │   └── stats-stream/   # Server-sent events for live dashboard
 │   ├── dashboard/          # Live stats page
 │   ├── review/             # Post-pilot image review page
 │   └── page.tsx            # Kiosk entry point (server component, passes site config to client)
 ├── components/
+│   ├── AdminNav.tsx        # Shared admin navigation (dashboard ↔ review)
 │   ├── CameraFeed.tsx      # Camera initialisation + frame capture (mirror prop)
+│   ├── CameraScreen.tsx    # Camera view state (scanning / detecting)
 │   ├── ErrorBoundary.tsx   # Crash recovery with auto-reload
-│   ├── KioskDisplay.tsx    # 6-state CV pipeline + state machine
-│   └── LiveOverlay.tsx     # Trust-level result display + feedback UI
+│   ├── IdleScreen.tsx      # Idle / attract screen
+│   ├── KioskDisplay.tsx    # 6-state CV pipeline + state machine orchestrator
+│   └── ResultScreen.tsx    # Trust-level result display + feedback UI
 ├── config/
 │   └── sites/              # Per-location waste rule JSON files
 │       ├── default.json
 │       ├── office-hq.json
 │       ├── airport.json
+│       ├── pilot.json
 │       └── japan-office.json  # Japanese streams (burnable/non-burnable/recyclable/plastic)
-├── __tests__/              # Jest unit tests (67 tests)
+├── __tests__/              # Jest unit tests (85 tests)
 └── lib/
+    ├── auth.ts              # Two-tier API auth (kiosk token + admin key)
+    ├── auto-override.ts     # Automatic override suggestion from feedback data
+    ├── background-task.ts   # waitUntil wrapper for post-response work
     ├── blob-store.ts        # Vercel Blob upload helper (private by default)
-    ├── site-streams-context.tsx # React context providing site streams to client components
     ├── feedback-analysis.ts # Feedback aggregation + override suggestions
     ├── frame-analyzer.ts    # Local CV pipeline (background model, blob detection)
     ├── i18n.ts              # EN/JA translations
+    ├── inference-backend.ts # YOLO inference backend abstraction (ONNX or HTTP)
+    ├── kiosk-auth-client.ts # Client-side session token management
+    ├── kiosk-stats.ts       # Today's success rate computation
     ├── offline-cache.ts     # Browser localStorage result cache (50 items, 24h TTL)
     ├── pilot-log.ts         # Redis logging
     ├── redis.ts             # Upstash Redis client
     ├── request-id.ts        # Per-request UUID for log correlation
+    ├── session-token.ts     # HMAC-signed session token generation + validation
+    ├── site-streams-context.tsx # React context providing site streams to client components
     ├── types.ts             # Shared TypeScript types
-    └── waste-rules.ts       # Rules engine (pattern matching, overrides, result building)
+    ├── waste-rules-core.ts  # Core rules engine (pattern matching, stream resolution)
+    ├── waste-rules.ts       # Rules engine public API (overrides, result building)
+    ├── yolo-inference.ts    # YOLO26n ONNX Runtime Web inference
+    └── yolo-rules.ts        # COCO-80 class → waste stream mapping rules
 ```
 
 ---
@@ -306,7 +368,7 @@ All raw data is in your Upstash console:
 npm test
 ```
 
-67 unit tests covering the state machine, CV pipeline thresholds, HSV skin detection, override pattern matching, Japanese site config, offline cache, and classification API route.
+85 unit tests covering the state machine, CV pipeline thresholds, HSV skin detection, override pattern matching, Japanese site config, offline cache, and classification API route.
 
 ---
 

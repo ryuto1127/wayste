@@ -187,34 +187,57 @@ export async function DELETE(request: Request) {
       }
     }
 
-    // ── Clean up related feedback entries ──
-    const deletedRequestIds = new Set(
-      toDelete.map((e) => e.requestId).filter(Boolean)
-    );
+    // ── Clean up feedback entries (by timestamp, not just requestId) ──
+    const feedbackRaw = await redis.lrange(KEYS.feedback, 0, -1);
+    const feedbackToKeep: string[] = [];
+    const deletedFeedbackIds: string[] = [];
 
-    if (deletedRequestIds.size > 0) {
-      const feedbackRaw = await redis.lrange(KEYS.feedback, 0, -1);
-      const feedbackToKeep = feedbackRaw.filter((item) => {
-        try {
-          const f = (typeof item === "string" ? JSON.parse(item) : item) as { requestId?: string };
-          return !f.requestId || !deletedRequestIds.has(f.requestId);
-        } catch { return true; }
-      });
+    for (const item of feedbackRaw) {
+      try {
+        const f = (typeof item === "string" ? JSON.parse(item) : item) as { id?: string; timestamp?: string };
+        const fMs = f.timestamp ? new Date(f.timestamp).getTime() : 0;
+        const shouldDeleteFb = deleteAll
+          || (beforeDate && fMs < beforeMs)
+          || (fromDate && fMs >= fromMs && fMs <= toMs);
 
-      pipeline.del(KEYS.feedback);
-      if (feedbackToKeep.length > 0) {
-        for (const item of feedbackToKeep) {
-          pipeline.rpush(KEYS.feedback, typeof item === "string" ? item : JSON.stringify(item));
+        if (shouldDeleteFb) {
+          if (f.id) deletedFeedbackIds.push(f.id);
+        } else {
+          feedbackToKeep.push(typeof item === "string" ? item : JSON.stringify(item));
         }
+      } catch {
+        feedbackToKeep.push(typeof item === "string" ? item : JSON.stringify(item));
       }
+    }
 
-      // Clean up review verdicts
-      for (const id of deletedRequestIds) {
-        if (id) {
-          pipeline.hdel("recycling:review-verdicts", id);
-          pipeline.hdel("recycling:review-verdicts:streams", id);
-        }
+    pipeline.del(KEYS.feedback);
+    if (feedbackToKeep.length > 0) {
+      for (const item of feedbackToKeep) {
+        pipeline.rpush(KEYS.feedback, item);
       }
+    }
+
+    // Clean up corrections for deleted feedback entries
+    for (const id of deletedFeedbackIds) {
+      pipeline.hdel("recycling:corrections", id);
+      pipeline.hdel("recycling:corrections:names", id);
+    }
+
+    // Clean up review verdicts for deleted pilot log entries
+    const deletedRequestIds = toDelete.map((e) => e.requestId).filter(Boolean);
+    for (const id of deletedRequestIds) {
+      if (id) {
+        pipeline.hdel("recycling:review-verdicts", id);
+        pipeline.hdel("recycling:review-verdicts:streams", id);
+      }
+    }
+
+    // If deleting all, wipe the hash keys entirely (faster than per-key hdel)
+    if (deleteAll) {
+      pipeline.del("recycling:corrections");
+      pipeline.del("recycling:corrections:names");
+      pipeline.del("recycling:review-verdicts");
+      pipeline.del("recycling:review-verdicts:streams");
     }
 
     await pipeline.exec();

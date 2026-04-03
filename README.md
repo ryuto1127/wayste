@@ -9,8 +9,11 @@ Built for office and public-space pilots, with full English and Japanese support
 ## What it does
 
 - Detects objects held up to the camera using local computer vision — no cloud needed for detection
-- Runs **YOLO26n** in the browser via ONNX Runtime Web for instant on-device classification
-- Captures a frame and classifies the item using OpenAI vision models when YOLO confidence is low or the class has no waste rule
+- Runs a **3-tier local inference pipeline** entirely in the browser before touching any cloud API:
+  - **Tier 1 — YOLO26n (always-on):** runs continuously at ~10 fps, buffering detections so results are instant (zero latency) for common COCO-80 items
+  - **Tier 2 — YOLO World S (on-demand):** 30 recycling-specific classes (aluminum cans, cardboard, napkins, styrofoam, straws, etc.) that COCO-80 misses; loaded lazily (~50 MB) and run when Tier 1 confidence is below 0.65
+  - **Tier 3 — OpenAI API:** last resort when both local models fail or confidence stays below 0.30
+- When Tier 1 confidence is below 0.30, the API fires in parallel with YOLO World so the slower path never adds extra latency
 - Shows a **clear directive** based on confidence level — no raw percentages shown to users:
   - High confidence → **"Put this in Recycling"**
   - Medium confidence → **"This looks like it goes in Landfill"** + a soft note to check the bin label
@@ -28,7 +31,7 @@ Built for office and public-space pilots, with full English and Japanese support
 
 1. Open the kiosk URL on any device with a camera
 2. Hold one item in front of the camera
-3. Wait for the result — typically under 1 second (YOLO) or 1–3 seconds (API)
+3. Wait for the result — instant for common items (YOLO26n), ~200–800 ms for recycling-specific items (YOLO World), or 1–3 seconds (API fallback)
 4. Dispose of the item in the indicated bin
 5. Optionally tap **Correct** or **Wrong** to give feedback
 
@@ -50,7 +53,8 @@ Built for office and public-space pilots, with full English and Japanese support
 |-------|-----------|
 | Framework | Next.js 16 (App Router, TypeScript) |
 | Styling | Tailwind CSS v4 |
-| Local inference | YOLO26n (COCO-80) via ONNX Runtime Web — runs entirely in the browser |
+| Local inference (Tier 1) | YOLO26n (COCO-80, 9.5 MB) via ONNX Runtime Web — always-on, ~10 fps continuous loop |
+| Local inference (Tier 2) | YOLO World S (30 recycling classes, ~50 MB) via ONNX Runtime Web — on-demand fallback |
 | AI classification | OpenAI GPT vision — nano (fast) with mini escalation (accurate) |
 | Local detection | OffscreenCanvas background subtraction at 160×120, ~7 fps, HSV-based skin filtering |
 | Response validation | Zod schema validation on all model output |
@@ -149,22 +153,36 @@ Local CV pipeline detects object
         ↓
 5 quality frames accumulated (motion + sharpness gated)
         ↓
-YOLO26n runs on the ROI crop in the browser (ONNX Runtime Web)
+── Tier 1: YOLO26n (always-on, ~10 fps continuous loop) ──────────────────
+YOLO26n has been running in the background since page load; buffered
+detections are read immediately — zero inference latency at trigger time.
         ↓
-If YOLO detects a waste-relevant COCO class with high confidence
-        → result returned immediately (sub-second, no server call)
+If YOLO26n confidence ≥ 0.65 AND class has a waste-stream rule
+        → result returned immediately (instant, no server call)
         → YOLO-only log sent to /api/pilot-log (non-blocking)
         ↓
-Otherwise, ROI crop (70% of frame, scaled to max 320px) sent to /api/classify
+── Tier 2: YOLO World S (on-demand) ──────────────────────────────────────
+If YOLO26n confidence < 0.65 (or no waste rule for the class):
+  · YOLO26n continuous loop pauses (free CPU for World inference)
+  · YOLO World S loads lazily if not yet cached (~50 MB, ONNX Runtime Web)
+  · Runs on ROI crop — ~200–800 ms on CPU
+  · 30 pre-baked recycling classes: aluminum cans, cardboard, napkins,
+    styrofoam, straws, takeout containers, milk cartons, etc.
+If YOLO World confidence ≥ 0.45
+        → result returned immediately (no server call)
         ↓
-GPT nano classifies item + optional preAction guidance (fast path, ~1s)
-        ↓
-If confidence < 0.5 or item flagged for review
+── Tier 3: OpenAI API (last resort) ──────────────────────────────────────
+If both local models yield confidence < 0.30 — API fires in parallel with
+YOLO World (no extra wait). Otherwise falls through here only when
+YOLO World also fails.
+  · ROI crop (70% of frame, scaled to max 768px) sent to /api/classify
+  · GPT nano classifies item + optional preAction guidance (fast path, ~1s)
+  · If confidence < 0.5 or item flagged for review
         → escalates to GPT mini (accurate path, ~2–4s)
         → mini result used only if it improves on nano
+  · Zod validates model JSON output; unknown stream IDs fall back to needs_review
         ↓
-Zod validates model JSON output; unknown stream IDs fall back to needs_review
-        ↓
+── Common path ────────────────────────────────────────────────────────────
 Override rules applied (word-boundary pattern matching, sorted by specificity)
         ↓
 Trust level determined:
@@ -190,7 +208,8 @@ Result shown to user; frame upload to Blob + Redis logging happen asynchronously
 | **Config hot-reload** | Site config is cached for 5 minutes — override updates propagate without restart |
 | **Pending-item queue** | One-slot queue remembers an item detected while busy; cooldown exits directly to `object_detected` so the next scan starts without re-presentation |
 | **Session tokens** | HMAC-signed tokens issued at page load limit classify API abuse; client auto-refreshes via `/api/session` before expiry |
-| **YOLO fallback** | If ONNX Runtime fails to load, the pipeline falls back to the OpenAI API path transparently |
+| **YOLO fallback** | If ONNX Runtime or either YOLO model fails to load, the pipeline falls back to the next tier transparently |
+| **Parallel API race** | When YOLO26n confidence < 0.30, the API fires in parallel with YOLO World — whichever finishes first wins, so low-confidence items never block on two sequential inferences |
 
 ---
 
@@ -335,6 +354,15 @@ You can also trigger manual purges from the dashboard using the date-range data 
 │       ├── airport.json
 │       ├── pilot.json
 │       └── japan-office.json  # Japanese streams (burnable/non-burnable/recyclable/plastic)
+├── public/
+│   └── models/
+│       └── yolo-world-rules.json  # 30-class YOLO World → waste stream mapping
+├── training/               # Model training and export scripts
+│   ├── export_yolo_world.py       # Export yolov8s-worldv2 to ONNX with pre-baked embeddings
+│   ├── finetune_yolo26n.ipynb     # Fine-tune YOLO26n on recycling dataset
+│   ├── prepare_dataset.py         # Dataset prep (OIDv6 + TACO)
+│   ├── prepare_pilot_data.py      # Convert pilot log images to training data
+│   └── supplement_and_train.py    # Supplement and retrain pipeline
 ├── __tests__/              # Jest unit tests (85 tests)
 └── lib/
     ├── auth.ts              # Two-tier API auth (kiosk token + admin key)
@@ -356,7 +384,8 @@ You can also trigger manual purges from the dashboard using the date-range data 
     ├── types.ts             # Shared TypeScript types
     ├── waste-rules-core.ts  # Core rules engine (pattern matching, stream resolution)
     ├── waste-rules.ts       # Rules engine public API (overrides, result building)
-    ├── yolo-inference.ts    # YOLO26n ONNX Runtime Web inference
+    ├── yolo-inference.ts    # YOLO26n ONNX Runtime Web inference (always-on continuous loop)
+    ├── yolo-world-inference.ts # YOLO World S ONNX Runtime Web inference (on-demand fallback)
     └── yolo-rules.ts        # COCO-80 class → waste stream mapping rules
 ```
 

@@ -482,7 +482,15 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
           fgPersistRef.current = 0;
           goneCountRef.current = 0;
           objectDetectedFrameRef.current = 0;
-          transition("object_detected");
+
+          // YOLO fast gate: if YOLO already detected the new item, classify immediately
+          const yoloDets = inferenceRef.current?.getLatestDetections() ?? [];
+          if (yoloDets.length > 0 && imageQualityBand(analysis) !== "poor") {
+            console.log(`[fast-gate] Pending item with YOLO detection — skipping object_detected`);
+            triggerClassification(analysis);
+          } else {
+            transition("object_detected");
+          }
           return;
         }
 

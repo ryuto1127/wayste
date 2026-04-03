@@ -1,5 +1,9 @@
 import { redis, KEYS } from "./redis";
-import type { FeedbackEntry, WasteStream } from "./types";
+import type { FeedbackEntry, PilotLogEntry, WasteStream } from "./types";
+
+/** Redis keys for Full Review verdicts (must match review/route.ts) */
+const VERDICTS_KEY = "recycling:review-verdicts";
+const VERDICT_STREAMS_KEY = "recycling:review-verdicts:streams";
 
 export interface StreamAccuracy {
   stream: string;
@@ -58,8 +62,67 @@ export async function loadFeedback(): Promise<FeedbackEntry[]> {
   }
 }
 
+/**
+ * Merge kiosk feedback entries with ALL pilot log entries.
+ * Pilot log entries with review verdicts are mapped to correct/wrong;
+ * unreviewed pilot log entries are included as "pending" (feedback: "correct"
+ * placeholder) so the dashboard reflects all classifications, not just
+ * those where the user pressed Correct/Wrong on the kiosk screen.
+ */
+async function loadAllFeedback(): Promise<FeedbackEntry[]> {
+  const [kioskEntries, pilotRaw, verdicts, verdictStreams] = await Promise.all([
+    loadFeedback(),
+    redis.lrange(KEYS.pilotLog, 0, -1),
+    redis.hgetall(VERDICTS_KEY) as Promise<Record<string, string> | null>,
+    redis.hgetall(VERDICT_STREAMS_KEY) as Promise<Record<string, string> | null>,
+  ]);
+
+  // Build a set of requestIds already covered by kiosk feedback to avoid duplicates
+  const coveredRequestIds = new Set(
+    kioskEntries.filter((e) => e.requestId).map((e) => e.requestId)
+  );
+
+  // Convert pilot log entries into FeedbackEntry format
+  const pilotEntries = pilotRaw
+    .map((item) => {
+      try {
+        return (typeof item === "string" ? JSON.parse(item) : item) as PilotLogEntry;
+      } catch {
+        return null;
+      }
+    })
+    .filter((e): e is PilotLogEntry => e !== null);
+
+  const extraEntries: FeedbackEntry[] = [];
+  for (const entry of pilotEntries) {
+    if (!entry.requestId) continue;
+    if (coveredRequestIds.has(entry.requestId)) continue;
+
+    const verdict = verdicts?.[entry.requestId];
+
+    // Skip false detections from stats entirely
+    if (verdict === "false_detection") continue;
+
+    extraEntries.push({
+      id: entry.requestId,
+      timestamp: entry.timestamp,
+      itemName: entry.itemName,
+      predictedStream: entry.wasteStream as WasteStream,
+      confidence: entry.confidence,
+      feedback: verdict === "wrong" ? "wrong" : "correct",
+      actualStream: verdict === "wrong" ? (verdictStreams?.[entry.requestId] as WasteStream) : undefined,
+      siteId: "default",
+      imageUrl: entry.imageUrl,
+      requestId: entry.requestId,
+    });
+  }
+
+  return [...kioskEntries, ...extraEntries];
+}
+
 export async function analyzeFeedback(siteId?: string): Promise<FeedbackStats> {
-  let entries = await loadFeedback();
+  // Load both explicit kiosk feedback AND pilot log entries with review verdicts
+  let entries = await loadAllFeedback();
 
   if (siteId) {
     entries = entries.filter((e) => e.siteId === siteId);

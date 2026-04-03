@@ -328,6 +328,21 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
         continuousStarted = true;
       }
 
+      // During classifying, skip all heavy work — only check timeout.
+      // The frame analyzer and continuous YOLO loop are paused/unnecessary
+      // while we wait for the API response, and running them blocks the
+      // main thread, preventing fetch callbacks from executing.
+      if (stateRef.current === "classifying") {
+        if (Date.now() - classifyStartRef.current >= CLASSIFYING_TIMEOUT_MS) {
+          console.error("[classify] Timed out in classifying state — forcing recovery");
+          inferenceRef.current?.resumeContinuous();
+          inFlightRef.current = false;
+          cooldownStartRef.current = Date.now();
+          transition("cooldown");
+        }
+        return;
+      }
+
       // Set BG adaptation rate based on pipeline state
       const currentState = stateRef.current;
       const bgRate =
@@ -406,15 +421,8 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
         return;
       }
 
-      if (state === "classifying") {
-        if (Date.now() - classifyStartRef.current >= CLASSIFYING_TIMEOUT_MS) {
-          console.error("[classify] Timed out in classifying state — forcing recovery");
-          inFlightRef.current = false;
-          cooldownStartRef.current = Date.now();
-          transition("cooldown");
-        }
-        return;
-      }
+      // classifying state is handled above (before frame analysis)
+      // to avoid blocking the main thread during API calls.
 
       if (state === "result") {
         // Result stays on screen until item is removed — no minimum display time.
@@ -539,6 +547,10 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
       transition("classifying");
 
       const backend = inferenceRef.current;
+
+      // Pause continuous YOLO to free main thread for API callbacks.
+      // Individual tiers will manage pause/resume for YOLO World internally.
+      backend?.pauseContinuous();
       const yoloReady = backend?.isReady() && siteConfigRef.current;
       const isOffline = typeof navigator !== "undefined" && !navigator.onLine;
 
@@ -664,8 +676,7 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
         return;
       }
 
-      // Pause continuous YOLO to free CPU for YOLO World
-      backend.pauseContinuous();
+      // Continuous YOLO is already paused (from triggerClassification entry)
       const worldStart = Date.now();
 
       backend.detectWorld(video, CAPTURE_ROI_MARGIN)
@@ -681,7 +692,6 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
                 console.log(`[tier2] YOLO World HIT: ${worldBest.className} (${(worldBest.confidence * 100).toFixed(1)}%) → ${result.wasteStream} in ${worldMs}ms`);
                 apiController.abort();
                 logYoloOnlyResult(video, result, yoloDetections, yoloMs + worldMs);
-                backend.resumeContinuous();
                 handleClassificationResult(result, undefined);
                 return;
               }
@@ -692,10 +702,7 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
             console.log(`[tier2] YOLO World no detections (${worldMs}ms) — falling through to API`);
           }
 
-          // Resume YOLO before API call (API doesn't need CPU)
-          backend.resumeContinuous();
-
-          // Tier 3: API
+          // Tier 3: API (continuous YOLO stays paused — will resume in result/error handler)
           const promise = apiInflight ?? apiPromise();
           promise
             .then(({ result: r, requestId }) => {
@@ -714,8 +721,7 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
             });
         })
         .catch(() => {
-          // YOLO World failed — resume YOLO and fall through to API
-          backend.resumeContinuous();
+          // YOLO World failed — fall through to API (YOLO resumes in result/error handler)
           const promise = apiInflight ?? apiPromise();
           promise
             .then(({ result: r, requestId }) => {
@@ -748,12 +754,10 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
               return;
             }
 
-            // Try YOLO World offline
+            // Try YOLO World offline (continuous loop already paused from triggerClassification)
             if (backend.isYoloWorldReady()) {
-              backend.pauseContinuous();
               backend.detectWorld(video, CAPTURE_ROI_MARGIN)
                 .then((worldDets) => {
-                  backend.resumeContinuous();
                   if (worldDets.length > 0) {
                     const worldResult = resolveYoloWorldDetection(worldDets[0], siteConfigRef.current!);
                     if (worldResult) {
@@ -765,7 +769,6 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
                   handleClassificationResult(buildOfflineFallback(best.className, best.confidence), undefined);
                 })
                 .catch(() => {
-                  backend.resumeContinuous();
                   handleClassificationResult(buildOfflineFallback(best.className, best.confidence), undefined);
                 });
               return;
@@ -830,6 +833,9 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
       result: ClassificationResponse & { requestId?: string },
       requestId: string | undefined,
     ) {
+      // Resume continuous YOLO loop (paused during classifying)
+      inferenceRef.current?.resumeContinuous();
+
       if (
         result.itemName.toLowerCase() === "nothing detected" ||
         result.confidence === 0
@@ -859,6 +865,9 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
       if (err instanceof DOMException && err.name === "AbortError") {
         return;
       }
+      // Resume continuous YOLO loop (paused during classifying)
+      inferenceRef.current?.resumeContinuous();
+
       const msg = T("classificationFailed");
       console.error("[classify] API error:", err);
       setError(msg);

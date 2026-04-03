@@ -90,8 +90,8 @@ class OnnxBackend implements InferenceBackend {
   private latestDetections: YoloDetection[] = [];
   private continuousVideo: HTMLVideoElement | null = null;
   private continuousRoiMargin = 0.15;
-  /** Continuous loop interval — run YOLO every ~100ms (10fps). */
-  private static readonly CONTINUOUS_INTERVAL_MS = 100;
+  /** Continuous loop interval — run YOLO every ~75ms (~13fps). */
+  private static readonly CONTINUOUS_INTERVAL_MS = 75;
 
   async init(): Promise<boolean> {
     this.yolo = await import("./yolo-inference");

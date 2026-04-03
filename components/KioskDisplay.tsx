@@ -33,12 +33,16 @@ import CameraScreen from "./CameraScreen";
 import ResultScreen from "./ResultScreen";
 
 // ── Timing constants ──
-const ANALYSIS_INTERVAL_MS = 100; // ~10 fps local CV
+const ANALYSIS_INTERVAL_MS = 50;  // ~20 fps local CV
 const COOLDOWN_MS = 1500; // pause before re-scanning (BG model recovery)
-const OBJECT_GONE_FRAMES = 2;     // frames below ROI threshold before "gone" (~0.3s at 7fps)
-const FG_PERSIST_FRAMES = 2;      // consecutive ROI-blob frames required to leave idle
-/** Sharp frames (sharpnessScore > 150) in object_detected before triggering classification. */
-const SHARP_FRAMES_REQUIRED = 2;
+const OBJECT_GONE_FRAMES = 3;     // frames below ROI threshold before "gone" (~150ms at 20fps)
+const FG_PERSIST_FRAMES = 3;      // consecutive ROI-blob frames required to leave idle (~150ms at 20fps)
+/**
+ * Consecutive frames in idle with both foreground presence AND acceptable
+ * image quality (not "poor") required to trigger classification.
+ * Combines the old FG_PERSIST + SHARP_FRAMES gates into a single overlapped check.
+ */
+const SHARP_FG_FRAMES_REQUIRED = 3;
 /**
  * Escape hatch: if the result state persists for this long with the object
  * still visible (e.g., a tissue leftover that never leaves), force a transition
@@ -385,14 +389,33 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
       // ── State machine transitions ──
 
       if (state === "idle") {
-        if (roiHasFg) {
+        // ── Option 4: YOLO fast gate ──
+        // If the continuous YOLO loop already has a detection, skip the
+        // frame-analyzer FG persistence gate and trigger immediately
+        // (provided image quality is acceptable).
+        const yoloDetections = inferenceRef.current?.getLatestDetections() ?? [];
+        if (yoloDetections.length > 0 && imageQualityBand(analysis) !== "poor") {
+          console.log(`[fast-gate] YOLO pre-detected ${yoloDetections[0].className} (${(yoloDetections[0].confidence * 100).toFixed(1)}%) — skipping FG gate`);
+          fgPersistRef.current = 0;
+          goneCountRef.current = 0;
+          objectDetectedFrameRef.current = 0;
+          triggerClassification(analysis);
+          return;
+        }
+
+        // ── Option 1: Overlapped FG + sharpness check ──
+        // Count frames that are BOTH foreground-present AND sharp.
+        if (roiHasFg && imageQualityBand(analysis) !== "poor") {
           fgPersistRef.current++;
-          if (fgPersistRef.current >= FG_PERSIST_FRAMES) {
+          if (fgPersistRef.current >= SHARP_FG_FRAMES_REQUIRED) {
             fgPersistRef.current = 0;
             goneCountRef.current = 0;
             objectDetectedFrameRef.current = 0;
-            transition("object_detected");
+            triggerClassification(analysis);
           }
+        } else if (roiHasFg) {
+          // FG present but blurry — count toward persistence but don't trigger
+          fgPersistRef.current++;
         } else {
           fgPersistRef.current = 0;
         }
@@ -414,7 +437,7 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
           objectDetectedFrameRef.current++;
         }
 
-        if (objectDetectedFrameRef.current >= SHARP_FRAMES_REQUIRED) {
+        if (objectDetectedFrameRef.current >= SHARP_FG_FRAMES_REQUIRED) {
           objectDetectedFrameRef.current = 0;
           triggerClassification(analysis);
         }

@@ -51,6 +51,8 @@ const ERROR_HOLD_MS = 4_000;
 const API_TIMEOUT_MS = 15_000;
 /** Retry delay after a 429 rate-limit response. */
 const RATE_LIMIT_RETRY_MS = 1_200;
+/** Max time in "classifying" state before forcing a timeout recovery. */
+const CLASSIFYING_TIMEOUT_MS = 20_000;
 
 // ── Background adaptation rates (passed to FrameAnalyzer per pipeline state) ──
 // idle / cooldown: full rate — continuously absorb drift and persistent leftovers
@@ -151,6 +153,7 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
   const pendingItemRef = useRef(false);
   const objectDetectedFrameRef = useRef(0);
   const resultEnterTimeRef = useRef(0);
+  const classifyStartRef = useRef(0);
   const cooldownStartRef = useRef(0);
   const inFlightRef = useRef(false);
   const lastAnalysisRef = useRef<FrameAnalysis | null>(null);
@@ -263,11 +266,15 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
             console.warn(`[classify] Got 429, retrying after ${RATE_LIMIT_RETRY_MS}ms`);
             await new Promise((r) => setTimeout(r, RATE_LIMIT_RETRY_MS));
             const retryStart = Date.now();
+            const retryController = new AbortController();
+            const retryTimeout = setTimeout(() => retryController.abort(), API_TIMEOUT_MS);
             const retryRes = await fetch("/api/classify", {
               method: "POST",
               headers: { "Content-Type": "application/json", ...(sessionTokenRef.current ? { "x-session-token": sessionTokenRef.current } : {}) },
               body: JSON.stringify(reqBody),
+              signal: retryController.signal,
             });
+            clearTimeout(retryTimeout);
             const retryMs = Date.now() - retryStart;
             console.log(`[classify] Retry completed in ${retryMs}ms`);
             if (!retryRes.ok) {
@@ -400,6 +407,12 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
       }
 
       if (state === "classifying") {
+        if (Date.now() - classifyStartRef.current >= CLASSIFYING_TIMEOUT_MS) {
+          console.error("[classify] Timed out in classifying state — forcing recovery");
+          inFlightRef.current = false;
+          cooldownStartRef.current = Date.now();
+          transition("cooldown");
+        }
         return;
       }
 
@@ -522,6 +535,7 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
       if (!video) return;
 
       inFlightRef.current = true;
+      classifyStartRef.current = Date.now();
       transition("classifying");
 
       const backend = inferenceRef.current;
@@ -541,7 +555,10 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
       if (!yoloReady || !backend) {
         // No YOLO at all — straight to API
         apiPromise()
-          .then(({ result: r, requestId }) => { if (r) handleClassificationResult(r, requestId); })
+          .then(({ result: r, requestId }) => {
+            if (r) handleClassificationResult(r, requestId);
+            else handleClassificationError(new Error("API returned no result"));
+          })
           .catch(handleClassificationError);
         return;
       }
@@ -599,7 +616,10 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
         .catch(() => {
           // YOLO failed entirely — skip to API
           apiPromise()
-            .then(({ result: r, requestId }) => { if (r) handleClassificationResult(r, requestId); })
+            .then(({ result: r, requestId }) => {
+              if (r) handleClassificationResult(r, requestId);
+              else handleClassificationError(new Error("API returned no result"));
+            })
             .catch(handleClassificationError);
         });
     }
@@ -630,7 +650,10 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
         console.log("[tier2] YOLO World not ready — falling through to API");
         const promise = apiInflight ?? apiPromise();
         promise
-          .then(({ result: r, requestId }) => { if (r) handleClassificationResult(r, requestId); })
+          .then(({ result: r, requestId }) => {
+            if (r) handleClassificationResult(r, requestId);
+            else handleClassificationError(new Error("API returned no result"));
+          })
           .catch((err) => {
             if (yoloBest) {
               handleClassificationResult(buildOfflineFallback(yoloBest.className, yoloBest.confidence), undefined);
@@ -675,7 +698,10 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
           // Tier 3: API
           const promise = apiInflight ?? apiPromise();
           promise
-            .then(({ result: r, requestId }) => { if (r) handleClassificationResult(r, requestId); })
+            .then(({ result: r, requestId }) => {
+              if (r) handleClassificationResult(r, requestId);
+              else handleClassificationError(new Error("API returned no result"));
+            })
             .catch((err) => {
               // Fallback: use whatever local detection we had
               const fallbackName = yoloBest?.className ?? (worldDetections[0]?.className);
@@ -692,7 +718,10 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
           backend.resumeContinuous();
           const promise = apiInflight ?? apiPromise();
           promise
-            .then(({ result: r, requestId }) => { if (r) handleClassificationResult(r, requestId); })
+            .then(({ result: r, requestId }) => {
+              if (r) handleClassificationResult(r, requestId);
+              else handleClassificationError(new Error("API returned no result"));
+            })
             .catch(handleClassificationError);
         });
     }

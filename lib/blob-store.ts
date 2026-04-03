@@ -1,10 +1,19 @@
 /**
- * Uploads a base64-encoded JPEG frame to Vercel Blob.
- * Returns the public URL, or undefined if the upload fails.
+ * Uploads a base64-encoded JPEG frame to Vercel Blob (private access).
+ * Returns the blob URL, or undefined if the upload fails or is disabled.
  * Always best-effort — never throws.
+ *
+ * PRIVACY: Images are stored with `access: "private"` — the returned URL
+ * cannot be accessed directly. Use `getSignedImageUrl()` to generate a
+ * temporary signed download URL for admin pages (review, dashboard).
+ *
+ * Set BLOB_ENABLED=false to disable image uploads entirely.
  */
 
-import { put, head } from "@vercel/blob";
+import { put, head, getDownloadUrl } from "@vercel/blob";
+
+/** Set BLOB_ENABLED=false to disable all image uploads. */
+const BLOB_ENABLED = process.env.BLOB_ENABLED !== "false";
 
 export async function uploadFrameToBlob(
   base64Image: string,
@@ -12,6 +21,8 @@ export async function uploadFrameToBlob(
   wasteStream: string,
   timestamp: string
 ): Promise<string | undefined> {
+  if (!BLOB_ENABLED) return undefined;
+
   try {
     const buffer = Buffer.from(base64Image, "base64");
     // e.g. pilot-images/2026-03-27T10-00-00-plastic-bottle-recycling.jpg
@@ -19,7 +30,7 @@ export async function uploadFrameToBlob(
     const filename = `pilot-images/${timestamp.replace(/[:.]/g, "-")}-${safe(itemName)}-${safe(wasteStream)}.jpg`;
 
     const blob = await put(filename, buffer, {
-      access: "public",
+      access: "private",
       contentType: "image/jpeg",
       addRandomSuffix: true,
     });
@@ -27,6 +38,19 @@ export async function uploadFrameToBlob(
     return blob.url;
   } catch (err) {
     console.error("[blob-store] upload failed:", err);
+    return undefined;
+  }
+}
+
+/**
+ * Generate a temporary signed download URL for a private blob.
+ * Returns the signed URL, or undefined on failure.
+ */
+export function getSignedImageUrl(blobUrl: string): string | undefined {
+  try {
+    return getDownloadUrl(blobUrl);
+  } catch (err) {
+    console.error("[blob-store] signed URL generation failed:", err);
     return undefined;
   }
 }

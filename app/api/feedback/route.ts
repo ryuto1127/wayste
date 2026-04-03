@@ -23,6 +23,8 @@ const FEEDBACK_RL_TTL_S = 300; // 5 minutes
 
 export async function POST(request: Request) {
   // ── Session token validation ──
+  // In production, session tokens are mandatory. In dev mode, requests without
+  // tokens fall through to rate limiting only.
   const sessionToken = request.headers.get("x-session-token");
   if (sessionToken) {
     const result = validateSessionToken(sessionToken);
@@ -32,6 +34,11 @@ export async function POST(request: Request) {
         { status: 401 }
       );
     }
+  } else if (process.env.NODE_ENV === "production") {
+    return NextResponse.json(
+      { error: "Session token required." },
+      { status: 401 }
+    );
   }
 
   let body: unknown;

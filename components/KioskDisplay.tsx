@@ -18,7 +18,7 @@ import {
   imageQualityBand,
   ROI_FG_THRESHOLD,
 } from "@/lib/frame-analyzer";
-import { initYolo, isYoloReady, runYoloInference, warmUpYolo } from "@/lib/yolo-inference";
+import { getInferenceBackend, type InferenceBackend } from "@/lib/inference-backend";
 import { loadYoloRules, resolveYoloDetection } from "@/lib/yolo-rules";
 // kioskAuthHeaders replaced by session token (server-generated, HMAC-signed)
 import CameraFeed, { type CameraFeedHandle } from "./CameraFeed";
@@ -156,14 +156,16 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
 
   /** Site config fetched from the API. */
   const siteConfigRef = useRef<SiteConfig | null>(null);
+  /** Inference backend (ONNX or HTTP — resolved at init). */
+  const inferenceRef = useRef<InferenceBackend | null>(null);
 
   // Prevent SSR — this component requires browser APIs (camera, OffscreenCanvas)
   useEffect(() => setMounted(true), []);
 
-  // ── Initialize YOLO model + rules + site config (client-side) ──
+  // ── Initialize inference backend + rules + site config (client-side) ──
   useEffect(() => {
     Promise.all([
-      initYolo().then((loaded) => { if (loaded) return warmUpYolo(); }),
+      getInferenceBackend().then((backend) => { inferenceRef.current = backend; }),
       loadYoloRules(),
       fetch("/api/site-config")
         .then((r) => r.json())
@@ -490,12 +492,13 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
       inFlightRef.current = true;
       transition("classifying");
 
-      const yoloReady = isYoloReady() && siteConfigRef.current;
+      const backend = inferenceRef.current;
+      const yoloReady = backend?.isReady() && siteConfigRef.current;
       const isOffline = typeof navigator !== "undefined" && !navigator.onLine;
 
       // If offline, skip API entirely and rely on YOLO
-      if (isOffline && yoloReady) {
-        runYoloInference(video, CAPTURE_ROI_MARGIN)
+      if (isOffline && yoloReady && backend) {
+        backend.detect(video, CAPTURE_ROI_MARGIN)
           .then((detections) => {
             if (detections.length > 0) {
               const best = detections[0];
@@ -522,11 +525,11 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
       let yoloDetectionLogs: YoloDetectionLog[] | undefined;
       const apiPromise = () => classifyViaApiAsync(video, analysis, apiController.signal, yoloDetectionLogs);
 
-      if (yoloReady) {
+      if (yoloReady && backend) {
         const yoloStart = Date.now();
         let yoloBestDetection: { className: string; confidence: number } | null = null;
 
-        runYoloInference(video, CAPTURE_ROI_MARGIN)
+        backend.detect(video, CAPTURE_ROI_MARGIN)
           .then((detections) => {
             const yoloMs = Date.now() - yoloStart;
             // Save detection logs for API request

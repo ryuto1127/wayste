@@ -12,7 +12,7 @@ import { NextResponse } from "next/server";
 import { list, del, put } from "@vercel/blob";
 import { redis, KEYS } from "@/lib/redis";
 
-const RETENTION_DAYS = parseInt(process.env.BLOB_RETENTION_DAYS || "30");
+const RETENTION_DAYS = parseInt(process.env.BLOB_RETENTION_DAYS || "7");
 
 export async function GET(request: Request) {
   // Verify cron secret (Vercel sets this automatically for cron jobs)
@@ -35,7 +35,7 @@ export async function GET(request: Request) {
         .map((item) => (typeof item === "string" ? item : JSON.stringify(item)))
         .join("\n");
       await put(`archives/${date}/pilot-log.jsonl`, jsonl, {
-        access: "public",
+        access: "private",
         contentType: "application/jsonl",
         addRandomSuffix: false,
       });
@@ -48,7 +48,7 @@ export async function GET(request: Request) {
         .map((item) => (typeof item === "string" ? item : JSON.stringify(item)))
         .join("\n");
       await put(`archives/${date}/feedback.jsonl`, jsonl, {
-        access: "public",
+        access: "private",
         contentType: "application/jsonl",
         addRandomSuffix: false,
       });

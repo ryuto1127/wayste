@@ -276,7 +276,7 @@ function FullEntryCard({
         </div>
       ) : entry.imageUrl ? (
         <img
-          src={entry.imageUrl}
+          src={`/api/pilot-image?url=${encodeURIComponent(entry.imageUrl)}`}
           alt={entry.itemName}
           className="w-full max-h-48 object-contain rounded-lg bg-neutral-800"
         />
@@ -604,7 +604,7 @@ function LegacyEntryCard({
         </div>
       ) : entry.imageUrl ? (
         <img
-          src={entry.imageUrl}
+          src={`/api/pilot-image?url=${encodeURIComponent(entry.imageUrl)}`}
           alt={displayName}
           className="w-full max-h-48 object-contain rounded-lg bg-neutral-800"
         />

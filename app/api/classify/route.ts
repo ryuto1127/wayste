@@ -183,6 +183,8 @@ function shouldEscalate(
 
 export async function POST(request: Request) {
   // ── Session token validation ──
+  // In production, session tokens are mandatory. In dev mode (NODE_ENV !== "production"),
+  // requests without tokens fall through to rate limiting only.
   const sessionToken = request.headers.get("x-session-token");
   if (sessionToken) {
     const result = validateSessionToken(sessionToken);
@@ -192,8 +194,12 @@ export async function POST(request: Request) {
         { status: 401 }
       );
     }
+  } else if (process.env.NODE_ENV === "production") {
+    return NextResponse.json(
+      { error: "Session token required. Please reload the page." },
+      { status: 401 }
+    );
   }
-  // If no session token is provided, fall through to rate limiting only (dev mode)
 
   // ── Redis-based rate limiting ──
   const clientId =

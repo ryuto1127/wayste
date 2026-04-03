@@ -49,14 +49,27 @@ export function initYolo(modelUrl = "/models/yolo26n.onnx"): Promise<boolean> {
     try {
       ort = await import("onnxruntime-web");
 
-      // Use WASM backend — universally supported in browsers
-      ort.env.wasm.numThreads = 1;
+      // Use up to 4 WASM threads for parallel inference (capped to avoid
+      // over-subscription on low-core devices like Raspberry Pi).
+      const cores = typeof navigator !== "undefined" ? navigator.hardwareConcurrency ?? 1 : 1;
+      ort.env.wasm.numThreads = Math.min(cores, 4);
+
+      // Try WebGPU first (fastest on GPU-equipped devices), fall back to WASM.
+      let provider: string = "wasm";
+      try {
+        if (typeof navigator !== "undefined" && "gpu" in navigator) {
+          const gpu = await (navigator as { gpu: { requestAdapter(): Promise<unknown> } }).gpu.requestAdapter();
+          if (gpu) provider = "webgpu";
+        }
+      } catch {
+        // WebGPU not available — use WASM
+      }
 
       session = await ort.InferenceSession.create(modelUrl, {
-        executionProviders: ["wasm"],
+        executionProviders: [provider],
       });
 
-      console.log("[yolo] Model loaded successfully");
+      console.log(`[yolo] Model loaded (${provider}, ${ort.env.wasm.numThreads} threads)`);
       return true;
     } catch (err) {
       console.warn("[yolo] Model load failed — API fallback will be used:", err);

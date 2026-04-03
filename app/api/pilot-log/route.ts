@@ -45,6 +45,11 @@ export async function POST(request: Request) {
         { status: 401 }
       );
     }
+  } else if (process.env.NODE_ENV === "production") {
+    return NextResponse.json(
+      { error: "Session token required." },
+      { status: 401 }
+    );
   }
 
   let body: unknown;

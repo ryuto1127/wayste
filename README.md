@@ -22,7 +22,7 @@ Built for office and public-space pilots, with full English and Japanese support
 - Supports **English and Japanese** with configurable default locale per site
 - Lets users tap **Correct / Wrong** to give feedback — the "Wrong" correction menu dynamically shows the site's configured streams
 - Logs every scan and all feedback to Redis for post-pilot analysis
-- Saves captured images as **private blobs** served through signed-URL proxy — no public URLs
+- Saves captured images to **Vercel Blob** with public access + random-suffix URLs (non-guessable, non-enumerable); only exposed through admin-authenticated routes
 - Automatically archives pilot data to Blob and purges old images via a daily cron job
 
 ---
@@ -55,7 +55,7 @@ Built for office and public-space pilots, with full English and Japanese support
 | Styling | Tailwind CSS v4 |
 | Local inference (Tier 1) | YOLO26n (COCO-80, 9.5 MB) via ONNX Runtime Web — always-on, ~10 fps continuous loop |
 | Local inference (Tier 2) | YOLO World S (30 recycling classes, ~50 MB) via ONNX Runtime Web — on-demand fallback |
-| AI classification | OpenAI GPT vision — nano (fast) with mini escalation (accurate) |
+| AI classification | OpenAI GPT-5.4 vision — nano (fast) with mini escalation (accurate) |
 | Local detection | OffscreenCanvas background subtraction at 160×120, ~7 fps, HSV-based skin filtering |
 | Response validation | Zod schema validation on all model output |
 | API security | HMAC-signed session tokens + two-tier auth (kiosk token / admin key) |
@@ -131,7 +131,7 @@ vercel env pull
 | `KV_REST_API_TOKEN` | Production | Upstash Redis token |
 | `BLOB_READ_WRITE_TOKEN` | Production | Vercel Blob token |
 | `SITE_ID` | No | Site config to load (default: `default`). The site config's `defaultLocale` sets the UI language. |
-| `BLOB_ACCESS` | No | `private` (default) or `public`. Private blobs are served via `/api/pilot-image` with signed URLs. |
+| `BLOB_ENABLED` | No | Set to `false` to disable all image uploads entirely (default: enabled). |
 | `NEXT_PUBLIC_MIRROR_CAMERA` | No | Set to `true` for front-facing / selfie cameras. Omit or set `false` for outward-facing kiosk cameras. |
 | `RATE_LIMIT_MAX` | No | Max classifications per IP per minute (default: `15`) |
 | `KIOSK_API_TOKEN` | No | Bearer token required by kiosk endpoints (classify, feedback, pilot-log). Omit to skip auth in dev. |
@@ -176,9 +176,9 @@ If both local models yield confidence < 0.30 — API fires in parallel with
 YOLO World (no extra wait). Otherwise falls through here only when
 YOLO World also fails.
   · ROI crop (70% of frame, scaled to max 768px) sent to /api/classify
-  · GPT nano classifies item + optional preAction guidance (fast path, ~1s)
+  · GPT-5.4 nano classifies item + optional preAction guidance (fast path, ~1s)
   · If confidence < 0.5 or item flagged for review
-        → escalates to GPT mini (accurate path, ~2–4s)
+        → escalates to GPT-5.4 mini (accurate path, ~2–4s)
         → mini result used only if it improves on nano
   · Zod validates model JSON output; unknown stream IDs fall back to needs_review
         ↓
@@ -227,6 +227,14 @@ On page load the server component generates an HMAC-SHA256-signed session token 
 | Admin | `ADMIN_API_KEY` | `/api/overrides`, `/api/review`, `/api/pilot-log` (DELETE) |
 
 Both default to open (no auth) when the env var is unset, so local development requires no configuration.
+
+### Image privacy
+
+Captured images are uploaded to Vercel Blob with public access (required by `@vercel/blob` v2 for server-side reads). Privacy is enforced at the application layer:
+- URLs include a random suffix — non-guessable and non-enumerable
+- URLs are only exposed through admin-authenticated routes (`/review`, `/api/pilot-image`)
+- Images are auto-deleted after `BLOB_RETENTION_DAYS` (default: 7 days)
+- Set `BLOB_ENABLED=false` to disable image uploads entirely
 
 ---
 
@@ -357,15 +365,23 @@ You can also trigger manual purges from the dashboard using the date-range data 
 ├── public/
 │   └── models/
 │       └── yolo-world-rules.json  # 30-class YOLO World → waste stream mapping
+├── kiosk/                  # Kiosk deployment scripts
+│   ├── setup-mac.sh              # macOS M1/M2 setup (screensaver, updates, LaunchAgent)
+│   ├── start-kiosk-mac.sh        # Auto-restart Chrome kiosk mode
+│   ├── setup-pi.sh               # Raspberry Pi setup
+│   ├── start-kiosk.sh            # Generic Linux kiosk startup
+│   ├── backup-data.sh            # Data backup script
+│   └── kiosk.desktop             # Linux desktop entry
 ├── training/               # Model training and export scripts
 │   ├── export_yolo_world.py       # Export yolov8s-worldv2 to ONNX with pre-baked embeddings
 │   ├── finetune_yolo26n.ipynb     # Fine-tune YOLO26n on recycling dataset
 │   ├── prepare_dataset.py         # Dataset prep (OIDv6 + TACO)
 │   ├── prepare_pilot_data.py      # Convert pilot log images to training data
 │   └── supplement_and_train.py    # Supplement and retrain pipeline
-├── __tests__/              # Jest unit tests (85 tests)
+├── __tests__/              # Jest unit tests (152 tests)
 └── lib/
     ├── auth.ts              # Two-tier API auth (kiosk token + admin key)
+    ├── empty-module.js      # Stub for ONNX Runtime server-side imports
     ├── auto-override.ts     # Automatic override suggestion from feedback data
     ├── background-task.ts   # waitUntil wrapper for post-response work
     ├── blob-store.ts        # Vercel Blob upload helper (private by default)
@@ -397,7 +413,7 @@ You can also trigger manual purges from the dashboard using the date-range data 
 npm test
 ```
 
-85 unit tests covering the state machine, CV pipeline thresholds, HSV skin detection, override pattern matching, Japanese site config, offline cache, and classification API route.
+152 unit tests covering the state machine, CV pipeline thresholds, HSV skin detection, override pattern matching, Japanese site config, offline cache, and classification API route.
 
 ---
 

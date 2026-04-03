@@ -349,8 +349,8 @@ function FeedbackButtons({
 
   if (state === "sent") {
     return (
-      <div className="bg-emerald-900/30 border border-emerald-700/40 rounded-xl px-4 py-3 text-center">
-        <p className="text-emerald-400 text-sm font-medium">
+      <div className="bg-emerald-900/30 border border-emerald-700/40 rounded-2xl px-6 py-5 text-center">
+        <p className="text-emerald-400 text-lg font-semibold">
           {T("thanksFeedback")}
         </p>
       </div>
@@ -359,27 +359,29 @@ function FeedbackButtons({
 
   if (state === "sending") {
     return (
-      <div className="bg-neutral-800/50 rounded-xl px-4 py-3 text-center">
-        <p className="text-neutral-400 text-sm">{T("saving")}</p>
+      <div className="bg-neutral-800/50 rounded-2xl px-6 py-5 text-center">
+        <p className="text-neutral-400 text-base">{T("saving")}</p>
       </div>
     );
   }
 
   return (
-    <div className="flex gap-3">
+    <div className="flex gap-4">
       <button
         onClick={() => sendFeedback("correct")}
         disabled={state !== "idle"}
-        className="flex-1 py-3 rounded-xl bg-neutral-800/60 hover:bg-neutral-700 text-neutral-300 text-sm font-medium transition-colors disabled:opacity-50"
+        className="flex-1 py-5 rounded-2xl bg-emerald-800/40 border-2 border-emerald-600/50 hover:bg-emerald-700/50 active:bg-emerald-600/60 active:scale-[0.97] text-white font-bold text-lg transition-all disabled:opacity-50 flex items-center justify-center gap-2.5"
       >
-        ✓ {T("correct")}
+        <span className="text-2xl leading-none" aria-hidden="true">👍</span>
+        {T("correct")}
       </button>
       <button
         onClick={() => sendFeedback("wrong")}
         disabled={state !== "idle"}
-        className="flex-1 py-3 rounded-xl bg-neutral-800/60 hover:bg-neutral-700 text-neutral-300 text-sm font-medium transition-colors disabled:opacity-50"
+        className="flex-1 py-5 rounded-2xl bg-red-900/40 border-2 border-red-600/50 hover:bg-red-800/50 active:bg-red-700/60 active:scale-[0.97] text-white font-bold text-lg transition-all disabled:opacity-50 flex items-center justify-center gap-2.5"
       >
-        ✗ {T("wrong")}
+        <span className="text-2xl leading-none" aria-hidden="true">👎</span>
+        {T("wrong")}
       </button>
     </div>
   );

@@ -452,6 +452,8 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
         if (!roiHasFg) {
           goneCountRef.current++;
           if (goneCountRef.current >= OBJECT_GONE_FRAMES) {
+            // Item removed — resume YOLO for next item detection
+            inferenceRef.current?.resumeContinuous();
             cooldownStartRef.current = Date.now();
             transition("cooldown");
           }
@@ -462,6 +464,7 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
           if (Date.now() - resultEnterTimeRef.current >= RESULT_TIMEOUT_MS) {
             setStableResult(null); setResultRequestId(undefined);
             goneCountRef.current = 0;
+            inferenceRef.current?.resumeContinuous();
             cooldownStartRef.current = Date.now();
             transition("cooldown");
             return;
@@ -864,13 +867,14 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
       result: ClassificationResponse & { requestId?: string },
       requestId: string | undefined,
     ) {
-      // Resume continuous YOLO loop (paused during classifying)
-      inferenceRef.current?.resumeContinuous();
+      // Keep YOLO paused during result — no detections needed while result
+      // is on screen. YOLO resumes when transitioning to cooldown/idle.
 
       if (
         result.itemName.toLowerCase() === "nothing detected" ||
         result.confidence === 0
       ) {
+        inferenceRef.current?.resumeContinuous();
         cooldownStartRef.current = Date.now();
         transition("cooldown");
         inFlightRef.current = false;

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef, Suspense } from "react";
+import { useEffect, useState, useCallback, useRef, useMemo, Suspense } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { AdminNav } from "@/components/AdminNav";
@@ -25,6 +25,7 @@ type ReviewEntry = FeedbackEntry & { actualStream: string | null; blobUploadFail
 type FullReviewEntry = PilotLogEntry & {
   verdict: "correct" | "wrong" | "false_detection" | null;
   verdictStream: string | null;
+  correctedItemName: string | null;
 };
 
 type Verdict = "correct" | "wrong" | "false_detection";
@@ -100,6 +101,28 @@ function FullReviewPage() {
     }
   }, []);
 
+  const submitItemName = useCallback(async (requestId: string, correctedItemName: string) => {
+    setSaving(requestId);
+    try {
+      await fetch("/api/review", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: requestId, requestId, correctedItemName }),
+      });
+      setEntries((prev) =>
+        prev.map((e) =>
+          e.requestId === requestId
+            ? { ...e, correctedItemName }
+            : e
+        )
+      );
+    } catch {
+      // silent
+    } finally {
+      setSaving(null);
+    }
+  }, []);
+
   const reviewed = entries.filter((e) => e.verdict !== null).length;
   const pending = entries.length - reviewed;
 
@@ -108,6 +131,16 @@ function FullReviewPage() {
     if (filter === "reviewed") return e.verdict !== null;
     return true;
   });
+
+  // Build sorted list of unique item names for autocomplete
+  const knownNames = useMemo(() => {
+    const names = new Set<string>();
+    for (const e of entries) {
+      if (e.correctedItemName) names.add(e.correctedItemName);
+      if (e.itemName && e.itemName !== "nothing detected") names.add(e.itemName);
+    }
+    return [...names].sort((a, b) => a.localeCompare(b));
+  }, [entries]);
 
   // Accuracy = correct / (correct + wrong), excluding false detections
   const correctCount = entries.filter((e) => e.verdict === "correct").length;
@@ -205,6 +238,8 @@ function FullReviewPage() {
                 entry={entry}
                 saving={saving === entry.requestId}
                 onVerdict={submitVerdict}
+                onItemName={submitItemName}
+                knownNames={knownNames}
                 locale={locale}
                 T={T}
               />
@@ -220,16 +255,24 @@ function FullEntryCard({
   entry,
   saving,
   onVerdict,
+  onItemName,
+  knownNames,
   locale,
   T,
 }: {
   entry: FullReviewEntry;
   saving: boolean;
   onVerdict: (requestId: string, verdict: Verdict, stream?: string) => void;
+  onItemName: (requestId: string, correctedItemName: string) => void;
+  knownNames: string[];
   locale: Locale;
   T: (key: Parameters<typeof t>[1]) => string;
 }) {
   const [showStreamPicker, setShowStreamPicker] = useState(false);
+  const [editingName, setEditingName] = useState(false);
+  const [nameInput, setNameInput] = useState(entry.correctedItemName ?? entry.itemName);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const suggestionsRef = useRef<HTMLDivElement>(null);
 
   const date = new Date(entry.timestamp).toLocaleString(
     locale === "ja" ? "ja-JP" : "en-US",
@@ -269,7 +312,87 @@ function FullEntryCard({
 
       {/* Info */}
       <div>
-        <p className="font-semibold text-white truncate">{entry.itemName}</p>
+        {editingName ? (
+          <div className="relative">
+            <div className="flex gap-2 items-center">
+              <input
+                type="text"
+                value={nameInput}
+                onChange={(e) => { setNameInput(e.target.value); setShowSuggestions(true); }}
+                onFocus={() => setShowSuggestions(true)}
+                onBlur={() => { setTimeout(() => setShowSuggestions(false), 150); }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && nameInput.trim() && entry.requestId) {
+                    onItemName(entry.requestId, nameInput.trim());
+                    setEditingName(false);
+                    setShowSuggestions(false);
+                  }
+                  if (e.key === "Escape") {
+                    setNameInput(entry.correctedItemName ?? entry.itemName);
+                    setEditingName(false);
+                    setShowSuggestions(false);
+                  }
+                }}
+                autoFocus
+                className="flex-1 bg-neutral-700 text-white text-sm rounded px-2 py-1 outline-none focus:ring-1 focus:ring-purple-500"
+              />
+              <button
+                onClick={() => {
+                  if (nameInput.trim() && entry.requestId) {
+                    onItemName(entry.requestId, nameInput.trim());
+                    setEditingName(false);
+                  }
+                }}
+                disabled={saving || !nameInput.trim()}
+                className="px-2 py-1 rounded bg-purple-700 hover:bg-purple-600 text-xs font-medium disabled:opacity-40"
+              >
+                {T("saveItemName")}
+              </button>
+            </div>
+            {showSuggestions && (() => {
+              const q = nameInput.trim().toLowerCase();
+              const matches = knownNames.filter(
+                (n) => n.toLowerCase().includes(q) && n !== nameInput.trim()
+              ).slice(0, 8);
+              if (matches.length === 0) return null;
+              return (
+                <div ref={suggestionsRef} className="absolute z-10 left-0 right-12 mt-1 bg-neutral-700 rounded-lg shadow-lg border border-neutral-600 max-h-40 overflow-y-auto">
+                  {matches.map((name) => (
+                    <button
+                      key={name}
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => {
+                        setNameInput(name);
+                        setShowSuggestions(false);
+                        if (entry.requestId) {
+                          onItemName(entry.requestId, name);
+                          setEditingName(false);
+                        }
+                      }}
+                      className="w-full text-left px-3 py-1.5 text-sm text-white hover:bg-neutral-600 transition-colors"
+                    >
+                      {name}
+                    </button>
+                  ))}
+                </div>
+              );
+            })()}
+          </div>
+        ) : (
+          <p
+            className="font-semibold text-white truncate cursor-pointer hover:text-purple-300 transition-colors"
+            onClick={() => setEditingName(true)}
+            title={T("editItemName")}
+          >
+            {entry.correctedItemName ? (
+              <>
+                {entry.correctedItemName}
+                <span className="text-neutral-500 line-through text-xs ml-2">{entry.itemName}</span>
+              </>
+            ) : entry.itemName}
+            <span className="text-neutral-600 text-xs ml-1">✎</span>
+          </p>
+        )}
         <p className="text-xs text-neutral-500 mt-0.5">{date}</p>
       </div>
 

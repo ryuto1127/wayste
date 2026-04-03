@@ -10,19 +10,21 @@
  *   /api/overrides                 — override management
  *   /api/pilot-image               — captured frame images
  *
- * Auth method: HTTP Basic Auth
+ * Auth method: HTTP Basic Auth (first login) → session cookie (subsequent)
  *   Username: admin (or anything)
  *   Password: value of ADMIN_API_KEY env var
  *
- * If ADMIN_API_KEY is not set (dev mode), all requests pass through.
+ * After successful Basic Auth, a session cookie (admin_session) is set so the
+ * browser won't prompt for credentials again until the cookie expires (7 days).
  *
- * The kiosk main page (/) and kiosk POST endpoints (/api/classify,
- * /api/feedback, /api/pilot-log POST) are NOT affected — they use
- * their own kiosk token auth.
+ * If ADMIN_API_KEY is not set (dev mode), all requests pass through.
  */
 
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+
+const SESSION_COOKIE = "admin_session";
+const SESSION_MAX_AGE = 60 * 60 * 24 * 7; // 7 days
 
 /** Paths that require admin Basic Auth. */
 const ADMIN_PATHS = [
@@ -34,9 +36,6 @@ const ADMIN_PATHS = [
   "/api/pilot-log",
   "/api/overrides",
   "/api/pilot-image",
-  // NOTE: /api/kiosk-stats is intentionally NOT here — it's fetched by the
-  // public kiosk IdleScreen and only returns aggregate counts (no images/PII).
-  // Protecting it triggers the browser's Basic Auth dialog on the main page.
 ];
 
 function isAdminPath(pathname: string): boolean {
@@ -45,7 +44,17 @@ function isAdminPath(pathname: string): boolean {
   );
 }
 
-export function middleware(request: NextRequest) {
+/**
+ * Simple HMAC-like session token using Web Crypto.
+ * Token = hex(SHA-256(adminKey + ":admin-session-salt"))
+ */
+async function makeSessionToken(adminKey: string): Promise<string> {
+  const data = new TextEncoder().encode(adminKey + ":admin-session-salt");
+  const hash = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(hash)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Only protect admin paths
@@ -56,33 +65,53 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // /api/feedback POST goes through kiosk auth, not admin auth
-  // (feedback-stats GET is protected below)
-
   const adminKey = process.env.ADMIN_API_KEY;
 
   // Dev mode: no key configured → allow everything
   if (!adminKey) return NextResponse.next();
 
-  // Check HTTP Basic Auth
+  const expectedToken = await makeSessionToken(adminKey);
+
+  // 1. Check session cookie first (no password prompt)
+  const sessionCookie = request.cookies.get(SESSION_COOKIE)?.value;
+  if (sessionCookie === expectedToken) {
+    return NextResponse.next();
+  }
+
+  // 2. Check x-api-key header (for programmatic access / curl)
+  const apiKey = request.headers.get("x-api-key");
+  if (apiKey === adminKey) {
+    const res = NextResponse.next();
+    res.cookies.set(SESSION_COOKIE, expectedToken, {
+      httpOnly: true,
+      secure: request.nextUrl.protocol === "https:",
+      sameSite: "lax",
+      maxAge: SESSION_MAX_AGE,
+      path: "/",
+    });
+    return res;
+  }
+
+  // 3. Check HTTP Basic Auth — set session cookie on success
   const authHeader = request.headers.get("authorization");
   if (authHeader?.startsWith("Basic ")) {
     try {
       const decoded = atob(authHeader.slice(6));
-      // Accept any username, password must match ADMIN_API_KEY
       const password = decoded.includes(":") ? decoded.split(":").slice(1).join(":") : decoded;
       if (password === adminKey) {
-        return NextResponse.next();
+        const res = NextResponse.next();
+        res.cookies.set(SESSION_COOKIE, expectedToken, {
+          httpOnly: true,
+          secure: request.nextUrl.protocol === "https:",
+          sameSite: "lax",
+          maxAge: SESSION_MAX_AGE,
+          path: "/",
+        });
+        return res;
       }
     } catch {
       // Invalid base64 — fall through to 401
     }
-  }
-
-  // Also accept x-api-key header (for programmatic access / curl)
-  const apiKey = request.headers.get("x-api-key");
-  if (apiKey === adminKey) {
-    return NextResponse.next();
   }
 
   // Deny: return 401 with WWW-Authenticate to trigger browser login dialog

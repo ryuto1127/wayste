@@ -139,6 +139,8 @@ const translations = {
     verdictWrong: "Verified wrong",
     verdictFalse: "False detection",
     selectCorrectStream: "Select the correct bin:",
+    editItemName: "Correct item name:",
+    saveItemName: "Save",
 
     // Voice guidance
     voiceOn: "Sound On",
@@ -291,6 +293,8 @@ const translations = {
     verdictWrong: "不正解と確認済み",
     verdictFalse: "誤検出と確認済み",
     selectCorrectStream: "正しいゴミ箱を選択：",
+    editItemName: "正しいアイテム名：",
+    saveItemName: "保存",
 
     // Voice guidance
     voiceOn: "音声オン",

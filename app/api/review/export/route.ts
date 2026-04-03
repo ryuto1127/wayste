@@ -34,10 +34,11 @@ export async function GET(request: Request) {
   const toMs = toDate ? new Date(toDate + "T23:59:59.999Z").getTime() : Infinity;
 
   try {
-    const [pilotRaw, verdicts, verdictStreams] = await Promise.all([
+    const [pilotRaw, verdicts, verdictStreams, verdictNames] = await Promise.all([
       redis.lrange(KEYS.pilotLog, 0, -1),
       redis.hgetall("recycling:review-verdicts") as Promise<Record<string, string> | null>,
       redis.hgetall("recycling:review-verdicts:streams") as Promise<Record<string, string> | null>,
+      redis.hgetall("recycling:review-verdicts:names") as Promise<Record<string, string> | null>,
     ]);
 
     if (!verdicts || Object.keys(verdicts).length === 0) {
@@ -70,6 +71,8 @@ export async function GET(request: Request) {
           ? entry.wasteStream
           : null;
 
+      const correctedItemName = verdictNames?.[entry.requestId] ?? null;
+
       if (format === "threshold") {
         // Threshold analysis format: minimal, one per entry
         lines.push(JSON.stringify({
@@ -83,7 +86,8 @@ export async function GET(request: Request) {
         // Fine-tuning format: full data with bbox
         lines.push(JSON.stringify({
           imageUrl: entry.imageUrl ?? null,
-          itemName: entry.itemName,
+          itemName: correctedItemName ?? entry.itemName,
+          originalItemName: correctedItemName ? entry.itemName : undefined,
           predictedStream: entry.wasteStream,
           correctStream,
           confidence: entry.confidence,

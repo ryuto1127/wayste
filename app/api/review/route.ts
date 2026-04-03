@@ -16,6 +16,8 @@ const NAMES_KEY       = "recycling:corrections:names"; // Redis hash: id → act
 const VERDICTS_KEY    = "recycling:review-verdicts";
 /** When verdict is "wrong", the correct stream: requestId → stream */
 const VERDICT_STREAMS_KEY = "recycling:review-verdicts:streams";
+/** Corrected item names for full review: requestId → correctedItemName */
+const VERDICT_NAMES_KEY   = "recycling:review-verdicts:names";
 
 export async function GET(request: Request) {
   // GET is read-only (dashboard/review page) — no auth required.
@@ -27,10 +29,11 @@ export async function GET(request: Request) {
   // ── Full review mode: return ALL pilot log entries with review verdicts ──
   if (mode === "full") {
     try {
-      const [pilotRaw, verdicts, verdictStreams] = await Promise.all([
+      const [pilotRaw, verdicts, verdictStreams, verdictNames] = await Promise.all([
         redis.lrange(KEYS.pilotLog, 0, -1),
         redis.hgetall(VERDICTS_KEY) as Promise<Record<string, string> | null>,
         redis.hgetall(VERDICT_STREAMS_KEY) as Promise<Record<string, string> | null>,
+        redis.hgetall(VERDICT_NAMES_KEY) as Promise<Record<string, string> | null>,
       ]);
 
       const entries = pilotRaw
@@ -45,6 +48,7 @@ export async function GET(request: Request) {
           ...entry,
           verdict: entry.requestId ? (verdicts?.[entry.requestId] ?? null) : null,
           verdictStream: entry.requestId ? (verdictStreams?.[entry.requestId] ?? null) : null,
+          correctedItemName: entry.requestId ? (verdictNames?.[entry.requestId] ?? null) : null,
         }));
 
       const reviewed = entries.filter((e) => e.verdict !== null).length;
@@ -148,6 +152,7 @@ const CorrectionSchema = z.object({
   requestId: z.string().optional(),
   verdict:   z.enum(["correct", "wrong", "false_detection"]).optional(),
   verdictStream: z.string().optional(), // correct stream when verdict is "wrong"
+  correctedItemName: z.string().optional(), // corrected item name for fine-tuning
 });
 
 export async function POST(request: Request) {
@@ -167,7 +172,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const { id, actualStream, actualItemName, requestId, verdict, verdictStream } = parsed.data;
+    const { id, actualStream, actualItemName, requestId, verdict, verdictStream, correctedItemName } = parsed.data;
     const ops: Promise<unknown>[] = [];
 
     // Legacy feedback corrections (keyed by feedback entry id)
@@ -180,6 +185,11 @@ export async function POST(request: Request) {
       if (verdict === "wrong" && verdictStream) {
         ops.push(redis.hset(VERDICT_STREAMS_KEY, { [requestId]: verdictStream }));
       }
+    }
+
+    // Corrected item name (independent of verdict)
+    if (requestId && correctedItemName !== undefined) {
+      ops.push(redis.hset(VERDICT_NAMES_KEY, { [requestId]: correctedItemName }));
     }
 
     await Promise.all(ops);

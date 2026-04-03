@@ -4,7 +4,6 @@ import { logPilotEntry } from "@/lib/pilot-log";
 import { uploadFrameToBlob } from "@/lib/blob-store";
 import { runInBackground } from "@/lib/background-task";
 import { generateRequestId } from "@/lib/request-id";
-import { requireApiKey } from "@/lib/auth";
 import { del as deleteBlob } from "@vercel/blob";
 import type { PilotLogEntry } from "@/lib/types";
 import { validateSessionToken } from "@/lib/session-token";
@@ -104,7 +103,7 @@ export async function POST(request: Request) {
 /**
  * DELETE /api/pilot-log — Purge log entries and associated Blob images.
  *
- * Requires ADMIN_API_KEY. Supports:
+ * Protected by middleware.ts (Basic Auth / x-api-key). Supports:
  *   ?before=2026-07-01  — delete entries before July 1 (demo cleanup)
  *   ?from=...&to=...    — delete entries in a date range
  *   ?all=true           — delete ALL entries (full reset)
@@ -113,8 +112,7 @@ export async function POST(request: Request) {
  * for the deleted entries.
  */
 export async function DELETE(request: Request) {
-  const denied = requireApiKey(request);
-  if (denied) return denied;
+  // Auth is handled by middleware.ts (Basic Auth for /api/pilot-log non-POST)
 
   const { searchParams } = new URL(request.url);
   const deleteAll = searchParams.get("all") === "true";

@@ -115,9 +115,9 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
   const stateRef = useRef<PipelineState>("idle");
   const [mounted, setMounted] = useState(false);
   const [pipelineState, setPipelineState] = useState<PipelineState>("idle");
-  const [stableResult, setStableResult] =
-    useState<ClassificationResponse | null>(null);
-  const [resultRequestId, setResultRequestId] = useState<string | undefined>(undefined);
+  const [stableResults, setStableResults] =
+    useState<ClassificationResponse[]>([]);
+  const [resultRequestIds, setResultRequestIds] = useState<(string | undefined)[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [locale, setLocale] = useState<Locale>(defaultLocale ?? "en");
   /** Track whether the user has manually toggled the language. */
@@ -445,7 +445,7 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
 
           // Persistent-leftover escape hatch
           if (Date.now() - resultEnterTimeRef.current >= RESULT_TIMEOUT_MS) {
-            setStableResult(null); setResultRequestId(undefined);
+            setStableResults([]); setResultRequestIds([]);
             goneCountRef.current = 0;
             analyzer.boostBackgroundAdaptation();
             cooldownStartRef.current = Date.now();
@@ -467,7 +467,7 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
 
         // If a new item is pending, skip cooldown wait (fast-path to next scan)
         if (pendingItemRef.current && errorHeld) {
-          setStableResult(null); setResultRequestId(undefined);
+          setStableResults([]); setResultRequestIds([]);
           setError(null);
           pendingItemRef.current = false;
           fgPersistRef.current = 0;
@@ -479,7 +479,7 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
         }
 
         if (cooldownElapsed && errorHeld) {
-          setStableResult(null); setResultRequestId(undefined);
+          setStableResults([]); setResultRequestIds([]);
           setError(null);
           setStatsVersion((v) => v + 1);
           transition("idle");
@@ -594,13 +594,24 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
           if (detections.length > 0) {
             const best = detections[0];
 
-            // ── High confidence: YOLO wins ──
+            // ── Multi-item: resolve up to 2 distinct high-confidence detections ──
             if (best.confidence >= YOLO_FALLBACK_THRESHOLD) {
-              const result = resolveYoloDetection(best, siteConfigRef.current!);
-              if (result) {
-                console.log(`[tier1] YOLO HIT: ${best.className} (${(best.confidence * 100).toFixed(1)}%) → ${result.wasteStream} in ${yoloMs}ms`);
-                logYoloOnlyResult(video, result, detections, yoloMs);
-                handleClassificationResult(result, undefined);
+              // Collect distinct class results (max 2)
+              const seen = new Set<string>();
+              const resolvedResults: ClassificationResponse[] = [];
+              for (const det of detections) {
+                if (det.confidence < YOLO_FALLBACK_THRESHOLD) break;
+                if (seen.has(det.className)) continue;
+                seen.add(det.className);
+                const r = resolveYoloDetection(det, siteConfigRef.current!);
+                if (r) resolvedResults.push(r);
+                if (resolvedResults.length >= 2) break;
+              }
+
+              if (resolvedResults.length > 0) {
+                console.log(`[tier1] YOLO HIT: ${resolvedResults.map((r) => r.itemName).join(" + ")} in ${yoloMs}ms`);
+                logYoloOnlyResult(video, resolvedResults[0], detections, yoloMs);
+                handleMultiClassificationResults(resolvedResults, resolvedResults.map(() => undefined));
                 return;
               }
             }
@@ -609,7 +620,7 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
             // Show optimistic UI immediately
             console.log(`[tier1] YOLO conf=${(best.confidence * 100).toFixed(1)}% — escalating to YOLO World`);
             const optimisticResult = buildOptimisticResult(best.className, best.confidence);
-            setStableResult(optimisticResult);
+            setStableResults([optimisticResult]);
             resultEnterTimeRef.current = Date.now();
 
             // If very low confidence, fire API in parallel with YOLO World
@@ -743,10 +754,19 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
         .then((detections) => {
           if (detections.length > 0) {
             const best = detections[0];
-            const result = resolveYoloDetection(best, siteConfigRef.current!);
-            if (result) {
-              console.log(`[offline] YOLO HIT: ${best.className} → ${result.wasteStream}`);
-              handleClassificationResult(result, undefined);
+            // Resolve multiple distinct detections (offline)
+            const seen = new Set<string>();
+            const resolvedResults: ClassificationResponse[] = [];
+            for (const det of detections) {
+              if (seen.has(det.className)) continue;
+              seen.add(det.className);
+              const r = resolveYoloDetection(det, siteConfigRef.current!);
+              if (r) resolvedResults.push(r);
+              if (resolvedResults.length >= 2) break;
+            }
+            if (resolvedResults.length > 0) {
+              console.log(`[offline] YOLO HIT: ${resolvedResults.map((r) => r.itemName).join(" + ")}`);
+              handleMultiClassificationResults(resolvedResults, resolvedResults.map(() => undefined));
               return;
             }
 
@@ -829,35 +849,57 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
       result: ClassificationResponse & { requestId?: string },
       requestId: string | undefined,
     ) {
-      if (
-        result.itemName.toLowerCase() === "nothing detected" ||
-        result.confidence === 0
-      ) {
+      handleMultiClassificationResults([result], [requestId ?? result.requestId]);
+    }
+
+    function handleMultiClassificationResults(
+      results: (ClassificationResponse & { requestId?: string })[],
+      requestIds: (string | undefined)[],
+    ) {
+      // Filter out "nothing detected" results
+      const valid = results.filter(
+        (r) => r.itemName.toLowerCase() !== "nothing detected" && r.confidence !== 0
+      );
+
+      if (valid.length === 0) {
         nothingDetectedCountRef.current++;
-        // Clear pending-item flag so the same persistent object doesn't
-        // immediately re-trigger classification via the cooldown fast path.
         pendingItemRef.current = false;
-        // Boost BG adaptation to absorb whatever triggered the false detection
-        analyzerRef.current?.boostBackgroundAdaptation();
-        cooldownStartRef.current = Date.now();
-        transition("cooldown");
+        setStableResults([{
+          itemName: "nothing_detected",
+          wasteStream: "landfill",
+          confidence: 0,
+          reasoning: "",
+          binColor: "#525252",
+          binLabel: "",
+          needsReview: false,
+          isCompound: false,
+        }]);
+        setResultRequestIds([]);
+        setError(null);
+        goneCountRef.current = 0;
+        resultEnterTimeRef.current = Date.now();
+        transition("result");
         inFlightRef.current = false;
         return;
       }
 
       // Successful classification — reset the nothing-detected counter
       nothingDetectedCountRef.current = 0;
-      setStableResult(result);
-      setResultRequestId(requestId ?? result.requestId);
+      setStableResults(valid);
+      setResultRequestIds(
+        valid.map((r, i) => requestIds[results.indexOf(r)] ?? r.requestId)
+      );
       setError(null);
       goneCountRef.current = 0;
       resultEnterTimeRef.current = Date.now();
       transition("result");
 
-      const cacheKey = `${result.itemName}::${result.wasteStream}`;
-      if (cacheKey !== lastCachedRef.current) {
-        cacheResult(result, localeRef.current);
-        lastCachedRef.current = cacheKey;
+      for (const result of valid) {
+        const cacheKey = `${result.itemName}::${result.wasteStream}`;
+        if (cacheKey !== lastCachedRef.current) {
+          cacheResult(result, localeRef.current);
+          lastCachedRef.current = cacheKey;
+        }
       }
       inFlightRef.current = false;
     }
@@ -937,7 +979,7 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
   }, [classify, transition, T]);
 
   const handleFeedbackGiven = useCallback(() => {
-    setStableResult(null); setResultRequestId(undefined);
+    setStableResults([]); setResultRequestIds([]);
     cooldownStartRef.current = Date.now();
     transition("cooldown");
   }, [transition]);
@@ -997,10 +1039,10 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
         />
       )}
 
-      {uiScreen === "result" && stableResult && (
+      {uiScreen === "result" && stableResults.length > 0 && (
         <ResultScreen
-          result={stableResult}
-          requestId={resultRequestId}
+          results={stableResults}
+          requestIds={resultRequestIds}
           locale={locale}
           onFeedbackGiven={handleFeedbackGiven}
           onToggleLocale={toggleLocale}

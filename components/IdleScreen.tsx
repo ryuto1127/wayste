@@ -66,9 +66,10 @@ export default function IdleScreen({
   const roiInsetPct = `${detectionRoiMargin * 100}%`;
 
   return (
-    <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-neutral-950 px-6 py-8 select-none animate-[fadeIn_0.3s_ease-out]">
+    <div className="absolute inset-0 z-20 flex flex-col items-center justify-center px-6 py-8 select-none animate-[fadeIn_0.3s_ease-out]">
+
       {/* Top-right controls: voice toggle + language toggle */}
-      <div className="absolute top-6 right-6 flex items-center gap-3">
+      <div className="absolute top-6 right-6 flex items-center gap-3 z-10">
         <button
           onClick={onToggleVoice}
           className={`px-3 py-1.5 text-xs font-medium transition-colors rounded-lg ${
@@ -90,14 +91,14 @@ export default function IdleScreen({
       </div>
 
       {/* Branding */}
-      <div className="mb-4 text-center">
+      <div className="relative z-10 mb-4 text-center">
         <h1 className="text-2xl font-bold text-white tracking-tight">
           ♻️ Recycling Buddy
         </h1>
       </div>
 
       {/* Stats card */}
-      <div className="bg-neutral-800/50 rounded-2xl px-8 py-5 mb-5 min-w-[280px] text-center">
+      <div className="relative z-10 bg-neutral-800/50 rounded-2xl px-8 py-5 mb-5 min-w-[280px] text-center">
         {hasData ? (
           <>
             <div className="text-xs font-semibold uppercase tracking-widest text-neutral-500 mb-3">
@@ -138,12 +139,13 @@ export default function IdleScreen({
         )}
       </div>
 
-      {/* Camera viewfinder with ROI guide */}
-      <div className="relative w-full max-w-md aspect-square rounded-2xl overflow-hidden mb-5">
-        {/* Live camera feed — visible through the component tree.
-            The parent KioskDisplay renders <CameraFeed> behind all overlays.
-            We punch a transparent window here so it shows through. */}
-        <div className="absolute inset-0 bg-transparent" />
+      {/* Camera viewfinder with ROI guide.
+          The massive box-shadow darkens everything outside the viewfinder
+          so the live camera feed (behind this overlay) only shows through here. */}
+      <div
+        className="relative w-full max-w-md aspect-square rounded-2xl overflow-hidden mb-5"
+        style={{ boxShadow: "0 0 0 9999px rgba(10, 10, 10, 0.95)" }}
+      >
 
         {/* Dark vignette overlay outside the ROI — outer zone is dimmed so
             the user can see their hand/item but attention is drawn to the
@@ -210,13 +212,13 @@ export default function IdleScreen({
       </div>
 
       {/* CTA text */}
-      <p className="text-lg text-neutral-300 font-medium text-center mb-4">
+      <p className="relative z-10 text-lg text-neutral-300 font-medium text-center mb-4">
         {T("holdItemUp")}
       </p>
 
       {/* Sorting tip */}
       {tips.length > 0 && (
-        <div className="max-w-md text-center min-h-[48px] flex items-center justify-center">
+        <div className="relative z-10 max-w-md text-center min-h-[48px] flex items-center justify-center">
           <div
             key={tipIndex}
             className="animate-[fadeIn_0.5s_ease-out]"

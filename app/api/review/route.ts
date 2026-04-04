@@ -144,6 +144,51 @@ export async function GET(request: Request) {
   }
 }
 
+// ── DELETE: remove a single pilot-log entry by requestId ──
+
+export async function DELETE(request: Request) {
+  const denied = requireApiKey(request);
+  if (denied) return denied;
+
+  const { searchParams } = new URL(request.url);
+  const requestId = searchParams.get("requestId");
+  if (!requestId) {
+    return NextResponse.json({ error: "requestId is required." }, { status: 400 });
+  }
+
+  try {
+    // Find the entry in the pilot log list by scanning for the matching requestId
+    const allRaw = await redis.lrange(KEYS.pilotLog, 0, -1);
+    let removed = false;
+    for (const item of allRaw) {
+      try {
+        const entry = (typeof item === "string" ? JSON.parse(item) : item) as PilotLogEntry;
+        if (entry.requestId === requestId) {
+          // LREM removes the first occurrence of the exact value
+          const raw = typeof item === "string" ? item : JSON.stringify(item);
+          await redis.lrem(KEYS.pilotLog, 1, raw);
+          removed = true;
+          break;
+        }
+      } catch {
+        // skip malformed
+      }
+    }
+
+    // Also clean up associated verdict/stream/name hashes
+    await Promise.all([
+      redis.hdel(VERDICTS_KEY, requestId),
+      redis.hdel(VERDICT_STREAMS_KEY, requestId),
+      redis.hdel(VERDICT_NAMES_KEY, requestId),
+    ]);
+
+    return NextResponse.json({ deleted: removed });
+  } catch (err) {
+    console.error("[review] DELETE failed:", err);
+    return NextResponse.json({ error: "Failed to delete entry." }, { status: 500 });
+  }
+}
+
 const CorrectionSchema = z.object({
   id: z.string(),
   actualStream:   z.string().optional(),

@@ -123,6 +123,20 @@ function FullReviewPage() {
     }
   }, []);
 
+  const deleteEntry = useCallback(async (requestId: string) => {
+    setSaving(requestId);
+    try {
+      await fetch(`/api/review?requestId=${encodeURIComponent(requestId)}`, {
+        method: "DELETE",
+      });
+      setEntries((prev) => prev.filter((e) => e.requestId !== requestId));
+    } catch {
+      // silent
+    } finally {
+      setSaving(null);
+    }
+  }, []);
+
   const reviewed = entries.filter((e) => e.verdict !== null).length;
   const pending = entries.length - reviewed;
 
@@ -239,6 +253,7 @@ function FullReviewPage() {
                 saving={saving === entry.requestId}
                 onVerdict={submitVerdict}
                 onItemName={submitItemName}
+                onDelete={deleteEntry}
                 knownNames={knownNames}
                 locale={locale}
                 T={T}
@@ -256,6 +271,7 @@ function FullEntryCard({
   saving,
   onVerdict,
   onItemName,
+  onDelete,
   knownNames,
   locale,
   T,
@@ -264,12 +280,14 @@ function FullEntryCard({
   saving: boolean;
   onVerdict: (requestId: string, verdict: Verdict, stream?: string) => void;
   onItemName: (requestId: string, correctedItemName: string) => void;
+  onDelete: (requestId: string) => void;
   knownNames: string[];
   locale: Locale;
   T: (key: Parameters<typeof t>[1]) => string;
 }) {
   const [showStreamPicker, setShowStreamPicker] = useState(false);
   const [editingName, setEditingName] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [nameInput, setNameInput] = useState(entry.correctedItemName ?? entry.itemName);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const suggestionsRef = useRef<HTMLDivElement>(null);
@@ -480,6 +498,36 @@ function FullEntryCard({
             </button>
           </div>
         </div>
+      )}
+
+      {/* Delete button */}
+      {entry.requestId && (
+        confirmingDelete ? (
+          <div className="flex items-center gap-2 mt-1">
+            <span className="text-xs text-red-400">{T("confirmDelete")}</span>
+            <button
+              onClick={() => { onDelete(entry.requestId!); setConfirmingDelete(false); }}
+              disabled={saving}
+              className="px-3 py-1 rounded-lg text-xs font-medium bg-red-700 hover:bg-red-600 text-white disabled:opacity-40"
+            >
+              {T("deleteEntry")}
+            </button>
+            <button
+              onClick={() => setConfirmingDelete(false)}
+              className="px-3 py-1 rounded-lg text-xs font-medium bg-neutral-800 hover:bg-neutral-700 text-neutral-400"
+            >
+              {T("cancel")}
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={() => setConfirmingDelete(true)}
+            disabled={saving}
+            className="self-end text-[11px] text-neutral-600 hover:text-red-400 transition-colors disabled:opacity-40"
+          >
+            {T("deleteEntry")}
+          </button>
+        )
       )}
     </div>
   );

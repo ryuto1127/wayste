@@ -42,6 +42,8 @@ const translations = {
     confidenceLowDesc: "Please verify with staff",
     note: "Note",
     showOneItem: "Show one item at a time",
+    multipleItemsDetected: "Multiple items detected",
+    itemNumber: "Item {n}",
 
     // Feedback
     correct: "Correct",
@@ -124,6 +126,8 @@ const translations = {
 
     // Result screen
     putThisInBin: "Put this in the",
+    nothingDetectedTitle: "Nothing Detected",
+    nothingDetectedDesc: "The system could not identify an item. Please remove the object and try again.",
 
     // Full review page
     fullReview: "Full Review",
@@ -141,6 +145,8 @@ const translations = {
     selectCorrectStream: "Select the correct bin:",
     editItemName: "Correct item name:",
     saveItemName: "Save",
+    deleteEntry: "Delete",
+    confirmDelete: "Delete this entry?",
 
     // Voice guidance
     voiceOn: "Sound On",
@@ -199,6 +205,8 @@ const translations = {
     confidenceLowDesc: "スタッフに確認を",
     note: "備考",
     showOneItem: "アイテムを1つずつ見せてください",
+    multipleItemsDetected: "複数のアイテムを検出しました",
+    itemNumber: "アイテム {n}",
 
     correct: "正しい",
     wrong: "間違い",
@@ -278,6 +286,8 @@ const translations = {
 
     // Result screen
     putThisInBin: "こちらへ捨ててください：",
+    nothingDetectedTitle: "検出できませんでした",
+    nothingDetectedDesc: "アイテムを識別できませんでした。アイテムを取り除いてもう一度お試しください。",
 
     // Full review page
     fullReview: "全件レビュー",
@@ -295,6 +305,8 @@ const translations = {
     selectCorrectStream: "正しいゴミ箱を選択：",
     editItemName: "正しいアイテム名：",
     saveItemName: "保存",
+    deleteEntry: "削除",
+    confirmDelete: "このエントリーを削除しますか？",
 
     // Voice guidance
     voiceOn: "音声オン",

@@ -138,28 +138,30 @@ export default function IdleScreen({
         )}
       </div>
 
-      {/* Camera preview with ROI guide */}
-      <div className="relative w-full max-w-sm aspect-square rounded-2xl overflow-hidden mb-5">
+      {/* Camera viewfinder with ROI guide */}
+      <div className="relative w-full max-w-md aspect-square rounded-2xl overflow-hidden mb-5">
         {/* Live camera feed — visible through the component tree.
             The parent KioskDisplay renders <CameraFeed> behind all overlays.
             We punch a transparent window here so it shows through. */}
         <div className="absolute inset-0 bg-transparent" />
 
-        {/* Dark vignette overlay outside the ROI — guides attention inward */}
+        {/* Dark vignette overlay outside the ROI — outer zone is dimmed so
+            the user can see their hand/item but attention is drawn to the
+            brighter ROI center. */}
         <div className="absolute inset-0 pointer-events-none">
           {/* Top strip */}
           <div
-            className="absolute top-0 left-0 right-0 bg-neutral-950/60"
+            className="absolute top-0 left-0 right-0 bg-neutral-950/55"
             style={{ height: roiInsetPct }}
           />
           {/* Bottom strip */}
           <div
-            className="absolute bottom-0 left-0 right-0 bg-neutral-950/60"
+            className="absolute bottom-0 left-0 right-0 bg-neutral-950/55"
             style={{ height: roiInsetPct }}
           />
           {/* Left strip (between top and bottom) */}
           <div
-            className="absolute bg-neutral-950/60"
+            className="absolute bg-neutral-950/55"
             style={{
               top: roiInsetPct,
               bottom: roiInsetPct,
@@ -169,7 +171,7 @@ export default function IdleScreen({
           />
           {/* Right strip (between top and bottom) */}
           <div
-            className="absolute bg-neutral-950/60"
+            className="absolute bg-neutral-950/55"
             style={{
               top: roiInsetPct,
               bottom: roiInsetPct,
@@ -179,15 +181,24 @@ export default function IdleScreen({
           />
         </div>
 
-        {/* ROI corner markers */}
+        {/* ROI boundary — thin continuous border + glow pulse */}
+        <div
+          className="absolute pointer-events-none rounded-xl border border-white/20"
+          style={{
+            inset: roiInsetPct,
+            animation: "roiGlow 3s ease-in-out infinite",
+          }}
+        />
+
+        {/* ROI corner brackets — larger and bolder for visibility */}
         <div
           className="absolute pointer-events-none"
           style={{ inset: roiInsetPct }}
         >
-          <div className="absolute top-0 left-0 w-8 h-8 border-t-2 border-l-2 rounded-tl-lg border-white/50" />
-          <div className="absolute top-0 right-0 w-8 h-8 border-t-2 border-r-2 rounded-tr-lg border-white/50" />
-          <div className="absolute bottom-0 left-0 w-8 h-8 border-b-2 border-l-2 rounded-bl-lg border-white/50" />
-          <div className="absolute bottom-0 right-0 w-8 h-8 border-b-2 border-r-2 rounded-br-lg border-white/50" />
+          <div className="absolute top-0 left-0 w-10 h-10 border-t-[3px] border-l-[3px] rounded-tl-xl border-white/70" />
+          <div className="absolute top-0 right-0 w-10 h-10 border-t-[3px] border-r-[3px] rounded-tr-xl border-white/70" />
+          <div className="absolute bottom-0 left-0 w-10 h-10 border-b-[3px] border-l-[3px] rounded-bl-xl border-white/70" />
+          <div className="absolute bottom-0 right-0 w-10 h-10 border-b-[3px] border-r-[3px] rounded-br-xl border-white/70" />
         </div>
 
         {/* Pulsing hand icon in the center */}

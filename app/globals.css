@@ -35,6 +35,15 @@ body {
   }
 }
 
+@keyframes roiGlow {
+  0%, 100% {
+    box-shadow: 0 0 12px 2px rgba(255, 255, 255, 0.08);
+  }
+  50% {
+    box-shadow: 0 0 24px 4px rgba(255, 255, 255, 0.18);
+  }
+}
+
 /* Prevent text selection on kiosk displays */
 .select-none {
   -webkit-user-select: none;

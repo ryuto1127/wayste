@@ -134,24 +134,19 @@ export async function runYoloWorldInference(
   if (!session || !ort) return [];
 
   try {
-    // Direct center 640×640 crop — 1:1 pixel mapping, no resize/distortion.
+    // Crop center short-side square (e.g. 720×720 from 1280×720),
+    // resize into the model's 640×640 input.
     const vw = video.videoWidth;
     const vh = video.videoHeight;
+    const side = Math.min(vw, vh);
+    const roiX = Math.round((vw - side) / 2);
+    const roiY = Math.round((vh - side) / 2);
 
     const canvas = new OffscreenCanvas(MODEL_INPUT_SIZE, MODEL_INPUT_SIZE);
     const ctx = canvas.getContext("2d");
     if (!ctx) return [];
 
-    if (vw >= MODEL_INPUT_SIZE && vh >= MODEL_INPUT_SIZE) {
-      const roiX = Math.round((vw - MODEL_INPUT_SIZE) / 2);
-      const roiY = Math.round((vh - MODEL_INPUT_SIZE) / 2);
-      ctx.drawImage(video, roiX, roiY, MODEL_INPUT_SIZE, MODEL_INPUT_SIZE, 0, 0, MODEL_INPUT_SIZE, MODEL_INPUT_SIZE);
-    } else {
-      const side = Math.min(vw, vh);
-      const roiX = Math.round((vw - side) / 2);
-      const roiY = Math.round((vh - side) / 2);
-      ctx.drawImage(video, roiX, roiY, side, side, 0, 0, MODEL_INPUT_SIZE, MODEL_INPUT_SIZE);
-    }
+    ctx.drawImage(video, roiX, roiY, side, side, 0, 0, MODEL_INPUT_SIZE, MODEL_INPUT_SIZE);
 
     const imageData = ctx.getImageData(0, 0, MODEL_INPUT_SIZE, MODEL_INPUT_SIZE);
     const { data } = imageData;

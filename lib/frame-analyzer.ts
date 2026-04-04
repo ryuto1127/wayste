@@ -8,18 +8,17 @@
 
 import type { FrameAnalysis, ImageQuality } from "./types";
 
-// ── Analysis resolution (square — matches YOLO's 640×640 center crop) ──
-// The analysis canvas draws from the center square of the video frame,
-// so its coordinate space is aligned with what YOLO sees.
+// ── Analysis resolution (square — matches YOLO's short-side center crop) ──
+// The analysis canvas draws from the same center square as YOLO (short-side
+// based, e.g. 720×720 from 1280×720), downsampled to 120×120.
 const AW = 120;
 const AH = 120;
 const PIXEL_COUNT = AW * AH;
 
-// ── Central ROI: center 60% × 60% of the square analysis canvas ──
+// ── Central ROI: center 60% × 60% of the analysis canvas ──
 // Only foreground within this zone is used for idle→object_detected decisions.
 // Edge noise, vibration, and peripheral lighting changes are ignored.
-// 60% balances detection coverage (~432×432 in real frame) with edge-noise rejection,
-// and fits well inside the YOLO 640×640 crop with margin to spare.
+// 60% = 432×432 of the 720×720 capture crop (20% inset on each side).
 const ROI_X0 = Math.round(AW * 0.20); // 24
 const ROI_X1 = Math.round(AW * 0.80); // 96
 const ROI_Y0 = Math.round(AH * 0.20); // 24
@@ -110,9 +109,8 @@ export class FrameAnalyzer {
     }
     const ctx = this.ctx!;
 
-    // Draw center square of frame into the square analysis canvas.
-    // For 1280×720 input: crops center 720×720, draws to 120×120.
-    // This aligns with YOLO's center 640×640 crop — same region, same aspect ratio.
+    // Draw the same center short-side square that YOLO sees into the 120×120 canvas.
+    // For 1280×720 input: crops center 720×720 (sx=280, sy=0).
     const vw = video.videoWidth;
     const vh = video.videoHeight;
     const side = Math.min(vw, vh);

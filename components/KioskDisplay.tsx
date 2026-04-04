@@ -66,11 +66,9 @@ const BG_RATE_RESULT = 0.001;
 // object_detected / classifying: frozen — never absorb the held object
 const BG_RATE_FROZEN = 0;
 
-// ── Capture ROI (fraction of frame, applied to image capture) ──
-const CAPTURE_ROI_MARGIN = 0.15; // 15% margin on each side → 70% of frame sent to model
-// ── Detection ROI margin (matches frame-analyzer: 20% inset of center square) ──
-// frame-analyzer draws from the center square of the frame (short-side based),
-// then applies 20% inset → detection ROI = center 60% of that square.
+// ── Detection ROI margin (fraction of the short-side square capture crop) ──
+// frame-analyzer crops the same center square as YOLO (e.g. 720×720 from
+// 1280×720), then applies this inset → detection ROI = center 60% (432×432).
 const DETECTION_ROI_MARGIN = 0.20;
 
 // ── Entry coherence gate ──
@@ -502,21 +500,18 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
       detections: YoloDetection[],
       latencyMs: number,
     ) {
-      // Capture and upload image for the log
+      // Capture the same center short-side square that YOLO sees (e.g. 720×720
+      // from 1280×720). Log images preserve full resolution for fine-tuning.
       const vw = video.videoWidth;
       const vh = video.videoHeight;
-      const roiX = Math.round(vw * CAPTURE_ROI_MARGIN);
-      const roiY = Math.round(vh * CAPTURE_ROI_MARGIN);
-      const roiW = Math.round(vw * (1 - CAPTURE_ROI_MARGIN * 2));
-      const roiH = Math.round(vh * (1 - CAPTURE_ROI_MARGIN * 2));
-      const scale = Math.min(1, 768 / Math.max(roiW, roiH));
-      const outW = Math.round(roiW * scale);
-      const outH = Math.round(roiH * scale);
+      const side = Math.min(vw, vh);
+      const roiX = Math.round((vw - side) / 2);
+      const roiY = Math.round((vh - side) / 2);
 
-      const canvas = new OffscreenCanvas(outW, outH);
+      const canvas = new OffscreenCanvas(side, side);
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
-      ctx.drawImage(video, roiX, roiY, roiW, roiH, 0, 0, outW, outH);
+      ctx.drawImage(video, roiX, roiY, side, side, 0, 0, side, side);
 
       canvas.convertToBlob({ type: "image/jpeg", quality: 0.82 }).then((blob) => {
         const reader = new FileReader();
@@ -588,7 +583,7 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
 
       // ── Tier 1: On-demand YOLO detection ──
       const yoloStart = Date.now();
-      backend.detect(video, CAPTURE_ROI_MARGIN)
+      backend.detect(video)
         .then((detections) => {
           const yoloMs = Date.now() - yoloStart;
 
@@ -680,7 +675,7 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
 
       const worldStart = Date.now();
 
-      backend.detectWorld(video, CAPTURE_ROI_MARGIN)
+      backend.detectWorld(video)
         .then((worldDetections) => {
           const worldMs = Date.now() - worldStart;
 
@@ -744,7 +739,7 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
         return;
       }
 
-      backend.detect(video, CAPTURE_ROI_MARGIN)
+      backend.detect(video)
         .then((detections) => {
           if (detections.length > 0) {
             const best = detections[0];
@@ -757,7 +752,7 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
 
             // Try YOLO World offline
             if (backend.isYoloWorldReady()) {
-              backend.detectWorld(video, CAPTURE_ROI_MARGIN)
+              backend.detectWorld(video)
                 .then((worldDets) => {
                   if (worldDets.length > 0) {
                     const worldResult = resolveYoloWorldDetection(worldDets[0], siteConfigRef.current!);
@@ -887,23 +882,19 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
       signal?: AbortSignal,
       yoloDetections?: YoloDetectionLog[],
     ): Promise<{ result: (ClassificationResponse & { requestId?: string }) | null; requestId?: string }> {
+      // Send the same center short-side square that YOLO sees to the API.
       const procStart = Date.now();
       const vw = video.videoWidth;
       const vh = video.videoHeight;
-      const roiX = Math.round(vw * CAPTURE_ROI_MARGIN);
-      const roiY = Math.round(vh * CAPTURE_ROI_MARGIN);
-      const roiW = Math.round(vw * (1 - CAPTURE_ROI_MARGIN * 2));
-      const roiH = Math.round(vh * (1 - CAPTURE_ROI_MARGIN * 2));
+      const side = Math.min(vw, vh);
+      const roiX = Math.round((vw - side) / 2);
+      const roiY = Math.round((vh - side) / 2);
 
-      const scale = Math.min(1, 768 / Math.max(roiW, roiH));
-      const outW = Math.round(roiW * scale);
-      const outH = Math.round(roiH * scale);
-
-      const cropCanvas = new OffscreenCanvas(outW, outH);
+      const cropCanvas = new OffscreenCanvas(side, side);
       const cropCtx = cropCanvas.getContext("2d");
       if (!cropCtx) return { result: null };
 
-      cropCtx.drawImage(video, roiX, roiY, roiW, roiH, 0, 0, outW, outH);
+      cropCtx.drawImage(video, roiX, roiY, side, side, 0, 0, side, side);
       const cropMs = Date.now() - procStart;
 
       if (signal?.aborted) throw new DOMException("Aborted", "AbortError");

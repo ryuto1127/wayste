@@ -121,30 +121,21 @@ export async function runYoloInference(
   if (!session || !ort) return [];
 
   try {
-    // ── Preprocess: crop center 640×640, no resize ──
-    // Directly cut a 640×640 square from the frame center for 1:1 pixel
-    // mapping into the model — zero interpolation, zero distortion.
-    // Falls back to aspect-preserving resize only if the frame is smaller
-    // than 640 in either dimension.
+    // ── Preprocess: crop center short-side square, resize to 640×640 ──
+    // Crop the largest centered square (short-side based, e.g. 720×720 from
+    // 1280×720) and resize into the model's 640×640 input. This maximises
+    // the field of view while keeping the aspect ratio square.
     const vw = video.videoWidth;
     const vh = video.videoHeight;
+    const side = Math.min(vw, vh);
+    const roiX = Math.round((vw - side) / 2);
+    const roiY = Math.round((vh - side) / 2);
 
     const canvas = new OffscreenCanvas(MODEL_INPUT_SIZE, MODEL_INPUT_SIZE);
     const ctx = canvas.getContext("2d");
     if (!ctx) return [];
 
-    if (vw >= MODEL_INPUT_SIZE && vh >= MODEL_INPUT_SIZE) {
-      // Direct 1:1 crop — no resizing needed
-      const roiX = Math.round((vw - MODEL_INPUT_SIZE) / 2);
-      const roiY = Math.round((vh - MODEL_INPUT_SIZE) / 2);
-      ctx.drawImage(video, roiX, roiY, MODEL_INPUT_SIZE, MODEL_INPUT_SIZE, 0, 0, MODEL_INPUT_SIZE, MODEL_INPUT_SIZE);
-    } else {
-      // Fallback: frame too small — scale up preserving aspect ratio
-      const side = Math.min(vw, vh);
-      const roiX = Math.round((vw - side) / 2);
-      const roiY = Math.round((vh - side) / 2);
-      ctx.drawImage(video, roiX, roiY, side, side, 0, 0, MODEL_INPUT_SIZE, MODEL_INPUT_SIZE);
-    }
+    ctx.drawImage(video, roiX, roiY, side, side, 0, 0, MODEL_INPUT_SIZE, MODEL_INPUT_SIZE);
 
     const imageData = ctx.getImageData(0, 0, MODEL_INPUT_SIZE, MODEL_INPUT_SIZE);
     const { data } = imageData;

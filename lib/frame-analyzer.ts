@@ -34,8 +34,8 @@ const FG_PIXEL_THRESHOLD = 40; // per-pixel diff threshold for foreground classi
 // ── Thresholds (exported for state machine) ──
 /**
  * Total ROI foreground threshold (erosion-filtered).
- * ≥9% of the central ROI must be occupied by noise-suppressed foreground.
- * ~760 pixels after the ≥2-neighbor erosion pass.
+ * ≥6% of the central ROI must be occupied by noise-suppressed foreground.
+ * ~288 pixels after the ≥2-neighbor erosion pass (4800 × 0.06).
  * Paired with ROI_BLOB_THRESHOLD in KioskDisplay for coherence gating.
  */
 export const ROI_FG_THRESHOLD = 0.06;

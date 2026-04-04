@@ -35,8 +35,8 @@ import ResultScreen from "./ResultScreen";
 // ── Timing constants ──
 const ANALYSIS_INTERVAL_MS = 30;  // ~33 fps local CV
 const COOLDOWN_MS = 1500; // pause before re-scanning (BG model recovery)
-const OBJECT_GONE_FRAMES = 3;     // frames below ROI threshold before "gone" (~150ms at 20fps)
-const FG_PERSIST_FRAMES = 3;      // consecutive ROI-blob frames required to leave idle (~150ms at 20fps)
+const OBJECT_GONE_FRAMES = 3;     // frames below ROI threshold before "gone" (~90ms at 33fps)
+const FG_PERSIST_FRAMES = 3;      // consecutive ROI-blob frames required to leave idle (~90ms at 33fps)
 /**
  * Consecutive frames in idle with both foreground presence AND acceptable
  * image quality (not "poor") required to trigger classification.

@@ -10,7 +10,6 @@ export type PipelineState =
 
 // ── Frame analysis (client-side CV output) ──
 export interface FrameAnalysis {
-  foregroundRatio: number;
   /** Noise-suppressed foreground ratio within the central ROI only (erosion-filtered). */
   roiForegroundRatio: number;
   /**
@@ -33,7 +32,6 @@ export interface FrameAnalysis {
    *   bottle / cup     → 0.20 – 0.50
    */
   roiLargestBlobDiagonalRatio: number;
-  motionScore: number;
   skinRatio: number;
   sharpnessScore: number;
   /** False during the startup convergence window — detection is blocked until the background model has settled. */

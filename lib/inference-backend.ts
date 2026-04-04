@@ -1,11 +1,10 @@
 /**
  * Inference backend abstraction layer — Tiered Detection Pipeline.
  *
- * Three tiers, each progressively heavier:
+ * Three tiers, each progressively heavier (all on-demand):
  *
- *   1. **YOLO26n (always-on)** — Runs continuously in the background, buffering
- *      the latest detection. When classification triggers, the result is available
- *      instantly (zero latency). Paused during YOLO World inference to free CPU.
+ *   1. **YOLO26n (on-demand)** — Runs when classification triggers.
+ *      High confidence + rule match → instant result (Tier 1).
  *
  *   2. **YOLO World (on-demand fallback)** — Open-vocabulary detector with
  *      pre-baked recycling classes. Runs when YOLO26n confidence is low or it
@@ -51,20 +50,6 @@ export interface InferenceBackend {
     confidenceThreshold?: number,
   ): Promise<YoloDetection[]>;
 
-  // ── Always-on YOLO loop ──
-  /** Start continuous YOLO detection loop, buffering the latest result. */
-  startContinuous(video: HTMLVideoElement, roiMargin?: number): void;
-  /** Stop the continuous detection loop. */
-  stopContinuous(): void;
-  /** Pause the continuous loop (e.g., during YOLO World inference). */
-  pauseContinuous(): void;
-  /** Resume the continuous loop after pause. */
-  resumeContinuous(): void;
-  /** Get the latest buffered detection from the continuous loop. */
-  getLatestDetections(): YoloDetection[];
-  /** Whether the continuous loop is currently running (not paused). */
-  isContinuousRunning(): boolean;
-
   // ── YOLO World ──
   /** Initialize YOLO World model (lazy — only loads when first needed). */
   initYoloWorld(): Promise<boolean>;
@@ -83,15 +68,6 @@ export interface InferenceBackend {
 class OnnxBackend implements InferenceBackend {
   private yolo: typeof import("./yolo-inference") | null = null;
   private yoloWorld: typeof import("./yolo-world-inference") | null = null;
-
-  // Continuous loop state
-  private continuousTimer: ReturnType<typeof setTimeout> | null = null;
-  private continuousPaused = false;
-  private latestDetections: YoloDetection[] = [];
-  private continuousVideo: HTMLVideoElement | null = null;
-  private continuousRoiMargin = 0.15;
-  /** Continuous loop interval — run YOLO every ~75ms (~13fps). */
-  private static readonly CONTINUOUS_INTERVAL_MS = 75;
 
   async init(): Promise<boolean> {
     this.yolo = await import("./yolo-inference");
@@ -112,82 +88,6 @@ class OnnxBackend implements InferenceBackend {
   ): Promise<YoloDetection[]> {
     if (!this.yolo) return [];
     return this.yolo.runYoloInference(video, roiMargin, minBoxArea, confidenceThreshold);
-  }
-
-  // ── Continuous YOLO loop ──
-
-  startContinuous(video: HTMLVideoElement, roiMargin = 0.15): void {
-    if (this.continuousTimer) return; // Already running
-    this.continuousVideo = video;
-    this.continuousRoiMargin = roiMargin;
-    this.continuousPaused = false;
-    this.scheduleNext();
-    console.log("[inference] Continuous YOLO loop started");
-  }
-
-  stopContinuous(): void {
-    if (this.continuousTimer) {
-      clearTimeout(this.continuousTimer);
-      this.continuousTimer = null;
-    }
-    this.continuousVideo = null;
-    this.latestDetections = [];
-    console.log("[inference] Continuous YOLO loop stopped");
-  }
-
-  pauseContinuous(): void {
-    this.continuousPaused = true;
-    if (this.continuousTimer) {
-      clearTimeout(this.continuousTimer);
-      this.continuousTimer = null;
-    }
-    // Clear buffered detections so stale results from the previous item
-    // don't trigger the YOLO fast gate when the loop resumes.
-    this.latestDetections = [];
-    console.log("[inference] Continuous YOLO loop paused");
-  }
-
-  resumeContinuous(): void {
-    if (!this.continuousPaused) return;
-    this.continuousPaused = false;
-    this.scheduleNext();
-    console.log("[inference] Continuous YOLO loop resumed");
-  }
-
-  getLatestDetections(): YoloDetection[] {
-    return this.latestDetections;
-  }
-
-  isContinuousRunning(): boolean {
-    return this.continuousTimer !== null && !this.continuousPaused;
-  }
-
-  private scheduleNext(): void {
-    if (this.continuousPaused) return;
-    this.continuousTimer = setTimeout(() => this.runContinuousTick(), OnnxBackend.CONTINUOUS_INTERVAL_MS);
-  }
-
-  private async runContinuousTick(): Promise<void> {
-    if (this.continuousPaused || !this.continuousVideo || !this.yolo) {
-      if (!this.continuousPaused) this.scheduleNext();
-      return;
-    }
-
-    try {
-      // Use a lower confidence threshold for buffered detections —
-      // the tiered pipeline will decide what to do based on confidence.
-      const detections = await this.yolo.runYoloInference(
-        this.continuousVideo,
-        this.continuousRoiMargin,
-        5000,
-        0.25, // Low threshold — capture everything, filter later
-      );
-      this.latestDetections = detections;
-    } catch {
-      // Non-fatal — next tick will retry
-    }
-
-    this.scheduleNext();
   }
 
   // ── YOLO World ──
@@ -286,13 +186,7 @@ class HttpBackend implements InferenceBackend {
     }
   }
 
-  // HTTP backend doesn't support continuous mode or YOLO World
-  startContinuous(): void {}
-  stopContinuous(): void {}
-  pauseContinuous(): void {}
-  resumeContinuous(): void {}
-  getLatestDetections(): YoloDetection[] { return []; }
-  isContinuousRunning(): boolean { return false; }
+  // HTTP backend doesn't support YOLO World
   async initYoloWorld(): Promise<boolean> { return false; }
   isYoloWorldReady(): boolean { return false; }
   async detectWorld(): Promise<YoloDetection[]> { return []; }

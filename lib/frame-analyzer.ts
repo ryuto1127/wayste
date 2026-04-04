@@ -2,8 +2,8 @@
  * Client-side computer vision for local foreground detection,
  * stability analysis, hand-occlusion estimation, and sharpness scoring.
  *
- * Operates on a downscaled grayscale copy of the camera feed.
- * No frames are sent over the network — all processing is local.
+ * All processing is limited to the central ROI (~6,912 pixels at 160×120)
+ * for performance. No frames are sent over the network.
  */
 
 import type { FrameAnalysis, ImageQuality } from "./types";
@@ -20,7 +20,9 @@ const ROI_X0 = Math.round(AW * 0.20); // 32
 const ROI_X1 = Math.round(AW * 0.80); // 128
 const ROI_Y0 = Math.round(AH * 0.20); // 24
 const ROI_Y1 = Math.round(AH * 0.80); // 96
-const ROI_PIXEL_COUNT = (ROI_X1 - ROI_X0) * (ROI_Y1 - ROI_Y0); // 6912
+const ROI_W = ROI_X1 - ROI_X0;        // 96
+const ROI_H = ROI_Y1 - ROI_Y0;        // 72
+const ROI_PIXEL_COUNT = ROI_W * ROI_H; // 6912
 
 // ── Background subtraction ──
 const BG_LEARN_RATE = 0.015; // absorbs camera drift in ~10s; BG continues during confirm window to erode noise
@@ -37,10 +39,8 @@ const FG_PIXEL_THRESHOLD = 40; // per-pixel diff threshold for foreground classi
  * Paired with ROI_BLOB_THRESHOLD in KioskDisplay for coherence gating.
  */
 export const ROI_FG_THRESHOLD = 0.06;
-export const MOTION_RATIO_THRESHOLD = 0.12; // <12% inter-frame change → stable (forgiving of natural hand sway while holding item)
+export const MOTION_RATIO_THRESHOLD = 0.12; // kept for external consumers
 export const MAX_SKIN_RATIO = 0.80; // >80% skin in foreground → too much hand
-
-const MOTION_PIXEL_THRESHOLD = 35;
 
 /** Convert RGB (0-255) to HSV where H is 0-360, S is 0-1, V is 0-1. */
 function rgbToHsv(r: number, g: number, b: number): [number, number, number] {
@@ -110,25 +110,36 @@ export class FrameAnalyzer {
     ctx.drawImage(video, 0, 0, AW, AH);
     const { data: px } = ctx.getImageData(0, 0, AW, AH);
 
-    // ── Convert to grayscale ──
-    const gray = new Uint8Array(PIXEL_COUNT);
+    // ── Compute full-frame mean luminance (cheap — needed for adaptive BG rate) ──
+    let lumSum = 0;
     for (let i = 0; i < PIXEL_COUNT; i++) {
       const o = i * 4;
-      gray[i] = (0.299 * px[o] + 0.587 * px[o + 1] + 0.114 * px[o + 2]) | 0;
+      lumSum += 0.299 * px[o] + 0.587 * px[o + 1] + 0.114 * px[o + 2];
+    }
+    const meanLuminance = lumSum / PIXEL_COUNT;
+
+    // ── Convert ROI pixels to grayscale ──
+    // Only ROI pixels are needed for BG subtraction, skin, and sharpness.
+    // Use a flat ROI buffer indexed as (ry * ROI_W + rx).
+    const roiGray = new Uint8Array(ROI_PIXEL_COUNT);
+    for (let y = ROI_Y0; y < ROI_Y1; y++) {
+      for (let x = ROI_X0; x < ROI_X1; x++) {
+        const o = (y * AW + x) * 4;
+        roiGray[(y - ROI_Y0) * ROI_W + (x - ROI_X0)] =
+          (0.299 * px[o] + 0.587 * px[o + 1] + 0.114 * px[o + 2]) | 0;
+      }
     }
 
     this.frameCount++;
 
     // ── Bootstrap background model ──
     if (!this.bgModel) {
-      this.bgModel = Float32Array.from(gray);
-      this.prevGray = new Uint8Array(gray);
+      this.bgModel = Float32Array.from(roiGray);
+      this.prevGray = new Uint8Array(roiGray);
       return {
-        foregroundRatio: 0,
         roiForegroundRatio: 0,
         roiLargestBlobRatio: 0,
         roiLargestBlobDiagonalRatio: 0,
-        motionScore: 0,
         skinRatio: 0,
         sharpnessScore: 0,
         isSettled: false,
@@ -138,35 +149,30 @@ export class FrameAnalyzer {
 
     const bg = this.bgModel;
 
-    // ── Foreground mask + full-frame ratio ──
-    const fgMask = new Uint8Array(PIXEL_COUNT);
-    let fgCount = 0;
-    for (let i = 0; i < PIXEL_COUNT; i++) {
-      if (Math.abs(gray[i] - bg[i]) > FG_PIXEL_THRESHOLD) {
+    // ── ROI foreground mask + erosion filter ──
+    // Background subtraction directly in ROI space.
+    const fgMask = new Uint8Array(ROI_PIXEL_COUNT);
+    for (let i = 0; i < ROI_PIXEL_COUNT; i++) {
+      if (Math.abs(roiGray[i] - bg[i]) > FG_PIXEL_THRESHOLD) {
         fgMask[i] = 1;
-        fgCount++;
       }
     }
-    const foregroundRatio = fgCount / PIXEL_COUNT;
 
-    // ── ROI foreground: 2-neighbor erosion filter → eroded mask ──
-    // A foreground pixel in the ROI only survives if ≥2 of its 4 cardinal
-    // neighbours are also foreground (morphological erosion). Dense object
-    // blobs survive intact; scattered vibration noise is almost entirely removed.
-    // The eroded mask is retained for connected-component analysis below.
-    const roiErodedMask = new Uint8Array(PIXEL_COUNT);
+    // 2-neighbor erosion: a foreground pixel survives only if ≥2 of its
+    // 4 cardinal neighbours are also foreground.
+    const erodedMask = new Uint8Array(ROI_PIXEL_COUNT);
     let roiFgCount = 0;
-    for (let y = ROI_Y0; y < ROI_Y1; y++) {
-      for (let x = ROI_X0; x < ROI_X1; x++) {
-        const i = y * AW + x;
+    for (let ry = 0; ry < ROI_H; ry++) {
+      for (let rx = 0; rx < ROI_W; rx++) {
+        const i = ry * ROI_W + rx;
         if (!fgMask[i]) continue;
         const n =
-          (x > 0 ? fgMask[i - 1] : 0) +
-          (x < AW - 1 ? fgMask[i + 1] : 0) +
-          (y > 0 ? fgMask[i - AW] : 0) +
-          (y < AH - 1 ? fgMask[i + AW] : 0);
+          (rx > 0 ? fgMask[i - 1] : 0) +
+          (rx < ROI_W - 1 ? fgMask[i + 1] : 0) +
+          (ry > 0 ? fgMask[i - ROI_W] : 0) +
+          (ry < ROI_H - 1 ? fgMask[i + ROI_W] : 0);
         if (n >= 2) {
-          roiErodedMask[i] = 1;
+          erodedMask[i] = 1;
           roiFgCount++;
         }
       }
@@ -174,56 +180,47 @@ export class FrameAnalyzer {
     const roiForegroundRatio = roiFgCount / ROI_PIXEL_COUNT;
 
     // ── Largest connected blob in eroded ROI mask ──
-    // DFS over the eroded mask to find the largest single connected component
-    // (4-connectivity, bounded to ROI). Used in the state machine to require a
-    // coherent blob rather than many scattered patches that happen to sum above
-    // the ratio threshold. Scattered noise → tiny blobs; real object → one large blob.
     let roiLargestBlobPixels = 0;
-    let largestBlobMinX = ROI_X1;
-    let largestBlobMaxX = ROI_X0;
-    let largestBlobMinY = ROI_Y1;
-    let largestBlobMaxY = ROI_Y0;
-    const blobVisited = new Uint8Array(PIXEL_COUNT);
-    for (let y = ROI_Y0; y < ROI_Y1; y++) {
-      for (let x = ROI_X0; x < ROI_X1; x++) {
-        const startIdx = y * AW + x;
-        if (!roiErodedMask[startIdx] || blobVisited[startIdx]) continue;
-        // DFS flood-fill — stack holds flat pixel indices
+    let largestBlobMinX = ROI_W;
+    let largestBlobMaxX = 0;
+    let largestBlobMinY = ROI_H;
+    let largestBlobMaxY = 0;
+    const blobVisited = new Uint8Array(ROI_PIXEL_COUNT);
+    for (let ry = 0; ry < ROI_H; ry++) {
+      for (let rx = 0; rx < ROI_W; rx++) {
+        const startIdx = ry * ROI_W + rx;
+        if (!erodedMask[startIdx] || blobVisited[startIdx]) continue;
         let size = 0;
-        let blobMinX = ROI_X1;
-        let blobMaxX = ROI_X0;
-        let blobMinY = ROI_Y1;
-        let blobMaxY = ROI_Y0;
+        let blobMinX = ROI_W;
+        let blobMaxX = 0;
+        let blobMinY = ROI_H;
+        let blobMaxY = 0;
         const stack = [startIdx];
         blobVisited[startIdx] = 1;
         while (stack.length > 0) {
           const idx = stack.pop()!;
           size++;
-          const cx = idx % AW;
-          const cy = (idx / AW) | 0;
+          const cx = idx % ROI_W;
+          const cy = (idx / ROI_W) | 0;
           if (cx < blobMinX) blobMinX = cx;
           if (cx > blobMaxX) blobMaxX = cx;
           if (cy < blobMinY) blobMinY = cy;
           if (cy > blobMaxY) blobMaxY = cy;
-          // Left
-          if (cx > ROI_X0) {
+          if (cx > 0) {
             const n = idx - 1;
-            if (roiErodedMask[n] && !blobVisited[n]) { blobVisited[n] = 1; stack.push(n); }
+            if (erodedMask[n] && !blobVisited[n]) { blobVisited[n] = 1; stack.push(n); }
           }
-          // Right
-          if (cx < ROI_X1 - 1) {
+          if (cx < ROI_W - 1) {
             const n = idx + 1;
-            if (roiErodedMask[n] && !blobVisited[n]) { blobVisited[n] = 1; stack.push(n); }
+            if (erodedMask[n] && !blobVisited[n]) { blobVisited[n] = 1; stack.push(n); }
           }
-          // Up
-          if (cy > ROI_Y0) {
-            const n = idx - AW;
-            if (roiErodedMask[n] && !blobVisited[n]) { blobVisited[n] = 1; stack.push(n); }
+          if (cy > 0) {
+            const n = idx - ROI_W;
+            if (erodedMask[n] && !blobVisited[n]) { blobVisited[n] = 1; stack.push(n); }
           }
-          // Down
-          if (cy < ROI_Y1 - 1) {
-            const n = idx + AW;
-            if (roiErodedMask[n] && !blobVisited[n]) { blobVisited[n] = 1; stack.push(n); }
+          if (cy < ROI_H - 1) {
+            const n = idx + ROI_W;
+            if (erodedMask[n] && !blobVisited[n]) { blobVisited[n] = 1; stack.push(n); }
           }
         }
         if (size > roiLargestBlobPixels) {
@@ -237,83 +234,60 @@ export class FrameAnalyzer {
     }
     const roiLargestBlobRatio = roiLargestBlobPixels / ROI_PIXEL_COUNT;
 
-    // Euclidean diagonal of the largest blob's bounding box
     const largestBlobDiagonal = Math.sqrt(
       (largestBlobMaxX - largestBlobMinX) ** 2 +
       (largestBlobMaxY - largestBlobMinY) ** 2
     );
-
-    // ROI's own diagonal (constant for the fixed ROI dimensions)
-    const roiDiagonal = Math.sqrt(
-      (ROI_X1 - ROI_X0) ** 2 +
-      (ROI_Y1 - ROI_Y0) ** 2
-    );
-
+    const roiDiagonal = Math.sqrt(ROI_W ** 2 + ROI_H ** 2);
     const roiLargestBlobDiagonalRatio =
       roiDiagonal > 0 ? largestBlobDiagonal / roiDiagonal : 0;
 
-    // ── Inter-frame motion ──
-    let motionCount = 0;
-    const prev = this.prevGray!;
-    for (let i = 0; i < PIXEL_COUNT; i++) {
-      if (Math.abs(gray[i] - prev[i]) > MOTION_PIXEL_THRESHOLD) motionCount++;
-    }
-    const motionScore = motionCount / PIXEL_COUNT;
-
-    // ── Skin-tone ratio (HSV-based, foreground pixels only) ──
-    // HSV detection is more equitable across skin tones than the old RGB heuristic.
+    // ── Skin-tone ratio (HSV-based, ROI foreground pixels only) ──
     let skinCount = 0;
     let fgPixels = 0;
-    for (let i = 0; i < PIXEL_COUNT; i++) {
-      if (Math.abs(gray[i] - bg[i]) <= FG_PIXEL_THRESHOLD) continue;
-      fgPixels++;
-      const o = i * 4;
-      const r = px[o],
-        g = px[o + 1],
-        b = px[o + 2];
-      const [h, s, v] = rgbToHsv(r, g, b);
-      if (h <= 50 && s >= 0.1 && s <= 0.8 && v >= 0.2) {
-        skinCount++;
+    for (let ry = 0; ry < ROI_H; ry++) {
+      for (let rx = 0; rx < ROI_W; rx++) {
+        const ri = ry * ROI_W + rx;
+        if (Math.abs(roiGray[ri] - bg[ri]) <= FG_PIXEL_THRESHOLD) continue;
+        fgPixels++;
+        const o = ((ROI_Y0 + ry) * AW + (ROI_X0 + rx)) * 4;
+        const r = px[o],
+          g = px[o + 1],
+          b = px[o + 2];
+        const [h, s, v] = rgbToHsv(r, g, b);
+        if (h <= 50 && s >= 0.1 && s <= 0.8 && v >= 0.2) {
+          skinCount++;
+        }
       }
     }
     const skinRatio = fgPixels > 0 ? skinCount / fgPixels : 0;
 
-    // ── Sharpness (Laplacian variance) ──
+    // ── Sharpness (Laplacian variance, foreground pixels only) ──
+    // Restricting to erodedMask prevents textured backgrounds from
+    // inflating the score and ensures the object itself drives quality.
     let lapSum = 0;
     let lapN = 0;
-    for (let y = 1; y < AH - 1; y++) {
-      for (let x = 1; x < AW - 1; x++) {
-        const idx = y * AW + x;
+    for (let ry = 1; ry < ROI_H - 1; ry++) {
+      for (let rx = 1; rx < ROI_W - 1; rx++) {
+        const idx = ry * ROI_W + rx;
+        if (!erodedMask[idx]) continue;
         const lap =
-          4 * gray[idx] -
-          gray[idx - 1] -
-          gray[idx + 1] -
-          gray[idx - AW] -
-          gray[idx + AW];
+          4 * roiGray[idx] -
+          roiGray[idx - 1] -
+          roiGray[idx + 1] -
+          roiGray[idx - ROI_W] -
+          roiGray[idx + ROI_W];
         lapSum += lap * lap;
         lapN++;
       }
     }
-    const sharpnessScore = lapN > 0 ? lapSum / lapN : 0;
+    // Guard: too few foreground pixels → unstable variance; report 0.
+    const sharpnessScore = lapN >= 50 ? lapSum / lapN : 0;
 
-    // ── Update background model ──
-    // Rate is set externally by the pipeline state machine via setBgRate().
-    // During init frames, always update fast regardless of the external rate.
-    // After init, use exactly the rate the state machine requested:
-    //   0     → frozen (object_detected / classifying)
-    //   ~0.001 → micro (result — slowly absorbs persistent stuck objects)
-    //   ~0.008 → full  (idle / cooldown — normal continuous adaptation)
-    // Compute mean luminance for adaptive rate adjustment
-    let lumSum = 0;
-    for (let i = 0; i < PIXEL_COUNT; i++) lumSum += gray[i];
-    const meanLuminance = lumSum / PIXEL_COUNT;
+    // ── Update background model (ROI only) ──
     const lumDelta = Math.abs(meanLuminance - this.prevMeanLuminance);
     this.prevMeanLuminance = meanLuminance;
 
-    // Adaptive BG rate: boost learning rate during sudden global illumination
-    // changes (e.g. fluorescent flicker, clouds passing, lights toggled).
-    // A lumDelta > 5 indicates a global brightness shift (not a local object).
-    // Boost is capped at 3x the base rate to avoid overshooting.
     let effectiveBgRate = this.frameCount <= BG_INIT_FRAMES
       ? BG_INIT_RATE
       : this.bgBoostFrames > 0
@@ -325,19 +299,17 @@ export class FrameAnalyzer {
     }
 
     if (effectiveBgRate > 0) {
-      for (let i = 0; i < PIXEL_COUNT; i++) {
-        bg[i] = bg[i] * (1 - effectiveBgRate) + gray[i] * effectiveBgRate;
+      for (let i = 0; i < ROI_PIXEL_COUNT; i++) {
+        bg[i] = bg[i] * (1 - effectiveBgRate) + roiGray[i] * effectiveBgRate;
       }
     }
 
-    this.prevGray = new Uint8Array(gray);
+    this.prevGray = new Uint8Array(roiGray);
 
     return {
-      foregroundRatio,
       roiForegroundRatio,
       roiLargestBlobRatio,
       roiLargestBlobDiagonalRatio,
-      motionScore,
       skinRatio,
       sharpnessScore,
       /** False during the first BG_SETTLE_FRAMES — detection is blocked until the background model has converged. */

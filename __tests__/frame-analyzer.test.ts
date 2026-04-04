@@ -10,7 +10,6 @@ import {
   FrameAnalyzer,
   imageQualityBand,
   ROI_FG_THRESHOLD,
-  MOTION_RATIO_THRESHOLD,
   MAX_SKIN_RATIO,
 } from "@/lib/frame-analyzer";
 import type { FrameAnalysis } from "@/lib/types";
@@ -18,11 +17,9 @@ import type { FrameAnalysis } from "@/lib/types";
 // Helper to build a FrameAnalysis with defaults
 function makeAnalysis(overrides: Partial<FrameAnalysis> = {}): FrameAnalysis {
   return {
-    foregroundRatio: 0,
     roiForegroundRatio: 0,
     roiLargestBlobRatio: 0,
     roiLargestBlobDiagonalRatio: 0,
-    motionScore: 0,
     skinRatio: 0,
     sharpnessScore: 500,
     isSettled: true,
@@ -84,19 +81,6 @@ describe("FrameAnalyzer", () => {
     });
   });
 
-  describe("motion gate", () => {
-    it("returns stable=false when inter-frame diff > MOTION_RATIO_THRESHOLD", () => {
-      const analysis = makeAnalysis({ motionScore: MOTION_RATIO_THRESHOLD + 0.02 });
-      const stable = analysis.motionScore < MOTION_RATIO_THRESHOLD;
-      expect(stable).toBe(false);
-    });
-
-    it("returns stable=true when inter-frame diff < MOTION_RATIO_THRESHOLD", () => {
-      const analysis = makeAnalysis({ motionScore: MOTION_RATIO_THRESHOLD - 0.02 });
-      const stable = analysis.motionScore < MOTION_RATIO_THRESHOLD;
-      expect(stable).toBe(true);
-    });
-  });
 });
 
 describe("HSV-based skin detection", () => {

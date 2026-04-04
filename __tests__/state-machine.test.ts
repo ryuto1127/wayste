@@ -18,11 +18,9 @@ const COOLDOWN_MS = 1500;
 
 function makeAnalysis(overrides: Partial<FrameAnalysis> = {}): FrameAnalysis {
   return {
-    foregroundRatio: 0.2,
     roiForegroundRatio: 0.15,
     roiLargestBlobRatio: 0.1,
     roiLargestBlobDiagonalRatio: 0,
-    motionScore: 0.02,
     skinRatio: 0.1,
     sharpnessScore: 500,
     isSettled: true,

@@ -33,7 +33,7 @@ import CameraScreen from "./CameraScreen";
 import ResultScreen from "./ResultScreen";
 
 // ── Timing constants ──
-const ANALYSIS_INTERVAL_MS = 50;  // ~20 fps local CV
+const ANALYSIS_INTERVAL_MS = 30;  // ~33 fps local CV
 const COOLDOWN_MS = 1500; // pause before re-scanning (BG model recovery)
 const OBJECT_GONE_FRAMES = 3;     // frames below ROI threshold before "gone" (~150ms at 20fps)
 const FG_PERSIST_FRAMES = 3;      // consecutive ROI-blob frames required to leave idle (~150ms at 20fps)
@@ -321,27 +321,14 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
     }
     const analyzer = analyzerRef.current;
 
-    /** Track whether continuous YOLO loop has been started. */
-    let continuousStarted = false;
-
     const interval = setInterval(() => {
       const video = cameraRef.current?.getVideo();
       if (!video) return;
 
-      // Start continuous YOLO loop once video and backend are both ready
-      if (!continuousStarted && inferenceRef.current?.isReady()) {
-        inferenceRef.current.startContinuous(video, CAPTURE_ROI_MARGIN);
-        continuousStarted = true;
-      }
-
       // During classifying, skip all heavy work — only check timeout.
-      // The frame analyzer and continuous YOLO loop are paused/unnecessary
-      // while we wait for the API response, and running them blocks the
-      // main thread, preventing fetch callbacks from executing.
       if (stateRef.current === "classifying") {
         if (Date.now() - classifyStartRef.current >= CLASSIFYING_TIMEOUT_MS) {
           console.error("[classify] Timed out in classifying state — forcing recovery");
-          inferenceRef.current?.resumeContinuous();
           analyzer.boostBackgroundAdaptation();
           inFlightRef.current = false;
           cooldownStartRef.current = Date.now();
@@ -392,22 +379,7 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
       // ── State machine transitions ──
 
       if (state === "idle") {
-        // ── Option 4: YOLO fast gate ──
-        // If the continuous YOLO loop already has a detection AND the frame
-        // analyzer confirms foreground in the ROI, trigger classification
-        // immediately. Both checks are required to avoid triggering on
-        // stale YOLO detections or items outside the scan area.
-        const yoloDetections = inferenceRef.current?.getLatestDetections() ?? [];
-        if (roiHasFg && yoloDetections.length > 0 && imageQualityBand(analysis) !== "poor") {
-          console.log(`[fast-gate] YOLO pre-detected ${yoloDetections[0].className} (${(yoloDetections[0].confidence * 100).toFixed(1)}%) — skipping FG gate`);
-          fgPersistRef.current = 0;
-          goneCountRef.current = 0;
-          objectDetectedFrameRef.current = 0;
-          triggerClassification(analysis);
-          return;
-        }
-
-        // ── Option 1: Overlapped FG + sharpness check ──
+        // ── Overlapped FG + sharpness check ──
         // Count frames that are BOTH foreground-present AND sharp.
         if (roiHasFg && imageQualityBand(analysis) !== "poor") {
           fgPersistRef.current++;
@@ -460,9 +432,8 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
         if (!roiHasFg) {
           goneCountRef.current++;
           if (goneCountRef.current >= OBJECT_GONE_FRAMES) {
-            // Item removed — resume YOLO and boost BG adaptation so the
+            // Item removed — boost BG adaptation so the
             // model rapidly absorbs the current scene (was frozen during result).
-            inferenceRef.current?.resumeContinuous();
             analyzer.boostBackgroundAdaptation();
             cooldownStartRef.current = Date.now();
             transition("cooldown");
@@ -474,7 +445,6 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
           if (Date.now() - resultEnterTimeRef.current >= RESULT_TIMEOUT_MS) {
             setStableResult(null); setResultRequestId(undefined);
             goneCountRef.current = 0;
-            inferenceRef.current?.resumeContinuous();
             analyzer.boostBackgroundAdaptation();
             cooldownStartRef.current = Date.now();
             transition("cooldown");
@@ -502,14 +472,7 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
           goneCountRef.current = 0;
           objectDetectedFrameRef.current = 0;
 
-          // YOLO fast gate: if YOLO already detected the new item, classify immediately
-          const yoloDets = inferenceRef.current?.getLatestDetections() ?? [];
-          if (roiHasFg && yoloDets.length > 0 && imageQualityBand(analysis) !== "poor") {
-            console.log(`[fast-gate] Pending item with YOLO detection — skipping object_detected`);
-            triggerClassification(analysis);
-          } else {
-            transition("object_detected");
-          }
+          transition("object_detected");
           return;
         }
 
@@ -525,8 +488,6 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
 
     return () => {
       clearInterval(interval);
-      // Stop continuous YOLO loop on unmount
-      inferenceRef.current?.stopContinuous();
     };
 
     /** Log a YOLO-only classification to the server (fire-and-forget).
@@ -580,11 +541,11 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
       }).catch(() => {});
     }
 
-    // ── Trigger classification (Tiered Pipeline) ──
+    // ── Trigger classification (Tiered Pipeline — all on-demand) ──
     //
-    // Tier 1: YOLO26n (always-on buffer) → instant, handles COCO-80 items
-    // Tier 2: YOLO World (on-demand)     → ~200-800ms, handles recycling-specific items
-    // Tier 3: OpenAI API (last resort)   → ~1-3s, handles anything
+    // Tier 1: YOLO26n (on-demand) → conf >= 0.65 + rule → instant result
+    // Tier 2: YOLO World (on-demand fallback) → ~200-800ms
+    // Tier 3: OpenAI API (last resort) → ~1-3s
     //
     function triggerClassification(analysis: FrameAnalysis) {
       if (inFlightRef.current) return;
@@ -597,10 +558,6 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
       transition("classifying");
 
       const backend = inferenceRef.current;
-
-      // Pause continuous YOLO to free main thread for API callbacks.
-      // Individual tiers will manage pause/resume for YOLO World internally.
-      backend?.pauseContinuous();
       const yoloReady = backend?.isReady() && siteConfigRef.current;
       const isOffline = typeof navigator !== "undefined" && !navigator.onLine;
 
@@ -625,15 +582,10 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
         return;
       }
 
-      // ── Tier 1: Get buffered YOLO detections (instant — always-on loop) ──
-      const bufferedDetections = backend.getLatestDetections();
-
-      // Also run a fresh detection for accuracy (the buffer may be 100ms stale)
+      // ── Tier 1: On-demand YOLO detection ──
       const yoloStart = Date.now();
       backend.detect(video, CAPTURE_ROI_MARGIN)
-        .then((freshDetections) => {
-          // Prefer fresh, fall back to buffered
-          const detections = freshDetections.length > 0 ? freshDetections : bufferedDetections;
+        .then((detections) => {
           const yoloMs = Date.now() - yoloStart;
 
           if (detections.length > 0) {
@@ -686,11 +638,7 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
         });
     }
 
-    /**
-     * Tier 2: YOLO World fallback.
-     * Pauses the continuous YOLO loop to free CPU, runs YOLO World inference,
-     * and resumes YOLO afterwards.
-     */
+    /** Tier 2: YOLO World fallback (on-demand). */
     function escalateToYoloWorld(
       video: HTMLVideoElement,
       backend: InferenceBackend,
@@ -726,7 +674,6 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
         return;
       }
 
-      // Continuous YOLO is already paused (from triggerClassification entry)
       const worldStart = Date.now();
 
       backend.detectWorld(video, CAPTURE_ROI_MARGIN)
@@ -752,7 +699,7 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
             console.log(`[tier2] YOLO World no detections (${worldMs}ms) — falling through to API`);
           }
 
-          // Tier 3: API (continuous YOLO stays paused — will resume in result/error handler)
+          // Tier 3: API
           const promise = apiInflight ?? apiPromise();
           promise
             .then(({ result: r, requestId }) => {
@@ -771,7 +718,7 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
             });
         })
         .catch(() => {
-          // YOLO World failed — fall through to API (YOLO resumes in result/error handler)
+          // YOLO World failed — fall through to API
           const promise = apiInflight ?? apiPromise();
           promise
             .then(({ result: r, requestId }) => {
@@ -804,7 +751,7 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
               return;
             }
 
-            // Try YOLO World offline (continuous loop already paused from triggerClassification)
+            // Try YOLO World offline
             if (backend.isYoloWorldReady()) {
               backend.detectWorld(video, CAPTURE_ROI_MARGIN)
                 .then((worldDets) => {
@@ -883,9 +830,6 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
       result: ClassificationResponse & { requestId?: string },
       requestId: string | undefined,
     ) {
-      // Keep YOLO paused during result — no detections needed while result
-      // is on screen. YOLO resumes when transitioning to cooldown/idle.
-
       if (
         result.itemName.toLowerCase() === "nothing detected" ||
         result.confidence === 0
@@ -896,7 +840,6 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
         pendingItemRef.current = false;
         // Boost BG adaptation to absorb whatever triggered the false detection
         analyzerRef.current?.boostBackgroundAdaptation();
-        inferenceRef.current?.resumeContinuous();
         cooldownStartRef.current = Date.now();
         transition("cooldown");
         inFlightRef.current = false;
@@ -924,8 +867,6 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
       if (err instanceof DOMException && err.name === "AbortError") {
         return;
       }
-      // Resume continuous YOLO loop (paused during classifying)
-      inferenceRef.current?.resumeContinuous();
 
       const msg = T("classificationFailed");
       console.error("[classify] API error:", err);

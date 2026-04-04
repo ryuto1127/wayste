@@ -21,7 +21,7 @@ function makeAnalysis(overrides: Partial<FrameAnalysis> = {}): FrameAnalysis {
     roiLargestBlobRatio: 0,
     roiLargestBlobDiagonalRatio: 0,
     skinRatio: 0,
-    sharpnessScore: 500,
+    sharpnessScore: 2000,
     isSettled: true,
     timestamp: Date.now(),
     ...overrides,
@@ -69,13 +69,13 @@ describe("FrameAnalyzer", () => {
   describe("sharpness gate", () => {
     it("returns sharp=false when laplacian variance is low", () => {
       const analysis = makeAnalysis({ sharpnessScore: 50 });
-      // imageQualityBand returns "poor" when sharpness < 150
+      // imageQualityBand returns "poor" when sharpness < 500
       const quality = imageQualityBand(analysis);
       expect(quality).toBe("poor");
     });
 
     it("returns sharp=true when laplacian variance is high", () => {
-      const analysis = makeAnalysis({ sharpnessScore: 500, skinRatio: 0.9 });
+      const analysis = makeAnalysis({ sharpnessScore: 2000, skinRatio: 0.9 });
       const quality = imageQualityBand(analysis);
       expect(quality).toBe("good");
     });
@@ -119,14 +119,14 @@ describe("HSV-based skin detection", () => {
 
 describe("imageQualityBand", () => {
   it("returns 'good' for high sharpness (skin ratio irrelevant)", () => {
-    expect(imageQualityBand(makeAnalysis({ sharpnessScore: 500, skinRatio: 0.9 }))).toBe("good");
+    expect(imageQualityBand(makeAnalysis({ sharpnessScore: 2000, skinRatio: 0.9 }))).toBe("good");
   });
 
   it("returns 'fair' for moderate sharpness (skin ratio irrelevant)", () => {
-    expect(imageQualityBand(makeAnalysis({ sharpnessScore: 200, skinRatio: 0.9 }))).toBe("fair");
+    expect(imageQualityBand(makeAnalysis({ sharpnessScore: 800, skinRatio: 0.9 }))).toBe("fair");
   });
 
   it("returns 'poor' for low sharpness", () => {
-    expect(imageQualityBand(makeAnalysis({ sharpnessScore: 100, skinRatio: 0.0 }))).toBe("poor");
+    expect(imageQualityBand(makeAnalysis({ sharpnessScore: 400, skinRatio: 0.0 }))).toBe("poor");
   });
 });

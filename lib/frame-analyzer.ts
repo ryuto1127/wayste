@@ -2,7 +2,7 @@
  * Client-side computer vision for local foreground detection,
  * stability analysis, hand-occlusion estimation, and sharpness scoring.
  *
- * All processing is limited to the central ROI (~6,912 pixels at 160×120)
+ * All processing is limited to the central ROI (~4,800 pixels at 160×120)
  * for performance. No frames are sent over the network.
  */
 
@@ -13,16 +13,16 @@ const AW = 160;
 const AH = 120;
 const PIXEL_COUNT = AW * AH;
 
-// ── Central ROI: center 60% × 60% of the analysis canvas ──
+// ── Central ROI: center 50% × 50% of the analysis canvas ──
 // Only foreground within this zone is used for idle→object_detected decisions.
 // Edge noise, vibration, and peripheral lighting changes are ignored.
-const ROI_X0 = Math.round(AW * 0.20); // 32
-const ROI_X1 = Math.round(AW * 0.80); // 128
-const ROI_Y0 = Math.round(AH * 0.20); // 24
-const ROI_Y1 = Math.round(AH * 0.80); // 96
-const ROI_W = ROI_X1 - ROI_X0;        // 96
-const ROI_H = ROI_Y1 - ROI_Y0;        // 72
-const ROI_PIXEL_COUNT = ROI_W * ROI_H; // 6912
+const ROI_X0 = Math.round(AW * 0.25); // 40
+const ROI_X1 = Math.round(AW * 0.75); // 120
+const ROI_Y0 = Math.round(AH * 0.25); // 30
+const ROI_Y1 = Math.round(AH * 0.75); // 90
+const ROI_W = ROI_X1 - ROI_X0;        // 80
+const ROI_H = ROI_Y1 - ROI_Y0;        // 60
+const ROI_PIXEL_COUNT = ROI_W * ROI_H; // 4800
 
 // ── Background subtraction ──
 const BG_LEARN_RATE = 0.015; // absorbs camera drift in ~10s; BG continues during confirm window to erode noise
@@ -328,8 +328,10 @@ export class FrameAnalyzer {
 }
 
 // ── Utility: derive image quality band from analysis ──
+// Initial estimates for foreground-only Laplacian variance.
+// Recalibrate from pilot-log data.
 export function imageQualityBand(a: FrameAnalysis): ImageQuality {
-  if (a.sharpnessScore > 400) return "good";
-  if (a.sharpnessScore > 150) return "fair";
+  if (a.sharpnessScore > 1500) return "good";
+  if (a.sharpnessScore > 500) return "fair";
   return "poor";
 }

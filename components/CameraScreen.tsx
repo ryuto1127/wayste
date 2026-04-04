@@ -8,13 +8,13 @@ import { t } from "@/lib/i18n";
 interface CameraScreenProps {
   pipelineState: PipelineState;
   locale: Locale;
-  captureRoiMargin: number;
+  detectionRoiMargin: number;
 }
 
 export default function CameraScreen({
   pipelineState,
   locale,
-  captureRoiMargin,
+  detectionRoiMargin,
 }: CameraScreenProps) {
   const T = useCallback(
     (key: TranslationKey) => t(locale, key),
@@ -61,7 +61,7 @@ export default function CameraScreen({
       {/* Corner scan markers */}
       <div
         className="absolute pointer-events-none"
-        style={{ inset: `${captureRoiMargin * 100}%` }}
+        style={{ inset: `${detectionRoiMargin * 100}%` }}
       >
         <div
           className={`absolute top-0 left-0 w-10 h-10 border-t-2 border-l-2 rounded-tl-lg transition-colors duration-300 ${borderColor}`}

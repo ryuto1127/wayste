@@ -22,7 +22,7 @@ function makeAnalysis(overrides: Partial<FrameAnalysis> = {}): FrameAnalysis {
     roiLargestBlobRatio: 0.1,
     roiLargestBlobDiagonalRatio: 0,
     skinRatio: 0.1,
-    sharpnessScore: 500,
+    sharpnessScore: 2000,
     isSettled: true,
     timestamp: Date.now(),
     ...overrides,
@@ -73,8 +73,8 @@ class StateMachineSimulator {
       }
       this.goneCount = 0;
 
-      // Sharpness gate: only count frames where sharpnessScore > 150
-      if (analysis.sharpnessScore > 150) {
+      // Sharpness gate: only count frames where sharpnessScore > 500
+      if (analysis.sharpnessScore > 500) {
         this.objectDetectedFrames++;
       }
 
@@ -164,7 +164,7 @@ describe("State machine", () => {
     sim.state = "object_detected";
     sim.objectDetectedFrames = 0;
 
-    const sharpFrame = makeAnalysis({ sharpnessScore: 500 });
+    const sharpFrame = makeAnalysis({ sharpnessScore: 2000 });
 
     for (let i = 0; i < SHARP_FRAMES_REQUIRED; i++) {
       sim.tick(sharpFrame);
@@ -195,7 +195,7 @@ describe("State machine", () => {
     sim.objectDetectedFrames = 0;
 
     const blurryFrame = makeAnalysis({ sharpnessScore: 50 });
-    const sharpFrame = makeAnalysis({ sharpnessScore: 500 });
+    const sharpFrame = makeAnalysis({ sharpnessScore: 2000 });
 
     // Interleave: blurry, sharp, blurry, blurry, sharp → should trigger on 2nd sharp
     sim.tick(blurryFrame);
@@ -215,7 +215,7 @@ describe("State machine", () => {
     sim.objectDetectedFrames = 0;
 
     // High skin ratio should NOT block classification — user always holds the item
-    const handHeldFrame = makeAnalysis({ sharpnessScore: 500, skinRatio: 0.8 });
+    const handHeldFrame = makeAnalysis({ sharpnessScore: 2000, skinRatio: 0.8 });
 
     for (let i = 0; i < SHARP_FRAMES_REQUIRED; i++) {
       sim.tick(handHeldFrame);

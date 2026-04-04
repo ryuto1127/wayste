@@ -66,8 +66,10 @@ const BG_RATE_RESULT = 0.001;
 // object_detected / classifying: frozen — never absorb the held object
 const BG_RATE_FROZEN = 0;
 
-// ── Capture ROI (fraction of frame, applied to both image capture and scan frame UI) ──
+// ── Capture ROI (fraction of frame, applied to image capture) ──
 const CAPTURE_ROI_MARGIN = 0.15; // 15% margin on each side → 70% of frame sent to model
+// ── Detection ROI margin (matches frame-analyzer ROI = 25% inset on each side) ──
+const DETECTION_ROI_MARGIN = 0.25;
 
 // ── Entry coherence gate ──
 const ROI_BLOB_THRESHOLD = 0.03;
@@ -999,7 +1001,7 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
         <CameraScreen
           pipelineState={pipelineState}
           locale={locale}
-          captureRoiMargin={CAPTURE_ROI_MARGIN}
+          detectionRoiMargin={DETECTION_ROI_MARGIN}
         />
       )}
 

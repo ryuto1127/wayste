@@ -7,7 +7,6 @@ import type { KioskDayStats } from "@/lib/kiosk-stats";
 
 interface IdleScreenProps {
   locale: Locale;
-  tips: { text: string }[];
   onToggleLocale: () => void;
   /** Incremented each time the pipeline returns to idle after a classification. */
   statsVersion: number;
@@ -19,7 +18,6 @@ interface IdleScreenProps {
 
 export default function IdleScreen({
   locale,
-  tips,
   onToggleLocale,
   statsVersion,
   voiceEnabled,
@@ -44,18 +42,6 @@ export default function IdleScreen({
       .catch(() => {});
     return () => { cancelled = true; };
   }, [statsVersion]);
-
-  // ── Tip rotation ──
-  const [tipIndex, setTipIndex] = useState(0);
-
-  useEffect(() => {
-    if (tips.length === 0) return;
-    setTipIndex(0);
-    const timer = setInterval(() => {
-      setTipIndex((i) => (i + 1) % tips.length);
-    }, 8_000);
-    return () => clearInterval(timer);
-  }, [tips]);
 
   const hasData = stats !== null && stats.totalClassifications > 0;
   const successPct = stats ? Math.round(stats.successRate * 100) : 0;
@@ -143,8 +129,8 @@ export default function IdleScreen({
           The massive box-shadow darkens everything outside the viewfinder
           so the live camera feed (behind this overlay) only shows through here. */}
       <div
-        className="relative w-full max-w-md aspect-square rounded-2xl overflow-hidden mb-5"
-        style={{ boxShadow: "0 0 0 9999px rgba(10, 10, 10, 0.95)" }}
+        className="relative w-full max-w-xl aspect-square rounded-2xl overflow-hidden mb-5"
+        style={{ boxShadow: "0 0 0 9999px rgba(10, 10, 10, 0.75)" }}
       >
 
         {/* Dark vignette overlay outside the ROI — outer zone is dimmed so
@@ -153,17 +139,17 @@ export default function IdleScreen({
         <div className="absolute inset-0 pointer-events-none">
           {/* Top strip */}
           <div
-            className="absolute top-0 left-0 right-0 bg-neutral-950/55"
+            className="absolute top-0 left-0 right-0 bg-neutral-950/35"
             style={{ height: roiInsetPct }}
           />
           {/* Bottom strip */}
           <div
-            className="absolute bottom-0 left-0 right-0 bg-neutral-950/55"
+            className="absolute bottom-0 left-0 right-0 bg-neutral-950/35"
             style={{ height: roiInsetPct }}
           />
           {/* Left strip (between top and bottom) */}
           <div
-            className="absolute bg-neutral-950/55"
+            className="absolute bg-neutral-950/35"
             style={{
               top: roiInsetPct,
               bottom: roiInsetPct,
@@ -173,7 +159,7 @@ export default function IdleScreen({
           />
           {/* Right strip (between top and bottom) */}
           <div
-            className="absolute bg-neutral-950/55"
+            className="absolute bg-neutral-950/35"
             style={{
               top: roiInsetPct,
               bottom: roiInsetPct,
@@ -216,22 +202,6 @@ export default function IdleScreen({
         {T("holdItemUp")}
       </p>
 
-      {/* Sorting tip */}
-      {tips.length > 0 && (
-        <div className="relative z-10 max-w-md text-center min-h-[48px] flex items-center justify-center">
-          <div
-            key={tipIndex}
-            className="animate-[fadeIn_0.5s_ease-out]"
-          >
-            <div className="text-xs font-semibold uppercase tracking-widest text-neutral-600 mb-1">
-              💡 {T("sortingTip")}
-            </div>
-            <p className="text-neutral-400 text-sm leading-relaxed">
-              {tips[tipIndex]?.text}
-            </p>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

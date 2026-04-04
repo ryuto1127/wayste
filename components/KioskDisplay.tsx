@@ -69,7 +69,7 @@ const BG_RATE_FROZEN = 0;
 // ── Detection ROI margin (fraction of the short-side square capture crop) ──
 // frame-analyzer crops the same center square as YOLO (e.g. 720×720 from
 // 1280×720), then applies this inset → detection ROI = center 60% (432×432).
-const DETECTION_ROI_MARGIN = 0.20;
+const DETECTION_ROI_MARGIN = 0.10;
 
 // ── Entry coherence gate ──
 const ROI_BLOB_THRESHOLD = 0.03;
@@ -994,7 +994,6 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
         ? "camera"
         : "idle"; // idle + cooldown both show idle screen
 
-  const tips = siteConfigRef.current?.tips ?? [];
 
   return (
     <div className="h-screen w-screen bg-neutral-950 relative overflow-hidden select-none">
@@ -1022,7 +1021,6 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
       {uiScreen === "idle" && (
         <IdleScreen
           locale={locale}
-          tips={tips}
           onToggleLocale={toggleLocale}
           statsVersion={statsVersion}
           voiceEnabled={voiceEnabled}

@@ -15,14 +15,14 @@ const AW = 120;
 const AH = 120;
 const PIXEL_COUNT = AW * AH;
 
-// ── Central ROI: center 60% × 60% of the analysis canvas ──
+// ── Central ROI: center 80% × 80% of the analysis canvas ──
 // Only foreground within this zone is used for idle→object_detected decisions.
 // Edge noise, vibration, and peripheral lighting changes are ignored.
-// 60% = 432×432 of the 720×720 capture crop (20% inset on each side).
-const ROI_X0 = Math.round(AW * 0.20); // 24
-const ROI_X1 = Math.round(AW * 0.80); // 96
-const ROI_Y0 = Math.round(AH * 0.20); // 24
-const ROI_Y1 = Math.round(AH * 0.80); // 96
+// 80% = 576×576 of the 720×720 capture crop (10% inset on each side).
+const ROI_X0 = Math.round(AW * 0.10); // 12
+const ROI_X1 = Math.round(AW * 0.90); // 108
+const ROI_Y0 = Math.round(AH * 0.10); // 12
+const ROI_Y1 = Math.round(AH * 0.90); // 108
 const ROI_W = ROI_X1 - ROI_X0;        // 72
 const ROI_H = ROI_Y1 - ROI_Y0;        // 72
 const ROI_PIXEL_COUNT = ROI_W * ROI_H; // 5184

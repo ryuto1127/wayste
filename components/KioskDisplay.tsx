@@ -68,8 +68,10 @@ const BG_RATE_FROZEN = 0;
 
 // ── Capture ROI (fraction of frame, applied to image capture) ──
 const CAPTURE_ROI_MARGIN = 0.15; // 15% margin on each side → 70% of frame sent to model
-// ── Detection ROI margin (matches frame-analyzer ROI = 25% inset on each side) ──
-const DETECTION_ROI_MARGIN = 0.25;
+// ── Detection ROI margin (matches frame-analyzer: 20% inset of center square) ──
+// frame-analyzer draws from the center square of the frame (short-side based),
+// then applies 20% inset → detection ROI = center 60% of that square.
+const DETECTION_ROI_MARGIN = 0.20;
 
 // ── Entry coherence gate ──
 const ROI_BLOB_THRESHOLD = 0.03;
@@ -965,9 +967,7 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
     <div className="h-screen w-screen bg-neutral-950 relative overflow-hidden select-none">
       {/* Camera feed — always mounted, hidden during idle for CV to keep running */}
       <div
-        className={`absolute inset-0 transition-opacity duration-300 ${
-          uiScreen === "idle" ? "opacity-0" : "opacity-100"
-        }`}
+        className="absolute inset-0"
       >
         <CameraFeed
           ref={cameraRef}
@@ -994,6 +994,7 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
           statsVersion={statsVersion}
           voiceEnabled={voiceEnabled}
           onToggleVoice={toggleVoice}
+          detectionRoiMargin={DETECTION_ROI_MARGIN}
         />
       )}
 

@@ -26,6 +26,23 @@ export default function CameraScreen({
     ? "border-amber-400/60"
     : "border-blue-400/60";
 
+  // The detection ROI is a square centered in the frame, based on the shorter
+  // dimension (height for 16:9). The margin is applied within that square.
+  // To place markers correctly on the 16:9 video, we need asymmetric insets:
+  //   vertical: detectionRoiMargin of the height
+  //   horizontal: must account for the square crop centering + inner margin
+  // For 1280×720: center square = 720×720 → starts at x=280 (21.875% of 1280)
+  // Inner ROI at 20% inset of 720 = 144px inset → starts at x=424 (33.125% of 1280)
+  // Using CSS calc with aspect-ratio-aware percentages:
+  const verticalInset = `${detectionRoiMargin * 100}%`;
+  // horizontalInset = (frameW - frameH) / (2 * frameW) + detectionRoiMargin * (frameH / frameW)
+  // For 16:9: = (16-9)/(2*16) + margin * (9/16) = 0.21875 + margin * 0.5625
+  // We use a CSS-friendly approximation: the square's edge + inner margin
+  // Generic formula that works for any aspect ratio via calc():
+  // left/right = 50% - (50% - margin*100%) * (height/width)
+  // Since we don't know exact aspect ratio in CSS, use a pragmatic approach:
+  // wrap markers in an aspect-square container centered in the frame.
+
   return (
     <div className="absolute inset-0 z-10 pointer-events-none animate-[fadeIn_0.2s_ease-out]">
       {/* Status indicator */}
@@ -58,23 +75,28 @@ export default function CameraScreen({
         </div>
       )}
 
-      {/* Corner scan markers */}
-      <div
-        className="absolute pointer-events-none"
-        style={{ inset: `${detectionRoiMargin * 100}%` }}
-      >
-        <div
-          className={`absolute top-0 left-0 w-10 h-10 border-t-2 border-l-2 rounded-tl-lg transition-colors duration-300 ${borderColor}`}
-        />
-        <div
-          className={`absolute top-0 right-0 w-10 h-10 border-t-2 border-r-2 rounded-tr-lg transition-colors duration-300 ${borderColor}`}
-        />
-        <div
-          className={`absolute bottom-0 left-0 w-10 h-10 border-b-2 border-l-2 rounded-bl-lg transition-colors duration-300 ${borderColor}`}
-        />
-        <div
-          className={`absolute bottom-0 right-0 w-10 h-10 border-b-2 border-r-2 rounded-br-lg transition-colors duration-300 ${borderColor}`}
-        />
+      {/* Corner scan markers — placed inside a center-square container
+          that matches the YOLO/analyzer crop area (short-side based). */}
+      <div className="absolute inset-0 flex items-center justify-center">
+        <div className="relative h-full aspect-square max-w-full">
+          <div
+            className="absolute pointer-events-none"
+            style={{ inset: verticalInset }}
+          >
+            <div
+              className={`absolute top-0 left-0 w-10 h-10 border-t-2 border-l-2 rounded-tl-lg transition-colors duration-300 ${borderColor}`}
+            />
+            <div
+              className={`absolute top-0 right-0 w-10 h-10 border-t-2 border-r-2 rounded-tr-lg transition-colors duration-300 ${borderColor}`}
+            />
+            <div
+              className={`absolute bottom-0 left-0 w-10 h-10 border-b-2 border-l-2 rounded-bl-lg transition-colors duration-300 ${borderColor}`}
+            />
+            <div
+              className={`absolute bottom-0 right-0 w-10 h-10 border-b-2 border-r-2 rounded-br-lg transition-colors duration-300 ${borderColor}`}
+            />
+          </div>
+        </div>
       </div>
     </div>
   );

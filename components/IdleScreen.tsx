@@ -13,6 +13,8 @@ interface IdleScreenProps {
   statsVersion: number;
   voiceEnabled: boolean;
   onToggleVoice: () => void;
+  /** Detection ROI margin (fraction, e.g. 0.20 = 20% inset of center square). */
+  detectionRoiMargin: number;
 }
 
 export default function IdleScreen({
@@ -22,6 +24,7 @@ export default function IdleScreen({
   statsVersion,
   voiceEnabled,
   onToggleVoice,
+  detectionRoiMargin,
 }: IdleScreenProps) {
   const T = useCallback(
     (key: TranslationKey) => t(locale, key),
@@ -57,8 +60,13 @@ export default function IdleScreen({
   const hasData = stats !== null && stats.totalClassifications > 0;
   const successPct = stats ? Math.round(stats.successRate * 100) : 0;
 
+  // The camera preview shows the center square of the frame (matching YOLO crop).
+  // The ROI guide is inset by detectionRoiMargin within that square.
+  // Outer region gets a dark overlay to draw the eye toward the ROI.
+  const roiInsetPct = `${detectionRoiMargin * 100}%`;
+
   return (
-    <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-neutral-950 px-8 py-12 select-none animate-[fadeIn_0.3s_ease-out]">
+    <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-neutral-950 px-6 py-8 select-none animate-[fadeIn_0.3s_ease-out]">
       {/* Top-right controls: voice toggle + language toggle */}
       <div className="absolute top-6 right-6 flex items-center gap-3">
         <button
@@ -82,14 +90,14 @@ export default function IdleScreen({
       </div>
 
       {/* Branding */}
-      <div className="mb-10 text-center">
+      <div className="mb-4 text-center">
         <h1 className="text-2xl font-bold text-white tracking-tight">
           ♻️ Recycling Buddy
         </h1>
       </div>
 
       {/* Stats card */}
-      <div className="bg-neutral-800/50 rounded-2xl px-8 py-6 mb-8 min-w-[280px] text-center">
+      <div className="bg-neutral-800/50 rounded-2xl px-8 py-5 mb-5 min-w-[280px] text-center">
         {hasData ? (
           <>
             <div className="text-xs font-semibold uppercase tracking-widest text-neutral-500 mb-3">
@@ -130,35 +138,87 @@ export default function IdleScreen({
         )}
       </div>
 
+      {/* Camera preview with ROI guide */}
+      <div className="relative w-full max-w-sm aspect-square rounded-2xl overflow-hidden mb-5">
+        {/* Live camera feed — visible through the component tree.
+            The parent KioskDisplay renders <CameraFeed> behind all overlays.
+            We punch a transparent window here so it shows through. */}
+        <div className="absolute inset-0 bg-transparent" />
+
+        {/* Dark vignette overlay outside the ROI — guides attention inward */}
+        <div className="absolute inset-0 pointer-events-none">
+          {/* Top strip */}
+          <div
+            className="absolute top-0 left-0 right-0 bg-neutral-950/60"
+            style={{ height: roiInsetPct }}
+          />
+          {/* Bottom strip */}
+          <div
+            className="absolute bottom-0 left-0 right-0 bg-neutral-950/60"
+            style={{ height: roiInsetPct }}
+          />
+          {/* Left strip (between top and bottom) */}
+          <div
+            className="absolute bg-neutral-950/60"
+            style={{
+              top: roiInsetPct,
+              bottom: roiInsetPct,
+              left: 0,
+              width: roiInsetPct,
+            }}
+          />
+          {/* Right strip (between top and bottom) */}
+          <div
+            className="absolute bg-neutral-950/60"
+            style={{
+              top: roiInsetPct,
+              bottom: roiInsetPct,
+              right: 0,
+              width: roiInsetPct,
+            }}
+          />
+        </div>
+
+        {/* ROI corner markers */}
+        <div
+          className="absolute pointer-events-none"
+          style={{ inset: roiInsetPct }}
+        >
+          <div className="absolute top-0 left-0 w-8 h-8 border-t-2 border-l-2 rounded-tl-lg border-white/50" />
+          <div className="absolute top-0 right-0 w-8 h-8 border-t-2 border-r-2 rounded-tr-lg border-white/50" />
+          <div className="absolute bottom-0 left-0 w-8 h-8 border-b-2 border-l-2 rounded-bl-lg border-white/50" />
+          <div className="absolute bottom-0 right-0 w-8 h-8 border-b-2 border-r-2 rounded-br-lg border-white/50" />
+        </div>
+
+        {/* Pulsing hand icon in the center */}
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <span className="text-4xl opacity-60 animate-[pulse_2s_ease-in-out_infinite]">
+            👋
+          </span>
+        </div>
+      </div>
+
+      {/* CTA text */}
+      <p className="text-lg text-neutral-300 font-medium text-center mb-4">
+        {T("holdItemUp")}
+      </p>
+
       {/* Sorting tip */}
       {tips.length > 0 && (
-        <div className="mb-10 max-w-md text-center min-h-[60px] flex items-center justify-center">
+        <div className="max-w-md text-center min-h-[48px] flex items-center justify-center">
           <div
             key={tipIndex}
             className="animate-[fadeIn_0.5s_ease-out]"
           >
-            <div className="text-xs font-semibold uppercase tracking-widest text-neutral-600 mb-2">
+            <div className="text-xs font-semibold uppercase tracking-widest text-neutral-600 mb-1">
               💡 {T("sortingTip")}
             </div>
-            <p className="text-neutral-300 text-sm leading-relaxed">
+            <p className="text-neutral-400 text-sm leading-relaxed">
               {tips[tipIndex]?.text}
             </p>
           </div>
         </div>
       )}
-
-      {/* CTA */}
-      <div className="text-center">
-        <div className="text-4xl mb-3 animate-[pulse_2s_ease-in-out_infinite]">
-          👋
-        </div>
-        <p className="text-xl text-neutral-300 font-medium">
-          {T("holdItemUp")}
-        </p>
-        <p className="text-sm text-neutral-600 mt-2">
-          {T("systemWillIdentify")}
-        </p>
-      </div>
     </div>
   );
 }

@@ -2,27 +2,31 @@
  * Client-side computer vision for local foreground detection,
  * stability analysis, hand-occlusion estimation, and sharpness scoring.
  *
- * All processing is limited to the central ROI (~4,800 pixels at 160×120)
- * for performance. No frames are sent over the network.
+ * All processing is limited to the central ROI (~5,184 pixels in a 120×120
+ * square canvas) for performance. No frames are sent over the network.
  */
 
 import type { FrameAnalysis, ImageQuality } from "./types";
 
-// ── Analysis resolution (small for speed) ──
-const AW = 160;
+// ── Analysis resolution (square — matches YOLO's 640×640 center crop) ──
+// The analysis canvas draws from the center square of the video frame,
+// so its coordinate space is aligned with what YOLO sees.
+const AW = 120;
 const AH = 120;
 const PIXEL_COUNT = AW * AH;
 
-// ── Central ROI: center 50% × 50% of the analysis canvas ──
+// ── Central ROI: center 60% × 60% of the square analysis canvas ──
 // Only foreground within this zone is used for idle→object_detected decisions.
 // Edge noise, vibration, and peripheral lighting changes are ignored.
-const ROI_X0 = Math.round(AW * 0.25); // 40
-const ROI_X1 = Math.round(AW * 0.75); // 120
-const ROI_Y0 = Math.round(AH * 0.25); // 30
-const ROI_Y1 = Math.round(AH * 0.75); // 90
-const ROI_W = ROI_X1 - ROI_X0;        // 80
-const ROI_H = ROI_Y1 - ROI_Y0;        // 60
-const ROI_PIXEL_COUNT = ROI_W * ROI_H; // 4800
+// 60% balances detection coverage (~432×432 in real frame) with edge-noise rejection,
+// and fits well inside the YOLO 640×640 crop with margin to spare.
+const ROI_X0 = Math.round(AW * 0.20); // 24
+const ROI_X1 = Math.round(AW * 0.80); // 96
+const ROI_Y0 = Math.round(AH * 0.20); // 24
+const ROI_Y1 = Math.round(AH * 0.80); // 96
+const ROI_W = ROI_X1 - ROI_X0;        // 72
+const ROI_H = ROI_Y1 - ROI_Y0;        // 72
+const ROI_PIXEL_COUNT = ROI_W * ROI_H; // 5184
 
 // ── Background subtraction ──
 const BG_LEARN_RATE = 0.015; // absorbs camera drift in ~10s; BG continues during confirm window to erode noise
@@ -106,8 +110,15 @@ export class FrameAnalyzer {
     }
     const ctx = this.ctx!;
 
-    // Draw downscaled frame
-    ctx.drawImage(video, 0, 0, AW, AH);
+    // Draw center square of frame into the square analysis canvas.
+    // For 1280×720 input: crops center 720×720, draws to 120×120.
+    // This aligns with YOLO's center 640×640 crop — same region, same aspect ratio.
+    const vw = video.videoWidth;
+    const vh = video.videoHeight;
+    const side = Math.min(vw, vh);
+    const sx = Math.round((vw - side) / 2);
+    const sy = Math.round((vh - side) / 2);
+    ctx.drawImage(video, sx, sy, side, side, 0, 0, AW, AH);
     const { data: px } = ctx.getImageData(0, 0, AW, AH);
 
     // ── Compute full-frame mean luminance (cheap — needed for adaptive BG rate) ──

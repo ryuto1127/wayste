@@ -1,7 +1,7 @@
 /**
- * YOLO26n edge inference using ONNX Runtime Web.
+ * YOLO26m edge inference using ONNX Runtime Web (FP16).
  *
- * Uses COCO-80 pre-trained YOLO26n with a curated rules file that maps
+ * Uses COCO-80 pre-trained YOLO26m with a curated rules file that maps
  * waste-relevant classes to disposal streams. Non-waste COCO detections
  * (furniture, vehicles, etc.) have no rules and trigger API fallback.
  *
@@ -42,7 +42,7 @@ const COCO_CLASSES = [
  * return the same promise. If the model file is missing or ONNX fails to load,
  * resolves to `false` and all subsequent `runYoloInference()` calls return [].
  */
-export function initYolo(modelUrl = "/models/yolo26n.onnx"): Promise<boolean> {
+export function initYolo(modelUrl = "/models/yolo26m.onnx"): Promise<boolean> {
   if (loading) return loading;
 
   loading = (async () => {

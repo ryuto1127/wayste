@@ -2,10 +2,9 @@
  * GET /api/review/download — Server-side proxy for /api/review/export.
  *
  * Adds the ADMIN_API_KEY header server-side so the review page can trigger
- * exports without exposing the key to the client.
+ * ZIP image exports without exposing the key to the client.
  *
  * Accepts the same query params as /api/review/export:
- *   ?format=finetune|threshold
  *   ?from=YYYY-MM-DD
  *   ?to=YYYY-MM-DD
  */

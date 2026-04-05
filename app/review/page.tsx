@@ -1,28 +1,15 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef, useMemo, Suspense } from "react";
-import Link from "next/link";
+import { useEffect, useState, useCallback, Suspense } from "react";
 import { AdminNav } from "@/components/AdminNav";
 import type { PilotLogEntry } from "@/lib/types";
 import type { Locale } from "@/lib/i18n";
 import { t } from "@/lib/i18n";
 
-// ── Shared stream definitions ──
-
-const STREAMS: { id: string; labelKey: "recycling" | "compost" | "landfill" | "special" | "needsCorrection"; color: string }[] = [
-  { id: "recycling", labelKey: "recycling", color: "bg-blue-600 hover:bg-blue-500" },
-  { id: "compost", labelKey: "compost", color: "bg-green-600 hover:bg-green-500" },
-  { id: "landfill", labelKey: "landfill", color: "bg-neutral-600 hover:bg-neutral-500" },
-  { id: "special", labelKey: "special", color: "bg-orange-600 hover:bg-orange-500" },
-  { id: "needs_review", labelKey: "needsCorrection", color: "bg-purple-600 hover:bg-purple-500" },
-];
-
 // ── Types ──
 
-type FullReviewEntry = PilotLogEntry & {
+type ReviewEntry = PilotLogEntry & {
   verdict: "correct" | "wrong" | "false_detection" | null;
-  verdictStream: string | null;
-  correctedItemName: string | null;
   kioskFeedback: "correct" | "wrong" | null;
 };
 
@@ -37,11 +24,12 @@ export default function ReviewPage() {
 }
 
 function ImageReviewPage() {
-  const [entries, setEntries] = useState<FullReviewEntry[]>([]);
+  const [entries, setEntries] = useState<ReviewEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [locale, setLocale] = useState<Locale>("en");
   const [filter, setFilter] = useState<"all" | "pending" | "reviewed">("all");
   const [saving, setSaving] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
 
   const T = useCallback((key: Parameters<typeof t>[1]) => t(locale, key), [locale]);
 
@@ -61,46 +49,18 @@ function ImageReviewPage() {
 
   useEffect(() => { load(); }, [load]);
 
-  const submitVerdict = useCallback(async (
-    requestId: string,
-    verdict: Verdict,
-    verdictStream?: string,
-  ) => {
+  const submitVerdict = useCallback(async (requestId: string, verdict: Verdict) => {
     setSaving(requestId);
     try {
       await fetch("/api/review", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: requestId, requestId, verdict, verdictStream }),
+        body: JSON.stringify({ requestId, verdict }),
       });
       setEntries((prev) =>
         prev.map((e) =>
-          e.requestId === requestId
-            ? { ...e, verdict, verdictStream: verdictStream ?? null }
-            : e
-        )
-      );
-    } catch {
-      // silent
-    } finally {
-      setSaving(null);
-    }
-  }, []);
-
-  const submitItemName = useCallback(async (requestId: string, correctedItemName: string) => {
-    setSaving(requestId);
-    try {
-      await fetch("/api/review", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: requestId, requestId, correctedItemName }),
-      });
-      setEntries((prev) =>
-        prev.map((e) =>
-          e.requestId === requestId
-            ? { ...e, correctedItemName }
-            : e
-        )
+          e.requestId === requestId ? { ...e, verdict } : e,
+        ),
       );
     } catch {
       // silent
@@ -125,6 +85,29 @@ function ImageReviewPage() {
     }
   }, []);
 
+  const handleExport = useCallback(async () => {
+    setExporting(true);
+    try {
+      const res = await fetch("/api/review/download");
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert((err as { error?: string }).error ?? `Export failed: ${res.status}`);
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `review-images-${new Date().toISOString().slice(0, 10)}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      alert("Export failed");
+    } finally {
+      setExporting(false);
+    }
+  }, []);
+
   const reviewed = entries.filter((e) => e.verdict !== null).length;
   const pending = entries.length - reviewed;
 
@@ -134,22 +117,18 @@ function ImageReviewPage() {
     return true;
   });
 
-  // Build sorted list of unique item names for autocomplete
-  const knownNames = useMemo(() => {
-    const names = new Set<string>();
-    for (const e of entries) {
-      if (e.correctedItemName) names.add(e.correctedItemName);
-      if (e.itemName && e.itemName !== "nothing detected") names.add(e.itemName);
-    }
-    return [...names].sort((a, b) => a.localeCompare(b));
-  }, [entries]);
-
   // Accuracy = correct / (correct + wrong), excluding false detections
   const correctCount = entries.filter((e) => e.verdict === "correct").length;
   const wrongCount = entries.filter((e) => e.verdict === "wrong").length;
   const falseCount = entries.filter((e) => e.verdict === "false_detection").length;
   const classifiable = correctCount + wrongCount;
   const accuracy = classifiable > 0 ? correctCount / classifiable : null;
+
+  // Count exportable images for button label
+  const exportableCount = entries.filter((e) =>
+    e.verdict === "wrong" ||
+    (e.verdict === "correct" && e.confidence <= 0.80),
+  ).filter((e) => e.imageUrl).length;
 
   if (loading) {
     return (
@@ -198,13 +177,16 @@ function ImageReviewPage() {
               </span>
             </div>
           )}
-          {reviewed > 0 && (
-            <a
-              href="/api/review/download"
-              className="px-4 py-2 rounded-lg bg-purple-700 hover:bg-purple-600 text-sm font-medium transition-colors"
+          {exportableCount > 0 && (
+            <button
+              onClick={handleExport}
+              disabled={exporting}
+              className="px-4 py-2 rounded-lg bg-purple-700 hover:bg-purple-600 text-sm font-medium transition-colors disabled:opacity-50"
             >
-              {T("exportData")}
-            </a>
+              {exporting
+                ? (locale === "ja" ? "エクスポート中..." : "Exporting...")
+                : (locale === "ja" ? `画像ZIP (${exportableCount}枚)` : `Export ZIP (${exportableCount} images)`)}
+            </button>
           )}
         </div>
 
@@ -235,14 +217,12 @@ function ImageReviewPage() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {filtered.map((entry) => (
-              <FullEntryCard
+              <EntryCard
                 key={entry.requestId ?? entry.timestamp}
                 entry={entry}
                 saving={saving === entry.requestId}
                 onVerdict={submitVerdict}
-                onItemName={submitItemName}
                 onDelete={deleteEntry}
-                knownNames={knownNames}
                 locale={locale}
                 T={T}
               />
@@ -254,35 +234,26 @@ function ImageReviewPage() {
   );
 }
 
-function FullEntryCard({
+function EntryCard({
   entry,
   saving,
   onVerdict,
-  onItemName,
   onDelete,
-  knownNames,
   locale,
   T,
 }: {
-  entry: FullReviewEntry;
+  entry: ReviewEntry;
   saving: boolean;
-  onVerdict: (requestId: string, verdict: Verdict, stream?: string) => void;
-  onItemName: (requestId: string, correctedItemName: string) => void;
+  onVerdict: (requestId: string, verdict: Verdict) => void;
   onDelete: (requestId: string) => void;
-  knownNames: string[];
   locale: Locale;
   T: (key: Parameters<typeof t>[1]) => string;
 }) {
-  const [showStreamPicker, setShowStreamPicker] = useState(false);
-  const [editingName, setEditingName] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const [nameInput, setNameInput] = useState(entry.correctedItemName ?? entry.itemName);
-  const [showSuggestions, setShowSuggestions] = useState(false);
-  const suggestionsRef = useRef<HTMLDivElement>(null);
 
   const date = new Date(entry.timestamp).toLocaleString(
     locale === "ja" ? "ja-JP" : "en-US",
-    { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }
+    { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" },
   );
 
   const verdictBorder =
@@ -296,6 +267,12 @@ function FullEntryCard({
     : entry.verdict === "wrong" ? { text: T("verdictWrong"), color: "text-red-400" }
     : entry.verdict === "false_detection" ? { text: T("verdictFalse"), color: "text-neutral-400" }
     : null;
+
+  // Model display name
+  const modelLabel = entry.modelUsed ?? "unknown";
+
+  // Sharpness score from CV metadata
+  const sharpness = entry.meta?.sharpnessScore;
 
   return (
     <div className={`rounded-xl border p-4 flex flex-col gap-3 ${verdictBorder}`}>
@@ -318,102 +295,25 @@ function FullEntryCard({
 
       {/* Info */}
       <div>
-        {editingName ? (
-          <div className="relative">
-            <div className="flex gap-2 items-center">
-              <input
-                type="text"
-                value={nameInput}
-                onChange={(e) => { setNameInput(e.target.value); setShowSuggestions(true); }}
-                onFocus={() => setShowSuggestions(true)}
-                onBlur={() => { setTimeout(() => setShowSuggestions(false), 150); }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && nameInput.trim() && entry.requestId) {
-                    onItemName(entry.requestId, nameInput.trim());
-                    setEditingName(false);
-                    setShowSuggestions(false);
-                  }
-                  if (e.key === "Escape") {
-                    setNameInput(entry.correctedItemName ?? entry.itemName);
-                    setEditingName(false);
-                    setShowSuggestions(false);
-                  }
-                }}
-                autoFocus
-                className="flex-1 bg-neutral-700 text-white text-sm rounded px-2 py-1 outline-none focus:ring-1 focus:ring-purple-500"
-              />
-              <button
-                onClick={() => {
-                  if (nameInput.trim() && entry.requestId) {
-                    onItemName(entry.requestId, nameInput.trim());
-                    setEditingName(false);
-                  }
-                }}
-                disabled={saving || !nameInput.trim()}
-                className="px-2 py-1 rounded bg-purple-700 hover:bg-purple-600 text-xs font-medium disabled:opacity-40"
-              >
-                {T("saveItemName")}
-              </button>
-            </div>
-            {showSuggestions && (() => {
-              const q = nameInput.trim().toLowerCase();
-              const matches = knownNames.filter(
-                (n) => n.toLowerCase().includes(q) && n !== nameInput.trim()
-              ).slice(0, 8);
-              if (matches.length === 0) return null;
-              return (
-                <div ref={suggestionsRef} className="absolute z-10 left-0 right-12 mt-1 bg-neutral-700 rounded-lg shadow-lg border border-neutral-600 max-h-40 overflow-y-auto">
-                  {matches.map((name) => (
-                    <button
-                      key={name}
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => {
-                        setNameInput(name);
-                        setShowSuggestions(false);
-                        if (entry.requestId) {
-                          onItemName(entry.requestId, name);
-                          setEditingName(false);
-                        }
-                      }}
-                      className="w-full text-left px-3 py-1.5 text-sm text-white hover:bg-neutral-600 transition-colors"
-                    >
-                      {name}
-                    </button>
-                  ))}
-                </div>
-              );
-            })()}
-          </div>
-        ) : (
-          <p
-            className="font-semibold text-white truncate cursor-pointer hover:text-purple-300 transition-colors"
-            onClick={() => setEditingName(true)}
-            title={T("editItemName")}
-          >
-            {entry.correctedItemName ? (
-              <>
-                {entry.correctedItemName}
-                <span className="text-neutral-500 line-through text-xs ml-2">{entry.itemName}</span>
-              </>
-            ) : entry.itemName}
-            <span className="text-neutral-600 text-xs ml-1">✎</span>
-          </p>
-        )}
+        <p className="font-semibold text-white truncate">{entry.itemName}</p>
         <p className="text-xs text-neutral-500 mt-0.5">{date}</p>
       </div>
 
-      {/* Prediction */}
-      <div className="flex items-center gap-2 text-sm">
-        <span className="text-neutral-400">{T("predicted")}:</span>
+      {/* Prediction details */}
+      <div className="flex flex-wrap items-center gap-2 text-sm">
         <StreamPill stream={entry.wasteStream} />
         <span className="text-neutral-600 text-xs">
           {Math.round(entry.confidence * 100)}%
         </span>
-        {entry.verdictStream && entry.verdict === "wrong" && (
-          <>
-            <span className="text-neutral-600">→</span>
-            <StreamPill stream={entry.verdictStream} />
-          </>
+      </div>
+
+      {/* Model & sharpness metadata */}
+      <div className="flex items-center gap-3 text-xs text-neutral-500">
+        <span className="bg-neutral-800 px-2 py-0.5 rounded">{modelLabel}</span>
+        {sharpness !== undefined && (
+          <span className="bg-neutral-800 px-2 py-0.5 rounded">
+            {locale === "ja" ? "鮮明度" : "sharpness"}: {Math.round(sharpness)}
+          </span>
         )}
       </div>
 
@@ -433,69 +333,42 @@ function FullEntryCard({
         </p>
       )}
 
-      {/* Verdict buttons */}
-      {!showStreamPicker ? (
-        <div className="flex gap-2 mt-1">
-          <button
-            onClick={() => entry.requestId && onVerdict(entry.requestId, "correct")}
-            disabled={saving || !entry.requestId}
-            className={`flex-1 py-2 rounded-lg text-xs font-medium transition-all ${
-              entry.verdict === "correct"
-                ? "bg-emerald-700 text-white ring-2 ring-emerald-400"
-                : "bg-neutral-800/60 hover:bg-emerald-800 text-neutral-300"
-            } disabled:opacity-40`}
-          >
-            ✓ {T("markCorrect")}
-          </button>
-          <button
-            onClick={() => setShowStreamPicker(true)}
-            disabled={saving || !entry.requestId}
-            className={`flex-1 py-2 rounded-lg text-xs font-medium transition-all ${
-              entry.verdict === "wrong"
-                ? "bg-red-700 text-white ring-2 ring-red-400"
-                : "bg-neutral-800/60 hover:bg-red-800 text-neutral-300"
-            } disabled:opacity-40`}
-          >
-            ✗ {T("markWrong")}
-          </button>
-          <button
-            onClick={() => entry.requestId && onVerdict(entry.requestId, "false_detection")}
-            disabled={saving || !entry.requestId}
-            className={`flex-1 py-2 rounded-lg text-xs font-medium transition-all ${
-              entry.verdict === "false_detection"
-                ? "bg-neutral-600 text-white ring-2 ring-neutral-400"
-                : "bg-neutral-800/60 hover:bg-neutral-700 text-neutral-400"
-            } disabled:opacity-40`}
-          >
-            ∅ {T("falseDetection")}
-          </button>
-        </div>
-      ) : (
-        <div>
-          <p className="text-xs text-neutral-400 mb-2">{T("selectCorrectStream")}</p>
-          <div className="flex flex-wrap gap-2">
-            {STREAMS.map((s) => (
-              <button
-                key={s.id}
-                onClick={() => {
-                  if (entry.requestId) onVerdict(entry.requestId, "wrong", s.id);
-                  setShowStreamPicker(false);
-                }}
-                disabled={saving}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${s.color} disabled:opacity-40`}
-              >
-                {T(s.labelKey)}
-              </button>
-            ))}
-            <button
-              onClick={() => setShowStreamPicker(false)}
-              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-neutral-800 hover:bg-neutral-700 text-neutral-400"
-            >
-              {T("cancel")}
-            </button>
-          </div>
-        </div>
-      )}
+      {/* Verdict buttons — simple 3-way toggle */}
+      <div className="flex gap-2 mt-1">
+        <button
+          onClick={() => entry.requestId && onVerdict(entry.requestId, "correct")}
+          disabled={saving || !entry.requestId}
+          className={`flex-1 py-2 rounded-lg text-xs font-medium transition-all ${
+            entry.verdict === "correct"
+              ? "bg-emerald-700 text-white ring-2 ring-emerald-400"
+              : "bg-neutral-800/60 hover:bg-emerald-800 text-neutral-300"
+          } disabled:opacity-40`}
+        >
+          ✓ {T("markCorrect")}
+        </button>
+        <button
+          onClick={() => entry.requestId && onVerdict(entry.requestId, "wrong")}
+          disabled={saving || !entry.requestId}
+          className={`flex-1 py-2 rounded-lg text-xs font-medium transition-all ${
+            entry.verdict === "wrong"
+              ? "bg-red-700 text-white ring-2 ring-red-400"
+              : "bg-neutral-800/60 hover:bg-red-800 text-neutral-300"
+          } disabled:opacity-40`}
+        >
+          ✗ {T("markWrong")}
+        </button>
+        <button
+          onClick={() => entry.requestId && onVerdict(entry.requestId, "false_detection")}
+          disabled={saving || !entry.requestId}
+          className={`flex-1 py-2 rounded-lg text-xs font-medium transition-all ${
+            entry.verdict === "false_detection"
+              ? "bg-neutral-600 text-white ring-2 ring-neutral-400"
+              : "bg-neutral-800/60 hover:bg-neutral-700 text-neutral-400"
+          } disabled:opacity-40`}
+        >
+          ∅ {T("falseDetection")}
+        </button>
+      </div>
 
       {/* Delete button */}
       {entry.requestId && (

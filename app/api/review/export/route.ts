@@ -1,62 +1,62 @@
 /**
- * GET /api/review/export — Export reviewed pilot log entries as JSONL.
+ * GET /api/review/export — Export reviewed images as a ZIP file for annotation tools.
+ *
+ * Exports images for entries that need retraining:
+ *   - All "wrong" verdicts (model misidentified the object)
+ *   - "correct" verdicts with confidence ≤ 0.80 (model was right but unsure)
+ *
+ * Images are named by timestamp (e.g. 2026-04-04T10-23-15.jpg) and delivered
+ * as a ZIP file compatible with CVAT, Roboflow, and Label Studio.
  *
  * Date filtering (ISO date strings, inclusive):
- *   ?from=2026-07-01          — entries from July 1 onward
- *   ?to=2026-08-31            — entries up to August 31
- *   ?from=2026-07-01&to=2026-08-31 — entries in July–August only
- *
- * Two export modes:
- *   ?format=finetune (default) — Dataset for YOLO fine-tuning:
- *     Each line: { imageUrl, itemName, correctStream, verdict, yoloDetections[], confidence, modelUsed }
- *     Includes bbox data when available. false_detection entries serve as negative examples.
- *
- *   ?format=threshold — Data for optimal confidence threshold analysis:
- *     Each line: { confidence, verdict, predictedStream, correctStream }
- *     One entry per reviewed classification. Feed into a script that computes
- *     accuracy per confidence bucket to find the optimal escalation threshold.
+ *   ?from=2026-07-01&to=2026-08-31
  */
 
 import { NextResponse } from "next/server";
 import { redis, KEYS } from "@/lib/redis";
 import { requireApiKey } from "@/lib/auth";
 import type { PilotLogEntry } from "@/lib/types";
+// Dynamic import: archiver is CommonJS, avoid top-level ESM issues
+import { Readable } from "node:stream";
+
+/** Confidence threshold: correct entries at or below this value are exported */
+const CORRECT_CONFIDENCE_THRESHOLD = 0.80;
 
 export async function GET(request: Request) {
   const denied = requireApiKey(request);
   if (denied) return denied;
 
   const { searchParams } = new URL(request.url);
-  const format = searchParams.get("format") ?? "finetune";
   const fromDate = searchParams.get("from");
   const toDate = searchParams.get("to");
   const fromMs = fromDate ? new Date(fromDate).getTime() : 0;
   const toMs = toDate ? new Date(toDate + "T23:59:59.999Z").getTime() : Infinity;
 
   try {
-    const [pilotRaw, verdicts, verdictStreams, verdictNames] = await Promise.all([
+    const [pilotRaw, verdicts] = await Promise.all([
       redis.lrange(KEYS.pilotLog, 0, -1),
       redis.hgetall("recycling:review-verdicts") as Promise<Record<string, string> | null>,
-      redis.hgetall("recycling:review-verdicts:streams") as Promise<Record<string, string> | null>,
-      redis.hgetall("recycling:review-verdicts:names") as Promise<Record<string, string> | null>,
     ]);
 
     if (!verdicts || Object.keys(verdicts).length === 0) {
       return NextResponse.json(
         { error: "No reviewed entries yet. Review entries at /review first." },
-        { status: 404 }
+        { status: 404 },
       );
     }
 
-    const lines: string[] = [];
+    // Collect entries that qualify for export
+    const toExport: { url: string; filename: string }[] = [];
 
     for (const item of pilotRaw) {
       let entry: PilotLogEntry;
       try {
         entry = (typeof item === "string" ? JSON.parse(item) : item) as PilotLogEntry;
-      } catch { continue; }
+      } catch {
+        continue;
+      }
 
-      if (!entry.requestId) continue;
+      if (!entry.requestId || !entry.imageUrl) continue;
 
       // Date range filter
       const entryMs = new Date(entry.timestamp).getTime();
@@ -65,52 +65,75 @@ export async function GET(request: Request) {
       const verdict = verdicts[entry.requestId];
       if (!verdict) continue;
 
-      const correctStream = verdict === "wrong"
-        ? (verdictStreams?.[entry.requestId] ?? null)
-        : verdict === "correct"
-          ? entry.wasteStream
-          : null;
+      // Export criteria: wrong (all) or correct with low confidence
+      const shouldExport =
+        verdict === "wrong" ||
+        (verdict === "correct" && entry.confidence <= CORRECT_CONFIDENCE_THRESHOLD);
 
-      const correctedItemName = verdictNames?.[entry.requestId] ?? null;
+      if (!shouldExport) continue;
 
-      if (format === "threshold") {
-        // Threshold analysis format: minimal, one per entry
-        lines.push(JSON.stringify({
-          confidence: entry.confidence,
-          verdict,
-          predictedStream: entry.wasteStream,
-          correctStream,
-          modelUsed: entry.modelUsed,
-        }));
-      } else {
-        // Fine-tuning format: full data with bbox
-        lines.push(JSON.stringify({
-          imageUrl: entry.imageUrl ?? null,
-          itemName: correctedItemName ?? entry.itemName,
-          originalItemName: correctedItemName ? entry.itemName : undefined,
-          predictedStream: entry.wasteStream,
-          correctStream,
-          confidence: entry.confidence,
-          modelUsed: entry.modelUsed,
-          verdict,
-          overrideApplied: entry.overrideApplied ?? false,
-          // YOLO bounding boxes for annotation (when available)
-          yoloDetections: entry.yoloDetections ?? null,
-          // CV metadata for analysis
-          meta: entry.meta ?? null,
-          timestamp: entry.timestamp,
-        }));
+      // Timestamp-based filename: 2026-04-04T10-23-15.jpg
+      const ts = entry.timestamp.replace(/:/g, "-").replace(/\.\d+Z$/, "").replace("Z", "");
+      toExport.push({ url: entry.imageUrl, filename: `${ts}.jpg` });
+    }
+
+    if (toExport.length === 0) {
+      return NextResponse.json(
+        { error: "No exportable images found (need wrong verdicts or low-confidence correct verdicts)." },
+        { status: 404 },
+      );
+    }
+
+    // Build ZIP using archiver
+    const archiver = (await import("archiver")).default;
+    const archive = archiver("zip", { zlib: { level: 1 } }); // fast compression for images
+
+    // Deduplicate filenames in case of collisions
+    const usedNames = new Set<string>();
+    const uniqueName = (name: string): string => {
+      if (!usedNames.has(name)) {
+        usedNames.add(name);
+        return name;
+      }
+      let i = 1;
+      const base = name.replace(/\.jpg$/, "");
+      while (usedNames.has(`${base}_${i}.jpg`)) i++;
+      const deduped = `${base}_${i}.jpg`;
+      usedNames.add(deduped);
+      return deduped;
+    };
+
+    // Fetch images in parallel (batches of 10) and append to archive
+    const BATCH_SIZE = 10;
+    for (let i = 0; i < toExport.length; i += BATCH_SIZE) {
+      const batch = toExport.slice(i, i + BATCH_SIZE);
+      const results = await Promise.allSettled(
+        batch.map(async ({ url, filename }) => {
+          const res = await fetch(url);
+          if (!res.ok) return null;
+          const buf = Buffer.from(await res.arrayBuffer());
+          return { filename, buf };
+        }),
+      );
+      for (const result of results) {
+        if (result.status === "fulfilled" && result.value) {
+          const { filename, buf } = result.value;
+          archive.append(buf, { name: uniqueName(filename) });
+        }
       }
     }
 
-    const filename = format === "threshold"
-      ? `threshold-analysis-${new Date().toISOString().slice(0, 10)}.jsonl`
-      : `finetune-dataset-${new Date().toISOString().slice(0, 10)}.jsonl`;
+    archive.finalize();
 
-    return new Response(lines.join("\n") + "\n", {
+    // Convert Node stream to Web ReadableStream
+    const nodeStream = archive as unknown as NodeJS.ReadableStream;
+    const webStream = Readable.toWeb(Readable.from(nodeStream)) as ReadableStream;
+
+    const dateStr = new Date().toISOString().slice(0, 10);
+    return new Response(webStream, {
       headers: {
-        "Content-Type": "application/jsonl",
-        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Content-Type": "application/zip",
+        "Content-Disposition": `attachment; filename="review-images-${dateStr}.zip"`,
       },
     });
   } catch (err) {

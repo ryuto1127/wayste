@@ -229,7 +229,6 @@ export async function DELETE(request: Request) {
     for (const id of deletedRequestIds) {
       if (id) {
         pipeline.hdel("recycling:review-verdicts", id);
-        pipeline.hdel("recycling:review-verdicts:streams", id);
       }
     }
 
@@ -238,7 +237,9 @@ export async function DELETE(request: Request) {
       pipeline.del("recycling:corrections");
       pipeline.del("recycling:corrections:names");
       pipeline.del("recycling:review-verdicts");
+      // Clean up legacy keys that are no longer used
       pipeline.del("recycling:review-verdicts:streams");
+      pipeline.del("recycling:review-verdicts:names");
     }
 
     await pipeline.exec();

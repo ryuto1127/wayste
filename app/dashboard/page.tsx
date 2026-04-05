@@ -1,10 +1,9 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef, useMemo, Suspense } from "react";
+import { useEffect, useState, useCallback, useRef, Suspense } from "react";
 import type { FeedbackStats } from "@/lib/feedback-analysis";
 import type { Locale } from "@/lib/i18n";
 import { t } from "@/lib/i18n";
-import Link from "next/link";
 import { AdminNav } from "@/components/AdminNav";
 
 export default function DashboardPage() {
@@ -12,8 +11,6 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [locale, setLocale] = useState<Locale>("en");
   const [isLive, setIsLive] = useState(false);
-  const [applyingOverride, setApplyingOverride] = useState<string | null>(null);
-  const [appliedOverrides, setAppliedOverrides] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     const es = new EventSource("/api/stats-stream");
@@ -42,26 +39,8 @@ export default function DashboardPage() {
 
   const T = useCallback(
     (key: Parameters<typeof t>[1]) => t(locale, key),
-    [locale]
+    [locale],
   );
-
-  const applyOverride = useCallback(async (pattern: string, stream: string) => {
-    setApplyingOverride(pattern);
-    try {
-      const res = await fetch("/api/overrides", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pattern, stream }),
-      });
-      if (res.ok) {
-        setAppliedOverrides((prev) => new Set(prev).add(pattern.toLowerCase()));
-      }
-    } catch {
-      // silent
-    } finally {
-      setApplyingOverride(null);
-    }
-  }, []);
 
   if (loading) {
     return (
@@ -123,123 +102,6 @@ export default function DashboardPage() {
               />
             </div>
 
-            {/* Suggested overrides */}
-            {stats.suggestedOverrides.length > 0 && (
-              <div className="bg-neutral-900 rounded-2xl p-6 mb-6">
-                <h2 className="text-lg font-semibold mb-4">
-                  {T("suggestedOverrides")}
-                </h2>
-                <div className="space-y-3">
-                  {stats.suggestedOverrides.map((o, i) => (
-                    <div
-                      key={i}
-                      className="flex items-center justify-between bg-neutral-800/60 rounded-xl px-4 py-3"
-                    >
-                      <div>
-                        <span className="text-neutral-200 font-medium">
-                          {o.pattern}
-                        </span>
-                        <span className="text-neutral-500 mx-2">→</span>
-                        <span className="text-emerald-400 font-medium">
-                          {o.suggestedStream}
-                        </span>
-                        <span className="text-neutral-500 text-sm ml-3">
-                          ({o.wrongCount} {T("timesWrong")})
-                        </span>
-                      </div>
-                      {appliedOverrides.has(o.pattern.toLowerCase()) ? (
-                        <span className="text-emerald-400 text-xs font-medium">Applied</span>
-                      ) : (
-                        <button
-                          onClick={() => applyOverride(o.pattern, o.suggestedStream)}
-                          disabled={applyingOverride === o.pattern}
-                          className="px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-medium transition-colors disabled:opacity-50"
-                        >
-                          {applyingOverride === o.pattern ? "..." : "Apply"}
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Most corrected items */}
-            {stats.mostCorrected.length > 0 && (
-              <div className="bg-neutral-900 rounded-2xl p-6 mb-6">
-                <h2 className="text-lg font-semibold mb-4">
-                  {T("mostCorrectedItems")}
-                </h2>
-                <div className="space-y-2">
-                  {stats.mostCorrected.map((item, i) => (
-                    <div
-                      key={i}
-                      className="flex items-center justify-between bg-neutral-800/40 rounded-lg px-4 py-2.5"
-                    >
-                      <span className="text-neutral-200">{item.itemName}</span>
-                      <div className="flex items-center gap-3 text-sm">
-                        <span className="text-red-400">
-                          {item.wrongCount}/{item.totalCount} {T("timesWrong")}
-                        </span>
-                        <span className="text-neutral-500">
-                          {T("correctedTo")}
-                        </span>
-                        <span className="text-emerald-400 font-medium">
-                          {item.mostCommonActual}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Per-stream accuracy */}
-            {stats.perStreamAccuracy.length > 0 && (
-              <div className="bg-neutral-900 rounded-2xl p-6 mb-6">
-                <h2 className="text-lg font-semibold mb-4">
-                  {locale === "ja" ? "カテゴリ別正解率" : "Accuracy by Category"}
-                </h2>
-                <div className="space-y-3">
-                  {stats.perStreamAccuracy.map((s) => (
-                    <div key={s.stream}>
-                      <div className="flex items-center justify-between text-sm mb-1">
-                        <div className="flex items-center gap-2">
-                          <StreamPill stream={s.stream} />
-                          <span className="text-neutral-400 text-xs">
-                            ({s.total} {locale === "ja" ? "件" : "items"})
-                          </span>
-                        </div>
-                        <span
-                          className={`font-bold text-xs ${
-                            s.rate >= 0.8
-                              ? "text-emerald-400"
-                              : s.rate >= 0.6
-                                ? "text-amber-400"
-                                : "text-red-400"
-                          }`}
-                        >
-                          {Math.round(s.rate * 100)}%
-                        </span>
-                      </div>
-                      <div className="w-full h-2 bg-neutral-800 rounded-full overflow-hidden">
-                        <div
-                          className={`h-full rounded-full transition-all duration-500 ${
-                            s.rate >= 0.8
-                              ? "bg-emerald-500"
-                              : s.rate >= 0.6
-                                ? "bg-amber-500"
-                                : "bg-red-500"
-                          }`}
-                          style={{ width: `${Math.round(s.rate * 100)}%` }}
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
             {/* 24-hour trend */}
             {stats.hourlyTrend.some((h) => h.total > 0) && (
               <div className="bg-neutral-900 rounded-2xl p-6 mb-6">
@@ -296,7 +158,7 @@ export default function DashboardPage() {
                     <tr className="text-neutral-500 text-xs uppercase tracking-wider border-b border-neutral-800">
                       <th className="text-left py-2 pr-4">{T("item")}</th>
                       <th className="text-left py-2 pr-4">{T("predicted")}</th>
-                      <th className="text-left py-2 pr-4">{T("actual")}</th>
+                      <th className="text-left py-2 pr-4">{locale === "ja" ? "判定" : "Verdict"}</th>
                       <th className="text-left py-2">{T("time")}</th>
                     </tr>
                   </thead>
@@ -314,13 +176,9 @@ export default function DashboardPage() {
                         </td>
                         <td className="py-2.5 pr-4">
                           {entry.feedback === "correct" ? (
-                            <span className="text-emerald-400 text-xs font-medium">
-                              ✓
-                            </span>
+                            <span className="text-emerald-400 text-xs font-medium">✓ Correct</span>
                           ) : (
-                            <StreamPill
-                              stream={entry.actualStream ?? "unknown"}
-                            />
+                            <span className="text-red-400 text-xs font-medium">✗ Wrong</span>
                           )}
                         </td>
                         <td className="py-2.5 text-neutral-500 text-xs">
@@ -331,7 +189,7 @@ export default function DashboardPage() {
                               day: "numeric",
                               hour: "2-digit",
                               minute: "2-digit",
-                            }
+                            },
                           )}
                         </td>
                       </tr>

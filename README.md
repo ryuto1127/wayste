@@ -43,7 +43,7 @@ Built for office and public-space pilots, with full English and Japanese support
 |-----|---------|
 | `/` | The kiosk itself |
 | `/dashboard` | Live accuracy stats, most-corrected items, suggested override rules |
-| `/review` | Post-pilot image review — assign correct bins to misclassified items |
+| `/review` | Human review — browse all classifications, mark each as correct/wrong/false detection, correct item names |
 
 ---
 
@@ -219,12 +219,12 @@ On page load the server component generates an HMAC-SHA256-signed session token 
 
 ### Two-tier auth
 
-| Tier | Env var | Endpoints protected |
-|------|---------|---------------------|
-| Kiosk | `KIOSK_API_TOKEN` | `/api/classify`, `/api/feedback`, `/api/pilot-log` (POST) |
-| Admin | `ADMIN_API_KEY` | `/api/overrides`, `/api/review`, `/api/pilot-log` (DELETE) |
+| Tier | Env var | Mechanism | Endpoints protected |
+|------|---------|-----------|---------------------|
+| Kiosk | `KIOSK_API_TOKEN` | Bearer token in route handler | `/api/classify`, `/api/feedback`, `/api/pilot-log` (POST) |
+| Admin | `ADMIN_API_KEY` | HTTP Basic Auth → session cookie (middleware) | `/dashboard`, `/review`, `/api/review/*`, `/api/overrides`, `/api/stats-stream`, `/api/pilot-log` (DELETE) |
 
-Both default to open (no auth) when the env var is unset, so local development requires no configuration.
+Both default to open (no auth) when the env var is unset, so local development requires no configuration. Admin auth is handled entirely by middleware — after the initial Basic Auth prompt, a session cookie (7 days) eliminates further password prompts.
 
 ### Image privacy
 
@@ -301,16 +301,17 @@ Patterns use **word-boundary matching** — a pattern of `"cup"` matches `"paper
 After a real-world test:
 
 1. Go to `/dashboard` to see accuracy rate, most-corrected items, and auto-suggested override rules
-2. Go to `/review` — every item a user marked as **Wrong** appears with its captured image
-3. For each card, click the correct bin to record the true classification
-4. Use the corrected data to add override rules in the relevant `config/sites/*.json` file
+2. Go to `/review` — **all classifications** appear with their captured images in a filterable grid
+3. Mark each entry as **Correct**, **Wrong** (select the right bin), or **Nothing / False** (false detection)
+4. Optionally correct item names for dataset refinement (click the item name to edit)
+5. Use corrected data to add override rules in `config/sites/*.json` or apply suggested overrides from the dashboard
 
-> **Note:** When users tap "Wrong" on the kiosk, their feedback is logged for post-pilot review. Use the `/review` page to assign correct bins to misclassified items.
+> **Note:** Dashboard stats reflect only items with explicit human feedback — either kiosk user taps (Correct/Wrong) or admin review verdicts. Unreviewed items are excluded so stats reflect confirmed data only.
 
 All raw data is in your Upstash console:
 - `recycling:pilot-log` — every classification (item, stream, confidence, model used, latency, image URL)
-- `recycling:feedback` — every user response (correct / wrong + actual stream if provided)
-- `recycling:corrections` — human-assigned correct bins from the review page
+- `recycling:feedback` — every kiosk user response (correct / wrong + actual stream if provided)
+- `recycling:review-verdicts` — admin review verdicts (correct / wrong / false_detection) keyed by requestId
 - `recycling:dynamic-overrides:{siteId}` — overrides added via the dashboard
 
 ### Data retention
@@ -338,12 +339,12 @@ You can also trigger manual purges from the dashboard using the date-range data 
 │   │   ├── overrides/      # Dynamic override management
 │   │   ├── pilot-image/    # Signed URL proxy for private blob images
 │   │   ├── pilot-log/      # Pilot log read/write/purge (GET/POST/DELETE)
-│   │   ├── review/         # Review page data + correction saving
+│   │   ├── review/         # Review verdicts, entry deletion, data export
 │   │   ├── session/        # Session token issuance (rate limited)
 │   │   ├── site-config/    # Returns site defaultLocale + streams for client use
 │   │   └── stats-stream/   # Server-sent events for live dashboard
 │   ├── dashboard/          # Live stats page
-│   ├── review/             # Post-pilot image review page
+│   ├── review/             # Human review — verdict assignment, name correction, entry deletion
 │   └── page.tsx            # Kiosk entry point (server component, passes site config to client)
 ├── components/
 │   ├── AdminNav.tsx        # Shared admin navigation (dashboard ↔ review)

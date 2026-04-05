@@ -63,11 +63,10 @@ export async function loadFeedback(): Promise<FeedbackEntry[]> {
 }
 
 /**
- * Merge kiosk feedback entries with ALL pilot log entries.
- * Pilot log entries with review verdicts are mapped to correct/wrong;
- * unreviewed pilot log entries are included as "pending" (feedback: "correct"
- * placeholder) so the dashboard reflects all classifications, not just
- * those where the user pressed Correct/Wrong on the kiosk screen.
+ * Merge kiosk feedback entries with pilot log entries that have admin
+ * review verdicts. Only items with explicit human feedback (kiosk
+ * correct/wrong button OR admin review verdict) are included in stats.
+ * Unreviewed items are excluded so stats reflect confirmed data only.
  */
 async function loadAllFeedback(): Promise<FeedbackEntry[]> {
   const [kioskEntries, pilotRaw, verdicts, verdictStreams] = await Promise.all([
@@ -102,6 +101,10 @@ async function loadAllFeedback(): Promise<FeedbackEntry[]> {
 
     // Skip false detections from stats entirely
     if (verdict === "false_detection") continue;
+
+    // Only include entries with an admin review verdict;
+    // unreviewed items are excluded from statistics
+    if (!verdict) continue;
 
     extraEntries.push({
       id: entry.requestId,

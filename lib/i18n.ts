@@ -100,7 +100,7 @@ const translations = {
 
     // Review page
     imageReview: "Image Review",
-    imageReviewSubtitle: "Assign correct bins to items users marked as wrong",
+    imageReviewSubtitle: "Review all classifications and mark each as correct, wrong, or false detection",
     pendingCount: "pending",
     correctedCount: "corrected",
     noWrongEntries: "No wrong feedback entries yet.",
@@ -260,7 +260,7 @@ const translations = {
 
     // Review page
     imageReview: "画像レビュー",
-    imageReviewSubtitle: "ユーザーが「間違い」と報告したアイテムに正しいゴミ箱を割り当てる",
+    imageReviewSubtitle: "全ての分類結果を確認し、正解・不正解・誤検出を判定します",
     pendingCount: "件 未対応",
     correctedCount: "件 修正済み",
     noWrongEntries: "まだ間違いのフィードバックはありません。",

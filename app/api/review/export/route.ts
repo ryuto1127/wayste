@@ -43,7 +43,7 @@ export async function GET(request: Request) {
 
     if (!verdicts || Object.keys(verdicts).length === 0) {
       return NextResponse.json(
-        { error: "No reviewed entries yet. Review entries at /review?mode=full first." },
+        { error: "No reviewed entries yet. Review entries at /review first." },
         { status: 404 }
       );
     }

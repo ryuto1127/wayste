@@ -3,11 +3,11 @@
  *
  * Three tiers, each progressively heavier (all on-demand):
  *
- *   1. **YOLO26n (on-demand)** — Runs when classification triggers.
+ *   1. **YOLO26m (on-demand)** — Runs when classification triggers.
  *      High confidence + rule match → instant result (Tier 1).
  *
  *   2. **YOLO World (on-demand fallback)** — Open-vocabulary detector with
- *      pre-baked recycling classes. Runs when YOLO26n confidence is low or it
+ *      pre-baked recycling classes. Runs when YOLO26m confidence is low or it
  *      detects no waste-relevant class. ~200-800ms on CPU.
  *
  *   3. **OpenAI API (last resort)** — Handled in KioskDisplay.tsx, not here.
@@ -29,9 +29,9 @@ const BACKEND = (typeof window !== "undefined"
 const INFERENCE_URL = process.env.NEXT_PUBLIC_INFERENCE_URL ?? "http://localhost:8000/detect";
 
 // ── Confidence thresholds for tiered fallback ──
-/** YOLO26n confidence below this triggers YOLO World fallback. */
+/** YOLO26m confidence below this triggers YOLO World fallback. */
 export const YOLO_FALLBACK_THRESHOLD = 0.65;
-/** YOLO26n confidence below this fires API in parallel with YOLO World. */
+/** YOLO26m confidence below this fires API in parallel with YOLO World. */
 export const YOLO_API_PARALLEL_THRESHOLD = 0.3;
 /** YOLO World confidence below this falls through to API. */
 export const YOLO_WORLD_ACCEPT_THRESHOLD = 0.45;

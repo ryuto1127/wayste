@@ -542,7 +542,7 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
 
     // ── Trigger classification (Tiered Pipeline — all on-demand) ──
     //
-    // Tier 1: YOLO26n (on-demand) → conf >= 0.65 + rule → instant result
+    // Tier 1: YOLO26m (on-demand) → conf >= 0.65 + rule → instant result
     // Tier 2: YOLO World (on-demand fallback) → ~200-800ms
     // Tier 3: OpenAI API (last resort) → ~1-3s
     //

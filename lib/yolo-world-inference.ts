@@ -116,7 +116,7 @@ export async function warmUpYoloWorld(): Promise<void> {
 /**
  * Run YOLO World inference on a video frame.
  *
- * Output format matches YOLO26n: [1, N, 6] where each row is
+ * Output format matches YOLO26m: [1, N, 6] where each row is
  * [x1, y1, x2, y2, confidence, classId].
  */
 export async function runYoloWorldInference(

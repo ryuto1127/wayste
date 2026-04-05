@@ -2,7 +2,7 @@
  * Tests for YOLO → waste stream resolution (Tier 1 + Tier 2).
  *
  * Verifies that:
- * 1. YOLO26n (COCO-80) detections resolve to the correct waste stream
+ * 1. YOLO26m (COCO-80) detections resolve to the correct waste stream
  * 2. YOLO World (recycling-specific) detections resolve correctly
  * 3. Unknown classes return null (trigger API fallback)
  * 4. Site overrides are applied on top of YOLO rules
@@ -66,10 +66,10 @@ afterAll(() => {
 });
 
 // ═══════════════════════════════════════════════════════════════════
-// Tier 1: YOLO26n (COCO-80) → waste stream
+// Tier 1: YOLO26m (COCO-80) → waste stream
 // ═══════════════════════════════════════════════════════════════════
 
-describe("Tier 1: YOLO26n detection → waste stream", () => {
+describe("Tier 1: YOLO26m detection → waste stream", () => {
   const config = makeSiteConfig();
 
   describe("recycling items", () => {

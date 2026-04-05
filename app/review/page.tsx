@@ -49,7 +49,7 @@ function ImageReviewPage() {
       const res = await fetch("/api/review");
       if (res.ok) {
         const data = await res.json();
-        setEntries(data.entries);
+        setEntries(Array.isArray(data.entries) ? data.entries : []);
       }
     } catch {
       // silent

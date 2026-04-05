@@ -275,7 +275,7 @@ const translations = {
 
     // Idle screen
     todaysStats: "今日の統計",
-    itemsSorted: "件 分類済み",
+    itemsSorted: "件が分類済み",
     successRateLabel: "成功率",
     firstUserWelcome: "あなたは今日最初のユーザーです！",
     sortingTip: "分別のヒント",

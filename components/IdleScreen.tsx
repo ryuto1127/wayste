@@ -192,7 +192,10 @@ export default function IdleScreen({
       </div>
 
       {/* CTA text */}
-      <p className="relative z-10 text-lg text-neutral-300 font-medium text-center mb-4">
+      <p
+        className="relative z-10 text-2xl text-white font-semibold text-center mb-4"
+        style={{ animation: "ctaPulse 2.5s ease-in-out infinite" }}
+      >
         {T("holdItemUp")}
       </p>
 

@@ -173,7 +173,7 @@ If YOLO World confidence ≥ 0.45
 If both local models yield confidence < 0.30 — API fires in parallel with
 YOLO World (no extra wait). Otherwise falls through here when
 YOLO World confidence < 0.45.
-  · ROI crop (70% of frame, scaled to max 768px) sent to /api/classify
+  · Center short-side square crop (e.g. 720×720 from 1280×720) sent to /api/classify
   · GPT-5.4 nano classifies item + optional preAction guidance (fast path, ~1s)
   · If confidence < 0.5 or item flagged for review
         → escalates to GPT-5.4 mini (accurate path, ~2–4s)
@@ -241,9 +241,9 @@ Captured images are uploaded to Vercel Blob with public access (required by `@ve
 The local CV pipeline uses **HSV color-space skin detection** instead of RGB heuristics. The HSV approach (`h ≤ 50, 0.1 ≤ s ≤ 0.8, v ≥ 0.2`) is significantly more equitable across skin tones — it avoids the bias inherent in RGB-range thresholds that tend to work better for lighter skin. The skin ratio gate (`MAX_SKIN_RATIO = 0.80`) prevents classifying a hand as an object while still allowing items held in-hand.
 
 Timing is tuned for kiosk responsiveness:
-- **Result display**: 4 seconds (then auto-transitions to cooldown)
+- **Result display**: stays on screen until the item is removed (30-second escape hatch)
 - **Cooldown**: 1.5 seconds between scans
-- **Object removal detection**: 2 consecutive empty frames
+- **Object removal detection**: 3 consecutive empty frames
 
 ### Pending-item queue
 

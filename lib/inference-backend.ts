@@ -111,12 +111,12 @@ class OnnxBackend implements InferenceBackend {
 
   async detectWorld(
     video: HTMLVideoElement,
-    roiMargin = 0.15,
+    _roiMargin = 0,
     minBoxArea = 5000,
     confidenceThreshold = 0.45,
   ): Promise<YoloDetection[]> {
     if (!this.yoloWorld) return [];
-    return this.yoloWorld.runYoloWorldInference(video, roiMargin, minBoxArea, confidenceThreshold);
+    return this.yoloWorld.runYoloWorldInference(video, _roiMargin, minBoxArea, confidenceThreshold);
   }
 }
 

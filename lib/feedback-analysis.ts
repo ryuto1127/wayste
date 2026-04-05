@@ -63,25 +63,17 @@ export async function loadFeedback(): Promise<FeedbackEntry[]> {
 }
 
 /**
- * Merge kiosk feedback entries with pilot log entries that have admin
- * review verdicts. Only items with explicit human feedback (kiosk
- * correct/wrong button OR admin review verdict) are included in stats.
- * Unreviewed items are excluded so stats reflect confirmed data only.
+ * Build feedback entries from admin review verdicts only.
+ * Review verdicts are the single source of truth — kiosk user feedback
+ * is ignored for stats. Only admin-reviewed items are counted.
  */
 async function loadAllFeedback(): Promise<FeedbackEntry[]> {
-  const [kioskEntries, pilotRaw, verdicts, verdictStreams] = await Promise.all([
-    loadFeedback(),
+  const [pilotRaw, verdicts, verdictStreams] = await Promise.all([
     redis.lrange(KEYS.pilotLog, 0, -1),
     redis.hgetall(VERDICTS_KEY) as Promise<Record<string, string> | null>,
     redis.hgetall(VERDICT_STREAMS_KEY) as Promise<Record<string, string> | null>,
   ]);
 
-  // Build a set of requestIds already covered by kiosk feedback to avoid duplicates
-  const coveredRequestIds = new Set(
-    kioskEntries.filter((e) => e.requestId).map((e) => e.requestId)
-  );
-
-  // Convert pilot log entries into FeedbackEntry format
   const pilotEntries = pilotRaw
     .map((item) => {
       try {
@@ -92,21 +84,14 @@ async function loadAllFeedback(): Promise<FeedbackEntry[]> {
     })
     .filter((e): e is PilotLogEntry => e !== null);
 
-  const extraEntries: FeedbackEntry[] = [];
+  const entries: FeedbackEntry[] = [];
   for (const entry of pilotEntries) {
     if (!entry.requestId) continue;
-    if (coveredRequestIds.has(entry.requestId)) continue;
 
     const verdict = verdicts?.[entry.requestId];
+    if (!verdict || verdict === "false_detection") continue;
 
-    // Skip false detections from stats entirely
-    if (verdict === "false_detection") continue;
-
-    // Only include entries with an admin review verdict;
-    // unreviewed items are excluded from statistics
-    if (!verdict) continue;
-
-    extraEntries.push({
+    entries.push({
       id: entry.requestId,
       timestamp: entry.timestamp,
       itemName: entry.itemName,
@@ -120,7 +105,7 @@ async function loadAllFeedback(): Promise<FeedbackEntry[]> {
     });
   }
 
-  return [...kioskEntries, ...extraEntries];
+  return entries;
 }
 
 export async function analyzeFeedback(siteId?: string): Promise<FeedbackStats> {

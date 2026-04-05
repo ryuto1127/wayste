@@ -23,6 +23,7 @@ type FullReviewEntry = PilotLogEntry & {
   verdict: "correct" | "wrong" | "false_detection" | null;
   verdictStream: string | null;
   correctedItemName: string | null;
+  kioskFeedback: "correct" | "wrong" | null;
 };
 
 type Verdict = "correct" | "wrong" | "false_detection";
@@ -420,6 +421,15 @@ function FullEntryCard({
       {verdictBadge && (
         <p className={`text-xs font-medium ${verdictBadge.color}`}>
           {verdictBadge.text}
+        </p>
+      )}
+
+      {/* Kiosk user feedback badge */}
+      {entry.kioskFeedback && (
+        <p className={`text-[11px] font-medium ${
+          entry.kioskFeedback === "correct" ? "text-sky-400" : "text-amber-400"
+        }`}>
+          {entry.kioskFeedback === "correct" ? T("kioskFeedbackCorrect") : T("kioskFeedbackWrong")}
         </p>
       )}
 

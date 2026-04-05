@@ -20,12 +20,24 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    const [pilotRaw, verdicts, verdictStreams, verdictNames] = await Promise.all([
+    const [pilotRaw, feedbackRaw, verdicts, verdictStreams, verdictNames] = await Promise.all([
       redis.lrange(KEYS.pilotLog, 0, -1),
+      redis.lrange(KEYS.feedback, 0, -1),
       redis.hgetall(VERDICTS_KEY) as Promise<Record<string, string> | null>,
       redis.hgetall(VERDICT_STREAMS_KEY) as Promise<Record<string, string> | null>,
       redis.hgetall(VERDICT_NAMES_KEY) as Promise<Record<string, string> | null>,
     ]);
+
+    // Build a map of kiosk user feedback keyed by requestId
+    const kioskFeedbackMap = new Map<string, "correct" | "wrong">();
+    for (const raw of feedbackRaw) {
+      try {
+        const fb = (typeof raw === "string" ? JSON.parse(raw) : raw) as { requestId?: string; feedback?: string };
+        if (fb.requestId && (fb.feedback === "correct" || fb.feedback === "wrong")) {
+          kioskFeedbackMap.set(fb.requestId, fb.feedback);
+        }
+      } catch { /* skip */ }
+    }
 
     const entries = pilotRaw
       .map((item) => {
@@ -40,6 +52,7 @@ export async function GET() {
         verdict: entry.requestId ? (verdicts?.[entry.requestId] ?? null) : null,
         verdictStream: entry.requestId ? (verdictStreams?.[entry.requestId] ?? null) : null,
         correctedItemName: entry.requestId ? (verdictNames?.[entry.requestId] ?? null) : null,
+        kioskFeedback: entry.requestId ? (kioskFeedbackMap.get(entry.requestId) ?? null) : null,
       }));
 
     const reviewed = entries.filter((e) => e.verdict !== null).length;

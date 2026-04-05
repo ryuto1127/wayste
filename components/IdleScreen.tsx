@@ -34,13 +34,17 @@ export default function IdleScreen({
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/kiosk-stats")
-      .then((r) => r.json())
-      .then((data: KioskDayStats) => {
-        if (!cancelled) setStats(data);
-      })
-      .catch(() => {});
-    return () => { cancelled = true; };
+    const fetchStats = () => {
+      fetch("/api/kiosk-stats")
+        .then((r) => r.json())
+        .then((data: KioskDayStats) => {
+          if (!cancelled) setStats(data);
+        })
+        .catch(() => {});
+    };
+    fetchStats();
+    const interval = setInterval(fetchStats, 15_000);
+    return () => { cancelled = true; clearInterval(interval); };
   }, [statsVersion]);
 
   const hasData = stats !== null && stats.totalClassifications > 0;

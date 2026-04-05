@@ -147,6 +147,8 @@ const translations = {
     saveItemName: "Save",
     deleteEntry: "Delete",
     confirmDelete: "Delete this entry?",
+    kioskFeedbackCorrect: "User: Correct",
+    kioskFeedbackWrong: "User: Wrong",
 
     // Voice guidance
     voiceOn: "Sound On",
@@ -307,6 +309,8 @@ const translations = {
     saveItemName: "保存",
     deleteEntry: "削除",
     confirmDelete: "このエントリーを削除しますか？",
+    kioskFeedbackCorrect: "ユーザー: 正解",
+    kioskFeedbackWrong: "ユーザー: 不正解",
 
     // Voice guidance
     voiceOn: "音声オン",

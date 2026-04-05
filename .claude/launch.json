@@ -4,7 +4,7 @@
     {
       "name": "Next.js Dev Server",
       "runtimeExecutable": "/bin/zsh",
-      "runtimeArgs": ["-c", "export PATH=/opt/homebrew/bin:$PATH && npm run dev"],
+      "runtimeArgs": ["-c", "export PATH=/Users/ryuto/.local/share/fnm/node-versions/v22.22.0/installation/bin:$PATH && npm run dev"],
       "port": 3000,
       "autoPort": true
     },

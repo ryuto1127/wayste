@@ -133,13 +133,43 @@ describe("Tier 1: YOLO26n detection → waste stream", () => {
     });
   });
 
-  describe("non-waste COCO classes return null (triggers API fallback)", () => {
+  describe("non-waste COCO classes return nothing_detected (instant rejection)", () => {
     it.each([
       "person", "car", "dog", "cat", "chair", "couch",
-      "bed", "dining table", "tv", "refrigerator",
-    ])("%s → null", (className) => {
+      "bed", "dining table",
+    ])("%s → nothing_detected", (className) => {
       const result = resolveYoloDetection(makeDetection(className), config);
-      expect(result).toBeNull();
+      expect(result).not.toBeNull();
+      expect(result!.itemName).toBe("nothing_detected");
+      expect(result!.modelUsed).toBe("yolo-local");
+    });
+  });
+
+  describe("electronics/appliances COCO classes resolve to special", () => {
+    it.each([
+      ["tv", "special"],
+      ["microwave", "special"],
+      ["toaster", "special"],
+      ["hair drier", "special"],
+      ["clock", "special"],
+    ])("%s → %s", (className, expectedStream) => {
+      const result = resolveYoloDetection(makeDetection(className), config);
+      expect(result).not.toBeNull();
+      expect(result!.wasteStream).toBe(expectedStream);
+    });
+  });
+
+  describe("newly added COCO items resolve correctly", () => {
+    it.each([
+      ["backpack", "landfill"],
+      ["umbrella", "landfill"],
+      ["scissors", "landfill"],
+      ["teddy bear", "landfill"],
+      ["vase", "landfill"],
+    ])("%s → %s", (className, expectedStream) => {
+      const result = resolveYoloDetection(makeDetection(className), config);
+      expect(result).not.toBeNull();
+      expect(result!.wasteStream).toBe(expectedStream);
     });
   });
 
@@ -165,9 +195,7 @@ describe("Tier 2: YOLO World detection → waste stream", () => {
 
   describe("recycling items (not in COCO-80)", () => {
     it.each([
-      ["aluminum can", "recycling"],
-      ["tin can", "recycling"],
-      ["cardboard box", "recycling"],
+      ["metal can", "recycling"],
       ["cardboard", "recycling"],
       ["paper bag", "recycling"],
       ["milk carton", "recycling"],
@@ -188,7 +216,6 @@ describe("Tier 2: YOLO World detection → waste stream", () => {
   describe("compost items", () => {
     it.each([
       ["napkin", "compost"],
-      ["tissue paper", "compost"],
       ["paper plate", "compost"],
       ["paper towel", "compost"],
       ["coffee cup sleeve", "compost"],
@@ -202,14 +229,10 @@ describe("Tier 2: YOLO World detection → waste stream", () => {
   describe("landfill items", () => {
     it.each([
       ["plastic bag", "landfill"],
-      ["food wrapper", "landfill"],
-      ["candy wrapper", "landfill"],
-      ["drinking straw", "landfill"],
-      ["plastic straw", "landfill"],
-      ["styrofoam container", "landfill"],
-      ["styrofoam cup", "landfill"],
-      ["plastic food container", "landfill"],
-      ["takeout container", "landfill"],
+      ["wrapper", "landfill"],
+      ["straw", "landfill"],
+      ["styrofoam", "landfill"],
+      ["food container", "landfill"],
       ["paper cup", "landfill"],
       ["chip bag", "landfill"],
       ["cigarette butt", "landfill"],
@@ -235,7 +258,7 @@ describe("Tier 2: YOLO World detection → waste stream", () => {
   });
 
   it("tags modelUsed as yolo-world", () => {
-    const result = resolveYoloWorldDetection(makeDetection("aluminum can"), config);
+    const result = resolveYoloWorldDetection(makeDetection("metal can"), config);
     expect(result!.modelUsed).toBe("yolo-world");
   });
 });
@@ -262,12 +285,12 @@ describe("Site overrides applied to YOLO results", () => {
     expect(result!.wasteStream).toBe("landfill");
   });
 
-  it("site override changes aluminum can stream for YOLO World", () => {
+  it("site override changes metal can stream for YOLO World", () => {
     const config = makeSiteConfig({
-      overrides: [{ pattern: "Aluminum Can", stream: "special", note: "Special recycling bin for cans" }],
+      overrides: [{ pattern: "Metal Can", stream: "special", note: "Special recycling bin for cans" }],
     });
 
-    const result = resolveYoloWorldDetection(makeDetection("aluminum can"), config);
+    const result = resolveYoloWorldDetection(makeDetection("metal can"), config);
     expect(result).not.toBeNull();
     expect(result!.wasteStream).toBe("special");
   });
@@ -278,20 +301,12 @@ describe("Site overrides applied to YOLO results", () => {
 // ═══════════════════════════════════════════════════════════════════
 
 describe("Rules JSON integrity", () => {
-  it("YOLO rules has all expected COCO-80 waste classes", () => {
-    const expectedClasses = [
-      "bottle", "wine glass", "cup", "fork", "knife", "spoon", "bowl",
-      "banana", "apple", "orange", "broccoli", "carrot", "sandwich",
-      "cake", "donut", "pizza", "hot dog", "cell phone", "remote",
-      "keyboard", "mouse", "laptop", "book", "toothbrush",
-    ];
-    for (const cls of expectedClasses) {
-      expect(yoloRules.rules[cls]).toBeDefined();
-    }
+  it("YOLO rules covers all 80 COCO classes", () => {
+    expect(Object.keys(yoloRules.rules)).toHaveLength(80);
   });
 
-  it("YOLO World rules has all 30 recycling-specific classes", () => {
-    expect(Object.keys(worldRules.rules)).toHaveLength(30);
+  it("YOLO World rules has all 23 consolidated recycling classes", () => {
+    expect(Object.keys(worldRules.rules)).toHaveLength(23);
   });
 
   it("every YOLO rule has required fields", () => {
@@ -318,7 +333,7 @@ describe("Rules JSON integrity", () => {
   });
 
   it("all waste streams in rules are valid", () => {
-    const validStreams = new Set(["recycling", "compost", "landfill", "special", "needs_review"]);
+    const validStreams = new Set(["recycling", "compost", "landfill", "special", "needs_review", "not_waste"]);
     for (const rule of Object.values(yoloRules.rules)) {
       expect(validStreams.has(rule.wasteStream)).toBe(true);
     }

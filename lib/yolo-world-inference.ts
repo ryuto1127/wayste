@@ -1,11 +1,12 @@
 /**
  * YOLO World open-vocabulary inference using ONNX Runtime Web.
  *
- * Used as a fallback when YOLO26n (COCO-80) has low confidence or no matching
- * waste-stream rule. The model is exported with pre-baked recycling-specific
- * class embeddings — no CLIP encoder needed at runtime.
+ * Used as a fallback when YOLO26m (COCO-80) has low confidence or the
+ * detected class is not waste-relevant. The model is exported with pre-baked
+ * recycling-specific class embeddings (23 consolidated classes) — no CLIP
+ * encoder needed at runtime.
  *
- * Heavier than YOLO26n (~50 MB vs 9.5 MB), so loaded on-demand and not run
+ * Heavier than YOLO26m (~50 MB vs 39 MB), so loaded on-demand and not run
  * continuously. Inference takes ~200-800ms on CPU depending on device.
  */
 import type { YoloDetection } from "./types";
@@ -26,22 +27,15 @@ const MODEL_INPUT_SIZE = 640;
  * Order must match the class indices frozen into the ONNX model.
  */
 export const YOLO_WORLD_CLASSES = [
-  "aluminum can",
-  "tin can",
-  "cardboard box",
+  "metal can",
   "cardboard",
   "paper bag",
   "plastic bag",
   "napkin",
-  "tissue paper",
-  "food wrapper",
-  "candy wrapper",
-  "drinking straw",
-  "plastic straw",
-  "styrofoam container",
-  "styrofoam cup",
-  "plastic food container",
-  "takeout container",
+  "wrapper",
+  "straw",
+  "styrofoam",
+  "food container",
   "milk carton",
   "juice box",
   "paper plate",

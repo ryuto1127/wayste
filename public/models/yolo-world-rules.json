@@ -2,23 +2,11 @@
   "confidence_threshold": 0.45,
   "min_box_area": 5000,
   "rules": {
-    "aluminum can": {
-      "itemName": "Aluminum Can",
+    "metal can": {
+      "itemName": "Metal Can",
       "wasteStream": "recycling",
-      "reasoning": "Aluminum cans are highly recyclable — rinse before recycling.",
+      "reasoning": "Metal cans are highly recyclable — rinse before recycling.",
       "preAction": "Empty and rinse before recycling"
-    },
-    "tin can": {
-      "itemName": "Tin Can",
-      "wasteStream": "recycling",
-      "reasoning": "Metal cans are recyclable — rinse and remove labels if possible.",
-      "preAction": "Empty and rinse before recycling"
-    },
-    "cardboard box": {
-      "itemName": "Cardboard Box",
-      "wasteStream": "recycling",
-      "reasoning": "Cardboard is recyclable — flatten before recycling.",
-      "preAction": "Flatten and remove tape if possible"
     },
     "cardboard": {
       "itemName": "Cardboard",
@@ -37,54 +25,29 @@
       "reasoning": "Plastic bags jam recycling machinery and must go to landfill or a dedicated drop-off."
     },
     "napkin": {
-      "itemName": "Napkin",
+      "itemName": "Napkin / Tissue",
       "wasteStream": "compost",
-      "reasoning": "Used napkins are compostable as soiled paper."
+      "reasoning": "Used napkins and tissue paper are compostable."
     },
-    "tissue paper": {
-      "itemName": "Tissue Paper",
-      "wasteStream": "compost",
-      "reasoning": "Used tissue paper is compostable."
-    },
-    "food wrapper": {
-      "itemName": "Food Wrapper",
+    "wrapper": {
+      "itemName": "Wrapper",
       "wasteStream": "landfill",
-      "reasoning": "Food-soiled wrappers are not recyclable."
+      "reasoning": "Food and candy wrappers are mixed-material packaging and not recyclable."
     },
-    "candy wrapper": {
-      "itemName": "Candy Wrapper",
-      "wasteStream": "landfill",
-      "reasoning": "Small mixed-material wrappers are not recyclable."
-    },
-    "drinking straw": {
+    "straw": {
       "itemName": "Straw",
       "wasteStream": "landfill",
       "reasoning": "Plastic straws are too small to recycle."
     },
-    "plastic straw": {
-      "itemName": "Plastic Straw",
-      "wasteStream": "landfill",
-      "reasoning": "Plastic straws are too small to recycle."
-    },
-    "styrofoam container": {
-      "itemName": "Styrofoam Container",
+    "styrofoam": {
+      "itemName": "Styrofoam",
       "wasteStream": "landfill",
       "reasoning": "Styrofoam (EPS) is not accepted in most recycling programs."
     },
-    "styrofoam cup": {
-      "itemName": "Styrofoam Cup",
+    "food container": {
+      "itemName": "Food Container",
       "wasteStream": "landfill",
-      "reasoning": "Styrofoam cups are not recyclable."
-    },
-    "plastic food container": {
-      "itemName": "Plastic Food Container",
-      "wasteStream": "landfill",
-      "reasoning": "Food-soiled plastic containers are generally not recyclable."
-    },
-    "takeout container": {
-      "itemName": "Takeout Container",
-      "wasteStream": "landfill",
-      "reasoning": "Food-soiled takeout containers are not recyclable."
+      "reasoning": "Food-soiled containers are generally not recyclable."
     },
     "milk carton": {
       "itemName": "Milk Carton",

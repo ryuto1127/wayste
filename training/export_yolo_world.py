@@ -3,8 +3,10 @@
 Export YOLO World v2 (small) with pre-baked recycling-specific classes to ONNX.
 
 This creates a fixed-class detector for waste items NOT covered by COCO-80.
-The CLIP text embeddings are computed once at export time and frozen into the
-model weights — no CLIP encoder needed at runtime.
+Similar classes are consolidated (e.g. aluminum can + tin can → metal can)
+to reduce inter-class confusion. The CLIP text embeddings are computed once
+at export time and frozen into the model weights — no CLIP encoder needed
+at runtime.
 
 Usage:
     pip install ultralytics
@@ -20,22 +22,15 @@ from ultralytics import YOLO
 # ── Classes to pre-bake ──
 # Must match YOLO_WORLD_CLASSES in lib/yolo-world-inference.ts exactly.
 RECYCLING_CLASSES = [
-    "aluminum can",
-    "tin can",
-    "cardboard box",
+    "metal can",
     "cardboard",
     "paper bag",
     "plastic bag",
     "napkin",
-    "tissue paper",
-    "food wrapper",
-    "candy wrapper",
-    "drinking straw",
-    "plastic straw",
-    "styrofoam container",
-    "styrofoam cup",
-    "plastic food container",
-    "takeout container",
+    "wrapper",
+    "straw",
+    "styrofoam",
+    "food container",
     "milk carton",
     "juice box",
     "paper plate",

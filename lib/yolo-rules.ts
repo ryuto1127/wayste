@@ -100,6 +100,22 @@ export function resolveYoloDetection(
   const rule = rulesCache.rules[detection.className];
   if (!rule) return null;
 
+  // Non-waste items (person, car, furniture, etc.) → instant "nothing detected"
+  // so the pipeline doesn't waste time falling through to YOLO World / API.
+  if (rule.wasteStream === "not_waste") {
+    return {
+      itemName: "nothing_detected",
+      wasteStream: "landfill",
+      confidence: 0,
+      reasoning: rule.reasoning,
+      binColor: "#525252",
+      binLabel: "",
+      needsReview: false,
+      isCompound: false,
+      modelUsed: "yolo-local",
+    };
+  }
+
   // Run through the same override/site-rule pipeline as the API route
   const result = buildClassificationResult(
     {

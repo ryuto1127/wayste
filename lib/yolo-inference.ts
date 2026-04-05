@@ -1,9 +1,9 @@
 /**
  * YOLO26m edge inference using ONNX Runtime Web (FP16).
  *
- * Uses COCO-80 pre-trained YOLO26m with a curated rules file that maps
- * waste-relevant classes to disposal streams. Non-waste COCO detections
- * (furniture, vehicles, etc.) have no rules and trigger API fallback.
+ * Uses COCO-80 pre-trained YOLO26m with a rules file that maps all 80
+ * classes to disposal streams. Non-waste detections (furniture, vehicles,
+ * animals, etc.) resolve to "not_waste" for instant rejection.
  *
  * Runs entirely in the browser — no server calls required.
  * Falls back gracefully (returns empty array) if the model fails to load.
@@ -180,10 +180,9 @@ export async function runYoloInference(
       const confidence = outputData[base + 4];
       const classId = Math.round(outputData[base + 5]);
 
-      // Skip empty/invalid detections and persons
+      // Skip empty/invalid detections
       if (confidence < confidenceThreshold) continue;
       if (classId < 0 || classId >= COCO_CLASSES.length) continue;
-      if (classId === 0) continue; // Skip "person"
 
       const w = x2 - x1;
       const h = y2 - y1;

@@ -7,7 +7,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod/v4";
 import { redis, KEYS } from "@/lib/redis";
-import { requireApiKey } from "@/lib/auth";
 import type { PilotLogEntry } from "@/lib/types";
 
 /** Human review verdicts for pilot log entries: requestId → "correct" | "wrong" | "false_detection" */
@@ -56,8 +55,7 @@ export async function GET() {
 // ── DELETE: remove a single pilot-log entry by requestId ──
 
 export async function DELETE(request: Request) {
-  const denied = requireApiKey(request);
-  if (denied) return denied;
+  // Auth is handled by middleware (session cookie / Basic Auth).
 
   const { searchParams } = new URL(request.url);
   const requestId = searchParams.get("requestId");
@@ -116,8 +114,7 @@ const ReviewSchema = z.object({
 });
 
 export async function POST(request: Request) {
-  const denied = requireApiKey(request);
-  if (denied) return denied;
+  // Auth is handled by middleware (session cookie / Basic Auth).
 
   let body: unknown;
   try {

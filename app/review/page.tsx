@@ -111,10 +111,12 @@ function ImageReviewPage() {
   const deleteEntry = useCallback(async (requestId: string) => {
     setSaving(requestId);
     try {
-      await fetch(`/api/review?requestId=${encodeURIComponent(requestId)}`, {
+      const res = await fetch(`/api/review?requestId=${encodeURIComponent(requestId)}`, {
         method: "DELETE",
       });
-      setEntries((prev) => prev.filter((e) => e.requestId !== requestId));
+      if (res.ok) {
+        setEntries((prev) => prev.filter((e) => e.requestId !== requestId));
+      }
     } catch {
       // silent
     } finally {

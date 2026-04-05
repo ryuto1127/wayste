@@ -1,11 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useSearchParams } from "next/navigation";
+import { usePathname } from "next/navigation";
 import type { Locale } from "@/lib/i18n";
 import { t } from "@/lib/i18n";
 
-type Page = "dashboard" | "review" | "review-full";
+type Page = "dashboard" | "review";
 
 interface AdminNavProps {
   locale: Locale;
@@ -37,15 +37,8 @@ function NavLink({
 
 export function AdminNav({ locale, onToggleLocale }: AdminNavProps) {
   const pathname = usePathname();
-  const searchParams = useSearchParams();
-  const mode = searchParams.get("mode");
 
-  const current: Page =
-    pathname === "/dashboard"
-      ? "dashboard"
-      : mode === "full"
-      ? "review-full"
-      : "review";
+  const current: Page = pathname === "/dashboard" ? "dashboard" : "review";
 
   const T = (key: Parameters<typeof t>[1]) => t(locale, key);
 
@@ -56,9 +49,6 @@ export function AdminNav({ locale, onToggleLocale }: AdminNavProps) {
       </NavLink>
       <NavLink href="/review" active={current === "review"}>
         {T("imageReview")}
-      </NavLink>
-      <NavLink href="/review?mode=full" active={current === "review-full"}>
-        {T("fullReview")}
       </NavLink>
       <span className="w-px h-5 bg-neutral-700 mx-1" />
       <button

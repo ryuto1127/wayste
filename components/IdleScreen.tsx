@@ -129,8 +129,8 @@ export default function IdleScreen({
           The massive box-shadow darkens everything outside the viewfinder
           so the live camera feed (behind this overlay) only shows through here. */}
       <div
-        className="relative w-full max-w-xl aspect-square rounded-2xl overflow-hidden mb-5"
-        style={{ boxShadow: "0 0 0 9999px rgba(10, 10, 10, 0.75)" }}
+        className="relative w-full max-w-lg max-h-[55vh] aspect-square flex-shrink-0 rounded-2xl overflow-hidden mb-5"
+        style={{ boxShadow: "0 0 0 9999px rgba(10, 10, 10, 0.50)" }}
       >
 
         {/* Dark vignette overlay outside the ROI — outer zone is dimmed so
@@ -139,17 +139,17 @@ export default function IdleScreen({
         <div className="absolute inset-0 pointer-events-none">
           {/* Top strip */}
           <div
-            className="absolute top-0 left-0 right-0 bg-neutral-950/35"
+            className="absolute top-0 left-0 right-0 bg-neutral-950/20"
             style={{ height: roiInsetPct }}
           />
           {/* Bottom strip */}
           <div
-            className="absolute bottom-0 left-0 right-0 bg-neutral-950/35"
+            className="absolute bottom-0 left-0 right-0 bg-neutral-950/20"
             style={{ height: roiInsetPct }}
           />
           {/* Left strip (between top and bottom) */}
           <div
-            className="absolute bg-neutral-950/35"
+            className="absolute bg-neutral-950/20"
             style={{
               top: roiInsetPct,
               bottom: roiInsetPct,
@@ -159,7 +159,7 @@ export default function IdleScreen({
           />
           {/* Right strip (between top and bottom) */}
           <div
-            className="absolute bg-neutral-950/35"
+            className="absolute bg-neutral-950/20"
             style={{
               top: roiInsetPct,
               bottom: roiInsetPct,
@@ -189,12 +189,6 @@ export default function IdleScreen({
           <div className="absolute bottom-0 right-0 w-10 h-10 border-b-[3px] border-r-[3px] rounded-br-xl border-white/70" />
         </div>
 
-        {/* Pulsing hand icon in the center */}
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <span className="text-4xl opacity-60 animate-[pulse_2s_ease-in-out_infinite]">
-            👋
-          </span>
-        </div>
       </div>
 
       {/* CTA text */}

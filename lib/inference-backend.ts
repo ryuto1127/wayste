@@ -82,12 +82,12 @@ class OnnxBackend implements InferenceBackend {
 
   async detect(
     video: HTMLVideoElement,
-    roiMargin = 0.15,
+    _roiMargin = 0,
     minBoxArea = 5000,
     confidenceThreshold = 0.65,
   ): Promise<YoloDetection[]> {
     if (!this.yolo) return [];
-    return this.yolo.runYoloInference(video, roiMargin, minBoxArea, confidenceThreshold);
+    return this.yolo.runYoloInference(video, _roiMargin, minBoxArea, confidenceThreshold);
   }
 
   // ── YOLO World ──
@@ -144,7 +144,7 @@ class HttpBackend implements InferenceBackend {
 
   async detect(
     video: HTMLVideoElement,
-    roiMargin = 0.15,
+    _roiMargin = 0,
     minBoxArea = 5000,
     confidenceThreshold = 0.65,
   ): Promise<YoloDetection[]> {
@@ -153,16 +153,17 @@ class HttpBackend implements InferenceBackend {
     try {
       const vw = video.videoWidth;
       const vh = video.videoHeight;
-      const roiX = Math.round(vw * roiMargin);
-      const roiY = Math.round(vh * roiMargin);
-      const roiW = Math.round(vw * (1 - roiMargin * 2));
-      const roiH = Math.round(vh * (1 - roiMargin * 2));
+      // Crop the largest centered square (short-side based, e.g. 720×720
+      // from 1280×720) — matches ONNX backend and OpenAI classification.
+      const side = Math.min(vw, vh);
+      const roiX = Math.round((vw - side) / 2);
+      const roiY = Math.round((vh - side) / 2);
 
       const canvas = new OffscreenCanvas(640, 640);
       const ctx = canvas.getContext("2d");
       if (!ctx) return [];
 
-      ctx.drawImage(video, roiX, roiY, roiW, roiH, 0, 0, 640, 640);
+      ctx.drawImage(video, roiX, roiY, side, side, 0, 0, 640, 640);
       const blob = await canvas.convertToBlob({ type: "image/jpeg", quality: 0.85 });
 
       const formData = new FormData();

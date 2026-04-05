@@ -11,8 +11,9 @@ Built for office and public-space pilots, with full English and Japanese support
 - Detects objects held up to the camera using local computer vision — no cloud needed for detection
 - Runs a **3-tier local inference pipeline** entirely in the browser before touching any cloud API:
   - **Tier 1 — YOLO26m (on-demand):** runs when the CV pipeline triggers classification; COCO-80 items with high confidence are resolved instantly (no server call)
-  - **Tier 2 — YOLO World S (on-demand):** 30 recycling-specific classes (aluminum cans, cardboard, napkins, styrofoam, straws, etc.) that COCO-80 misses; loaded lazily (~50 MB) and run when Tier 1 confidence is below 0.65
+  - **Tier 2 — YOLO World S (on-demand):** 23 consolidated recycling-specific classes (metal cans, cardboard, napkins, styrofoam, straws, etc.) that COCO-80 misses; loaded lazily (47.9 MB) and run when Tier 1 confidence is below 0.65
   - **Tier 3 — OpenAI API:** last resort when both local models fail or confidence stays below 0.30
+- **YOLO26m covers all 80 COCO classes** — non-waste detections (person, car, furniture, animals) resolve to `not_waste` and return `nothing_detected` instantly, skipping YOLO World and the API entirely
 - When Tier 1 confidence is below 0.30, the API fires in parallel with YOLO World so the slower path never adds extra latency
 - Shows a **clear directive** based on confidence level — no raw percentages shown to users:
   - High confidence → **"Put this in Recycling"**
@@ -42,8 +43,8 @@ Built for office and public-space pilots, with full English and Japanese support
 | URL | Purpose |
 |-----|---------|
 | `/` | The kiosk itself |
-| `/dashboard` | Live accuracy stats, most-corrected items, suggested override rules |
-| `/review` | Human review — browse all classifications, mark each as correct/wrong/false detection, correct item names |
+| `/dashboard` | Live accuracy stats, most-corrected items |
+| `/review` | Human review — browse all classifications, mark each as Correct/Wrong/Nothing (false detection), download ZIP of flagged images for annotation |
 
 ---
 
@@ -54,7 +55,7 @@ Built for office and public-space pilots, with full English and Japanese support
 | Framework | Next.js 16 (App Router, TypeScript) |
 | Styling | Tailwind CSS v4 |
 | Local inference (Tier 1) | YOLO26m FP16 (COCO-80, 39 MB) via ONNX Runtime Web — on-demand |
-| Local inference (Tier 2) | YOLO World S (30 recycling classes, ~50 MB) via ONNX Runtime Web — on-demand fallback |
+| Local inference (Tier 2) | YOLO World S (23 consolidated recycling classes, 47.9 MB) via ONNX Runtime Web — on-demand fallback |
 | AI classification | OpenAI GPT-5.4 vision — nano (fast) with mini escalation (accurate) |
 | Local detection | OffscreenCanvas background subtraction at 120×120 (square), ~33 fps, HSV-based skin filtering |
 | Response validation | Zod schema validation on all model output |
@@ -155,6 +156,10 @@ Local CV pipeline detects object
         ↓
 ── Tier 1: YOLO26m FP16 (on-demand) ─────────────────────────────────────
 YOLO26m runs on-demand when the CV pipeline triggers classification.
+Rules cover all 80 COCO classes.
+        ↓
+If YOLO26m class resolves to not_waste (person, car, furniture, animals…)
+        → nothing_detected returned instantly — no YOLO World, no API call
         ↓
 If YOLO26m confidence ≥ 0.65 AND class has a waste-stream rule
         → result returned immediately (instant, no server call)
@@ -162,10 +167,10 @@ If YOLO26m confidence ≥ 0.65 AND class has a waste-stream rule
         ↓
 ── Tier 2: YOLO World S (on-demand) ──────────────────────────────────────
 If YOLO26m confidence < 0.65 (or no waste rule for the class):
-  · YOLO World S loads lazily if not yet cached (~50 MB, ONNX Runtime Web)
+  · YOLO World S loads lazily if not yet cached (47.9 MB, ONNX Runtime Web)
   · Runs on ROI crop — ~200–800 ms on CPU
-  · 30 pre-baked recycling classes: aluminum cans, cardboard, napkins,
-    styrofoam, straws, takeout containers, milk cartons, etc.
+  · 23 consolidated recycling classes: metal cans, cardboard, napkins,
+    styrofoam, straws, food containers, milk cartons, etc.
 If YOLO World confidence ≥ 0.45
         → result returned immediately (no server call)
         ↓
@@ -300,11 +305,11 @@ Patterns use **word-boundary matching** — a pattern of `"cup"` matches `"paper
 
 After a real-world test:
 
-1. Go to `/dashboard` to see accuracy rate, most-corrected items, and auto-suggested override rules
-2. Go to `/review` — **all classifications** appear with their captured images in a filterable grid
-3. Mark each entry as **Correct**, **Wrong** (select the right bin), or **Nothing / False** (false detection)
-4. Optionally correct item names for dataset refinement (click the item name to edit)
-5. Use corrected data to add override rules in `config/sites/*.json` or apply suggested overrides from the dashboard
+1. Go to `/dashboard` to see accuracy rate and most-corrected items
+2. Go to `/review` — **all classifications** appear with their captured images in a filterable grid, with model name and sharpness score per entry
+3. Mark each entry as **Correct**, **Wrong** (model's class name doesn't match what's in the image), or **Nothing** (false detection)
+4. Download a **ZIP archive** of flagged images (Wrong + low-confidence Correct) for use in annotation tools
+5. Use insights to add override rules in `config/sites/*.json`
 
 > **Note:** Dashboard stats reflect only items with explicit human feedback — either kiosk user taps (Correct/Wrong) or admin review verdicts. Unreviewed items are excluded so stats reflect confirmed data only.
 
@@ -343,8 +348,8 @@ You can also trigger manual purges from the dashboard using the date-range data 
 │   │   ├── session/        # Session token issuance (rate limited)
 │   │   ├── site-config/    # Returns site defaultLocale + streams for client use
 │   │   └── stats-stream/   # Server-sent events for live dashboard
-│   ├── dashboard/          # Live stats page
-│   ├── review/             # Human review — verdict assignment, name correction, entry deletion
+│   ├── dashboard/          # Live stats (accuracy rate, most-corrected items)
+│   ├── review/             # Human review — Correct/Wrong/Nothing verdicts, ZIP export for annotation
 │   └── page.tsx            # Kiosk entry point (server component, passes site config to client)
 ├── components/
 │   ├── AdminNav.tsx        # Shared admin navigation (dashboard ↔ review)

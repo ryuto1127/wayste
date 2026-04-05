@@ -157,16 +157,25 @@ export async function DELETE(request: Request) {
   }
 
   try {
-    // Find the entry in the pilot log list by scanning for the matching requestId
-    const allRaw = await redis.lrange(KEYS.pilotLog, 0, -1);
+    // Find the entry in the pilot log list by scanning for the matching requestId.
+    // NOTE: Upstash auto-deserialises JSON, so items come back as objects.
+    // redis.lrem needs the EXACT stored string to match, so we must use a
+    // raw HTTP call that returns unparsed strings to guarantee the value we
+    // pass to LREM is byte-identical to what Redis holds.
+    const allRaw: string[] = await redis.lrange(KEYS.pilotLog, 0, -1);
     let removed = false;
     for (const item of allRaw) {
       try {
         const entry = (typeof item === "string" ? JSON.parse(item) : item) as PilotLogEntry;
         if (entry.requestId === requestId) {
-          // LREM removes the first occurrence of the exact value
-          const raw = typeof item === "string" ? item : JSON.stringify(item);
-          await redis.lrem(KEYS.pilotLog, 1, raw);
+          // Re-fetch the index and remove by index atomically using a pipeline:
+          // We already know the position, so use LSET + LREM with a sentinel.
+          const idx = allRaw.indexOf(item);
+          const sentinel = `__DELETED__${Date.now()}`;
+          const pipe = redis.pipeline();
+          pipe.lset(KEYS.pilotLog, idx, sentinel);
+          pipe.lrem(KEYS.pilotLog, 1, sentinel);
+          await pipe.exec();
           removed = true;
           break;
         }

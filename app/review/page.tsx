@@ -2,9 +2,8 @@
 
 import { useEffect, useState, useCallback, useRef, useMemo, Suspense } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
 import { AdminNav } from "@/components/AdminNav";
-import type { FeedbackEntry, PilotLogEntry } from "@/lib/types";
+import type { PilotLogEntry } from "@/lib/types";
 import type { Locale } from "@/lib/i18n";
 import { t } from "@/lib/i18n";
 
@@ -20,8 +19,6 @@ const STREAMS: { id: string; labelKey: "recycling" | "compost" | "landfill" | "s
 
 // ── Types ──
 
-type ReviewEntry = FeedbackEntry & { actualStream: string | null; blobUploadFailed?: boolean };
-
 type FullReviewEntry = PilotLogEntry & {
   verdict: "correct" | "wrong" | "false_detection" | null;
   verdictStream: string | null;
@@ -33,24 +30,12 @@ type Verdict = "correct" | "wrong" | "false_detection";
 export default function ReviewPage() {
   return (
     <Suspense fallback={<div className="h-full bg-neutral-950 text-white flex items-center justify-center"><p className="text-neutral-400">Loading...</p></div>}>
-      <ReviewRouter />
+      <ImageReviewPage />
     </Suspense>
   );
 }
 
-function ReviewRouter() {
-  const searchParams = useSearchParams();
-  const mode = searchParams.get("mode");
-
-  if (mode === "full") return <FullReviewPage />;
-  return <LegacyReviewPage />;
-}
-
-// ══════════════════════════════════════════════════
-// Full Review Mode — ALL pilot log entries
-// ══════════════════════════════════════════════════
-
-function FullReviewPage() {
+function ImageReviewPage() {
   const [entries, setEntries] = useState<FullReviewEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [locale, setLocale] = useState<Locale>("en");
@@ -61,7 +46,7 @@ function FullReviewPage() {
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch("/api/review?mode=full");
+      const res = await fetch("/api/review");
       if (res.ok) {
         const data = await res.json();
         setEntries(data.entries);
@@ -177,8 +162,8 @@ function FullReviewPage() {
         {/* Header */}
         <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
           <div>
-            <h1 className="text-3xl font-bold">{T("fullReview")}</h1>
-            <p className="text-neutral-400 text-sm mt-1">{T("fullReviewSubtitle")}</p>
+            <h1 className="text-3xl font-bold">{T("imageReview")}</h1>
+            <p className="text-neutral-400 text-sm mt-1">{T("imageReviewSubtitle")}</p>
           </div>
           <AdminNav locale={locale} onToggleLocale={() => setLocale(locale === "en" ? "ja" : "en")} />
         </div>

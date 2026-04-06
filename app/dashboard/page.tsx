@@ -13,27 +13,41 @@ export default function DashboardPage() {
   const [isLive, setIsLive] = useState(false);
 
   useEffect(() => {
-    const es = new EventSource("/api/stats-stream");
+    let es: EventSource | null = null;
 
-    es.onopen = () => setIsLive(true);
+    const connect = () => {
+      es?.close();
+      es = new EventSource("/api/stats-stream");
 
-    es.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data) as FeedbackStats;
-        setStats(data);
-        setLoading(false);
-      } catch {
-        // ignore parse errors
-      }
+      es.onopen = () => setIsLive(true);
+
+      es.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data) as FeedbackStats;
+          setStats(data);
+          setLoading(false);
+        } catch {
+          // ignore parse errors
+        }
+      };
+
+      es.onerror = () => {
+        setIsLive(false);
+      };
     };
 
-    es.onerror = () => {
-      setIsLive(false);
+    connect();
+
+    // Reconnect when tab becomes visible (SSE may drop when backgrounded)
+    const onVisible = () => {
+      if (document.visibilityState === "visible") connect();
     };
+    document.addEventListener("visibilitychange", onVisible);
 
     return () => {
-      es.close();
+      es?.close();
       setIsLive(false);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, []);
 

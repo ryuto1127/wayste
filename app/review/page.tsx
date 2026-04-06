@@ -49,6 +49,15 @@ function ImageReviewPage() {
 
   useEffect(() => { load(); }, [load]);
 
+  // Refetch when tab becomes visible (e.g., after deleting data on dashboard)
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible") load();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [load]);
+
   const submitVerdict = useCallback(async (requestId: string, verdict: Verdict) => {
     setSaving(requestId);
     try {

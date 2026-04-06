@@ -31,6 +31,17 @@ export function _setWorldRulesCache(config: YoloRulesConfig | null): void {
 }
 
 /**
+ * Check if a COCO-80 class name maps to "not_waste" in the loaded rules.
+ * Used to filter out non-waste detections (person, furniture, vehicles, etc.)
+ * so they don't block waste detection via Tier 2 / API.
+ */
+export function isYoloClassNotWaste(className: string): boolean {
+  if (!rulesCache) return false;
+  const rule = rulesCache.rules[className];
+  return rule?.wasteStream === "not_waste";
+}
+
+/**
  * Load yolo-rules.json from the public directory. Cached after first fetch.
  */
 export function loadYoloRules(): Promise<YoloRulesConfig | null> {

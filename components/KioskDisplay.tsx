@@ -25,7 +25,7 @@ import {
   YOLO_API_PARALLEL_THRESHOLD,
   YOLO_WORLD_ACCEPT_THRESHOLD,
 } from "@/lib/inference-backend";
-import { loadYoloRules, loadYoloWorldRules, resolveYoloDetection, resolveYoloWorldDetection } from "@/lib/yolo-rules";
+import { loadYoloRules, loadYoloWorldRules, resolveYoloDetection, resolveYoloWorldDetection, isYoloClassNotWaste } from "@/lib/yolo-rules";
 // kioskAuthHeaders replaced by session token (server-generated, HMAC-signed)
 import CameraFeed, { type CameraFeedHandle } from "./CameraFeed";
 import IdleScreen from "./IdleScreen";
@@ -460,7 +460,7 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
         // After repeated "nothing detected", use progressively longer cooldowns
         // to let the background model absorb persistent non-waste objects.
         const effectiveCooldown = nothingDetectedCountRef.current > 1
-          ? Math.min(COOLDOWN_MS * nothingDetectedCountRef.current, 10_000)
+          ? Math.min(COOLDOWN_MS * nothingDetectedCountRef.current, 4_000)
           : COOLDOWN_MS;
         const cooldownElapsed = Date.now() - cooldownStartRef.current >= effectiveCooldown;
         const errorHeld = !errorRef.current || (Date.now() - errorSetAtRef.current >= ERROR_HOLD_MS);
@@ -591,15 +591,19 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
             yoloDetectionLogs = toDetectionLogs(detections);
           }
 
-          if (detections.length > 0) {
-            const best = detections[0];
+          // Filter out not_waste classes (person, furniture, vehicles, etc.)
+          // Hands holding items are expected in a kiosk — they must not block waste detection.
+          const wasteDetections = detections.filter(d => !isYoloClassNotWaste(d.className));
+
+          if (wasteDetections.length > 0) {
+            const best = wasteDetections[0];
 
             // ── Multi-item: resolve up to 2 distinct high-confidence detections ──
             if (best.confidence >= YOLO_FALLBACK_THRESHOLD) {
               // Collect distinct class results (max 2)
               const seen = new Set<string>();
               const resolvedResults: ClassificationResponse[] = [];
-              for (const det of detections) {
+              for (const det of wasteDetections) {
                 if (det.confidence < YOLO_FALLBACK_THRESHOLD) break;
                 if (seen.has(det.className)) continue;
                 seen.add(det.className);
@@ -630,10 +634,14 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
               video, backend, best, apiPromise, apiController, fireApiInParallel, detections, yoloMs,
             );
           } else {
-            // ── No YOLO detections at all: try YOLO World, then API ──
-            console.log(`[tier1] No YOLO detections (${yoloMs}ms) — escalating to YOLO World`);
+            // ── Only non-waste (person, etc.) or no detections — escalate to YOLO World ──
+            if (detections.length > 0) {
+              console.log(`[tier1] Only non-waste detections (${detections.map(d => d.className).join(", ")}) in ${yoloMs}ms — escalating to YOLO World`);
+            } else {
+              console.log(`[tier1] No YOLO detections (${yoloMs}ms) — escalating to YOLO World`);
+            }
             escalateToYoloWorld(
-              video, backend, null, apiPromise, apiController, true, [], yoloMs,
+              video, backend, null, apiPromise, apiController, true, detections, yoloMs,
             );
           }
         })
@@ -752,12 +760,14 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
 
       backend.detect(video)
         .then((detections) => {
-          if (detections.length > 0) {
-            const best = detections[0];
+          // Filter out non-waste classes (person, furniture, etc.)
+          const wasteDetections = detections.filter(d => !isYoloClassNotWaste(d.className));
+          if (wasteDetections.length > 0) {
+            const best = wasteDetections[0];
             // Resolve multiple distinct detections (offline)
             const seen = new Set<string>();
             const resolvedResults: ClassificationResponse[] = [];
-            for (const det of detections) {
+            for (const det of wasteDetections) {
               if (seen.has(det.className)) continue;
               seen.add(det.className);
               const r = resolveYoloDetection(det, siteConfigRef.current!);
@@ -792,7 +802,26 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
 
             handleClassificationResult(buildOfflineFallback(best.className, best.confidence), undefined);
           } else {
-            handleClassificationResult(buildOfflineFallback("unknown item", 0.1), undefined);
+            // Only non-waste or no detections — try YOLO World
+            if (backend.isYoloWorldReady()) {
+              backend.detectWorld(video)
+                .then((worldDets) => {
+                  if (worldDets.length > 0) {
+                    const worldResult = resolveYoloWorldDetection(worldDets[0], siteConfigRef.current!);
+                    if (worldResult) {
+                      console.log(`[offline] YOLO World HIT: ${worldDets[0].className} → ${worldResult.wasteStream}`);
+                      handleClassificationResult(worldResult, undefined);
+                      return;
+                    }
+                  }
+                  handleClassificationResult(buildOfflineFallback("unknown item", 0.1), undefined);
+                })
+                .catch(() => {
+                  handleClassificationResult(buildOfflineFallback("unknown item", 0.1), undefined);
+                });
+            } else {
+              handleClassificationResult(buildOfflineFallback("unknown item", 0.1), undefined);
+            }
           }
         })
         .catch(() => {

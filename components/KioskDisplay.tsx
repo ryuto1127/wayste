@@ -62,8 +62,9 @@ const CLASSIFYING_TIMEOUT_MS = 20_000;
 // ── Background adaptation rates (passed to FrameAnalyzer per pipeline state) ──
 // idle / cooldown: full rate — continuously absorb drift and persistent leftovers
 const BG_RATE_IDLE = 0.025; // matches BG_LEARN_RATE in frame-analyzer
-// result: micro rate — slowly absorbs stuck items without corrupting live objects
-const BG_RATE_RESULT = 0.001;
+// result: frozen — BG model still holds the pre-item scene, so item-vs-empty
+// diff stays accurate; absorbing the item would erode foreground detection
+const BG_RATE_RESULT = 0;
 // object_detected / classifying: frozen — never absorb the held object
 const BG_RATE_FROZEN = 0;
 

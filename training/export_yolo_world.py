@@ -3,10 +3,10 @@
 Export YOLO World v2 (small) with pre-baked recycling-specific classes to ONNX.
 
 This creates a fixed-class detector for waste items NOT covered by COCO-80.
-Similar classes are consolidated (e.g. aluminum can + tin can → metal can)
-to reduce inter-class confusion. The CLIP text embeddings are computed once
-at export time and frozen into the model weights — no CLIP encoder needed
-at runtime.
+Visually specific class names are used to avoid model confusion
+(e.g. "aluminium beverage can" instead of "metal can" to prevent misclassification
+as "battery"). The CLIP text embeddings are computed once at export time and frozen
+into the model weights — no CLIP encoder needed at runtime.
 
 Usage:
     pip install ultralytics
@@ -22,29 +22,41 @@ from ultralytics import YOLO
 # ── Classes to pre-bake ──
 # Must match YOLO_WORLD_CLASSES in lib/yolo-world-inference.ts exactly.
 RECYCLING_CLASSES = [
-    "metal can",
+    "aluminium beverage can",
+    "steel food can",
+    "plastic bottle",
+    "glass bottle",
+    "glass jar",
     "cardboard",
     "paper bag",
-    "plastic bag",
+    "paper cup",
+    "paper plate",
+    "paper towel",
     "napkin",
-    "wrapper",
-    "straw",
-    "styrofoam",
-    "food container",
+    "newspaper",
     "milk carton",
     "juice box",
-    "paper plate",
-    "paper cup",
-    "aluminum foil",
-    "paper towel",
     "egg carton",
-    "coffee cup sleeve",
+    "pizza box",
+    "plastic bag",
     "plastic bottle cap",
-    "glass jar",
-    "yogurt cup",
+    "plastic wrapper",
     "chip bag",
-    "cigarette butt",
+    "styrofoam cup",
+    "styrofoam container",
+    "plastic straw",
+    "plastic food container",
+    "plastic cup",
+    "yogurt cup",
+    "plastic utensil",
+    "coffee cup",
+    "coffee cup sleeve",
+    "aluminum foil",
+    "banana peel",
+    "apple core",
     "battery",
+    "cigarette butt",
+    "pen",
 ]
 
 OUTPUT_DIR = Path(__file__).parent.parent / "public" / "models"

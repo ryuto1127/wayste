@@ -3,8 +3,8 @@
  *
  * Used as a fallback when YOLO26m (COCO-80) has low confidence or the
  * detected class is not waste-relevant. The model is exported with pre-baked
- * recycling-specific class embeddings (23 consolidated classes) — no CLIP
- * encoder needed at runtime.
+ * recycling-specific class embeddings (35 classes) — no CLIP encoder needed
+ * at runtime.
  *
  * Heavier than YOLO26m (~50 MB vs 39 MB), so loaded on-demand and not run
  * continuously. Inference takes ~200-800ms on CPU depending on device.
@@ -27,29 +27,41 @@ const MODEL_INPUT_SIZE = 640;
  * Order must match the class indices frozen into the ONNX model.
  */
 export const YOLO_WORLD_CLASSES = [
-  "metal can",
+  "aluminium beverage can",
+  "steel food can",
+  "plastic bottle",
+  "glass bottle",
+  "glass jar",
   "cardboard",
   "paper bag",
-  "plastic bag",
+  "paper cup",
+  "paper plate",
+  "paper towel",
   "napkin",
-  "wrapper",
-  "straw",
-  "styrofoam",
-  "food container",
+  "newspaper",
   "milk carton",
   "juice box",
-  "paper plate",
-  "paper cup",
-  "aluminum foil",
-  "paper towel",
   "egg carton",
-  "coffee cup sleeve",
+  "pizza box",
+  "plastic bag",
   "plastic bottle cap",
-  "glass jar",
-  "yogurt cup",
+  "plastic wrapper",
   "chip bag",
-  "cigarette butt",
+  "styrofoam cup",
+  "styrofoam container",
+  "plastic straw",
+  "plastic food container",
+  "plastic cup",
+  "yogurt cup",
+  "plastic utensil",
+  "coffee cup",
+  "coffee cup sleeve",
+  "aluminum foil",
+  "banana peel",
+  "apple core",
   "battery",
+  "cigarette butt",
+  "pen",
 ];
 
 /**
@@ -78,6 +90,7 @@ export function initYoloWorld(modelUrl = "/models/yolo-world-s.onnx"): Promise<b
 
       session = await ort.InferenceSession.create(modelUrl, {
         executionProviders: [provider],
+        logSeverityLevel: 3,
       });
 
       console.log(`[yolo-world] Model loaded (${provider}, ${ort.env.wasm.numThreads} threads)`);
@@ -116,8 +129,11 @@ export async function warmUpYoloWorld(): Promise<void> {
 /**
  * Run YOLO World inference on a video frame.
  *
- * Output format matches YOLO26m: [1, N, 6] where each row is
- * [x1, y1, x2, y2, confidence, classId].
+ * Model output is [1, 27, 8400] (channels-first, no NMS):
+ *   - 8400 candidate boxes
+ *   - 27 channels = 4 (cx, cy, w, h) + 23 class scores
+ *
+ * We apply argmax + confidence threshold + greedy NMS here.
  */
 export async function runYoloWorldInference(
   video: HTMLVideoElement,
@@ -162,41 +178,91 @@ export async function runYoloWorldInference(
 
     const outputData = output.data as Float32Array;
     const shape = output.dims;
+    const numChannels = shape[1] as number; // 39 = 4 + 35
+    const numCandidates = shape[2] as number; // 8400
+    const numClasses = numChannels - 4; // 35
 
-    const detections: YoloDetection[] = [];
+    // ── Parse channels-first output ──
+    // Data layout: outputData[ channel * numCandidates + candidateIdx ]
+    const rawDetections: YoloDetection[] = [];
 
-    const numDetections = shape[1] as number;
-    const stride = shape[2] as number;
+    for (let i = 0; i < numCandidates; i++) {
+      // Find best class score
+      let bestScore = -1;
+      let bestClassId = -1;
+      for (let c = 0; c < numClasses; c++) {
+        const score = outputData[(4 + c) * numCandidates + i];
+        if (score > bestScore) {
+          bestScore = score;
+          bestClassId = c;
+        }
+      }
 
-    for (let i = 0; i < numDetections; i++) {
-      const base = i * stride;
-      const x1 = outputData[base + 0];
-      const y1 = outputData[base + 1];
-      const x2 = outputData[base + 2];
-      const y2 = outputData[base + 3];
-      const confidence = outputData[base + 4];
-      const classId = Math.round(outputData[base + 5]);
+      if (bestScore < confidenceThreshold) continue;
+      if (bestClassId < 0 || bestClassId >= YOLO_WORLD_CLASSES.length) continue;
 
-      if (confidence < confidenceThreshold) continue;
-      if (classId < 0 || classId >= YOLO_WORLD_CLASSES.length) continue;
+      // Read box (cx, cy, w, h) in pixel coords (0-640)
+      const cx = outputData[0 * numCandidates + i];
+      const cy = outputData[1 * numCandidates + i];
+      const bw = outputData[2 * numCandidates + i];
+      const bh = outputData[3 * numCandidates + i];
 
-      const w = x2 - x1;
-      const h = y2 - y1;
-      const boxArea = w * h;
+      const boxArea = bw * bh;
       if (boxArea < minBoxArea) continue;
 
-      detections.push({
-        classId,
-        className: YOLO_WORLD_CLASSES[classId],
-        confidence,
-        bbox: [x1, y1, w, h],
+      // Convert center format → corner format
+      const x1 = cx - bw / 2;
+      const y1 = cy - bh / 2;
+
+      rawDetections.push({
+        classId: bestClassId,
+        className: YOLO_WORLD_CLASSES[bestClassId],
+        confidence: bestScore,
+        bbox: [x1, y1, bw, bh],
       });
     }
 
-    detections.sort((a, b) => b.confidence - a.confidence);
-    return detections;
+    // Sort by confidence descending
+    rawDetections.sort((a, b) => b.confidence - a.confidence);
+
+    // ── Greedy NMS (IoU threshold 0.5) ──
+    const NMS_IOU = 0.5;
+    const kept: YoloDetection[] = [];
+
+    for (const det of rawDetections) {
+      let dominated = false;
+      for (const k of kept) {
+        if (iou(det.bbox, k.bbox) > NMS_IOU) {
+          dominated = true;
+          break;
+        }
+      }
+      if (!dominated) kept.push(det);
+    }
+
+    if (kept.length > 0) {
+      console.log(
+        `[yolo-world] ${kept.length} detection(s): ` +
+        kept.map(d => `${d.className} ${(d.confidence * 100).toFixed(1)}%`).join(", ")
+      );
+    }
+
+    return kept;
   } catch (err) {
     console.warn("[yolo-world] Inference error:", err);
     return [];
   }
+}
+
+/** Compute Intersection-over-Union for two [x, y, w, h] boxes. */
+function iou(a: [number, number, number, number], b: [number, number, number, number]): number {
+  const ax2 = a[0] + a[2], ay2 = a[1] + a[3];
+  const bx2 = b[0] + b[2], by2 = b[1] + b[3];
+  const ix1 = Math.max(a[0], b[0]);
+  const iy1 = Math.max(a[1], b[1]);
+  const ix2 = Math.min(ax2, bx2);
+  const iy2 = Math.min(ay2, by2);
+  const inter = Math.max(0, ix2 - ix1) * Math.max(0, iy2 - iy1);
+  const union = a[2] * a[3] + b[2] * b[3] - inter;
+  return union > 0 ? inter / union : 0;
 }

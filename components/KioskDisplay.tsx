@@ -499,6 +499,7 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
       result: ClassificationResponse,
       detections: YoloDetection[],
       latencyMs: number,
+      analysis: FrameAnalysis,
     ) {
       // Capture the same center short-side square that YOLO sees (e.g. 720×720
       // from 1280×720). Log images preserve full resolution for fine-tuning.
@@ -532,6 +533,11 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
                 requiresVerification: result.needsReview ?? false,
                 latencyMs,
                 yoloDetections: toDetectionLogs(detections),
+                meta: {
+                  skinRatio: analysis.skinRatio,
+                  sharpnessScore: analysis.sharpnessScore,
+                  imageQuality: imageQualityBand(analysis),
+                },
               },
             }),
           }).catch(() => {}); // best-effort
@@ -614,7 +620,7 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
 
               if (resolvedResults.length > 0) {
                 console.log(`[tier1] YOLO HIT: ${resolvedResults.map((r) => r.itemName).join(" + ")} in ${yoloMs}ms`);
-                logYoloOnlyResult(video, resolvedResults[0], detections, yoloMs);
+                logYoloOnlyResult(video, resolvedResults[0], detections, yoloMs, analysis);
                 handleMultiClassificationResults(resolvedResults, resolvedResults.map(() => undefined));
                 return;
               }
@@ -631,7 +637,7 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
             const fireApiInParallel = best.confidence < YOLO_API_PARALLEL_THRESHOLD;
 
             escalateToYoloWorld(
-              video, backend, best, apiPromise, apiController, fireApiInParallel, detections, yoloMs,
+              video, backend, best, apiPromise, apiController, fireApiInParallel, detections, yoloMs, analysis,
             );
           } else {
             // ── Only non-waste (person, etc.) or no detections — escalate to YOLO World ──
@@ -641,7 +647,7 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
               console.log(`[tier1] No YOLO detections (${yoloMs}ms) — escalating to YOLO World`);
             }
             escalateToYoloWorld(
-              video, backend, null, apiPromise, apiController, true, detections, yoloMs,
+              video, backend, null, apiPromise, apiController, true, detections, yoloMs, analysis,
             );
           }
         })
@@ -666,6 +672,7 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
       fireApiInParallel: boolean,
       yoloDetections: YoloDetection[],
       yoloMs: number,
+      analysis: FrameAnalysis,
     ) {
       // Start API call in parallel if confidence is very low
       let apiInflight: ReturnType<typeof apiPromise> | null = null;
@@ -706,7 +713,7 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
               if (result) {
                 console.log(`[tier2] YOLO World HIT: ${worldBest.className} (${(worldBest.confidence * 100).toFixed(1)}%) → ${result.wasteStream} in ${worldMs}ms`);
                 apiController.abort();
-                logYoloOnlyResult(video, result, yoloDetections, yoloMs + worldMs);
+                logYoloOnlyResult(video, result, yoloDetections, yoloMs + worldMs, analysis);
                 handleClassificationResult(result, undefined);
                 return;
               }

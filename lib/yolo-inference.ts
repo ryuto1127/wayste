@@ -67,6 +67,7 @@ export function initYolo(modelUrl = "/models/yolo26m.onnx"): Promise<boolean> {
 
       session = await ort.InferenceSession.create(modelUrl, {
         executionProviders: [provider],
+        logSeverityLevel: 3,
       });
 
       console.log(`[yolo] Model loaded (${provider}, ${ort.env.wasm.numThreads} threads)`);

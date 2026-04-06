@@ -92,6 +92,7 @@ export async function POST(request: Request) {
         imageUrl,
         blobUploadFailed: image ? !imageUrl : undefined,
         requestId,
+        meta: entry.meta,
         yoloDetections: entry.yoloDetections,
       });
     })()

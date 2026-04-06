@@ -160,19 +160,22 @@ export async function DELETE(request: Request) {
       }
     }
 
-    // ── Delete Blob images (best-effort) ──
-    let blobsDeleted = 0;
+    // ── Delete Blob images (best-effort, non-blocking) ──
     const imageUrls = toDelete
       .map((e) => e.imageUrl)
       .filter((url): url is string => !!url);
 
-    for (const url of imageUrls) {
-      try {
-        await deleteBlob(url);
-        blobsDeleted++;
-      } catch {
-        // Blob may already be deleted — ignore
-      }
+    // Run blob deletions in parallel, after the response is sent
+    const blobsDeleted = imageUrls.length;
+    if (imageUrls.length > 0) {
+      runInBackground(
+        Promise.allSettled(imageUrls.map((url) => deleteBlob(url))).then((results) => {
+          const failed = results.filter((r) => r.status === "rejected").length;
+          if (failed > 0) {
+            console.warn(`[pilot-log] ${failed}/${imageUrls.length} blob deletions failed`);
+          }
+        }),
+      );
     }
 
     // ── Clean up feedback entries (by timestamp, not just requestId) ──

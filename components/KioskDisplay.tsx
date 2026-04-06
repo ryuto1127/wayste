@@ -74,7 +74,12 @@ const BG_RATE_FROZEN = 0;
 const DETECTION_ROI_MARGIN = 0.10;
 
 // ── Entry coherence gate ──
-const ROI_BLOB_THRESHOLD = 0.03;
+const ROI_BLOB_THRESHOLD = 0.01;
+
+// ── Result-state exit gate (more lenient — keeps result visible for distant/small items) ──
+// Lower than entry gate: item shrunken from distance should not dismiss the result.
+const RESULT_FG_THRESHOLD = 0.015;
+const RESULT_BLOB_THRESHOLD = 0.005;
 
 // ── Elongated-object gate ──
 const ROI_BLOB_DIAGONAL_THRESHOLD = 0.35;
@@ -366,6 +371,12 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
         (analysis.roiForegroundRatio >= ROI_FG_THRESHOLD &&
          analysis.roiLargestBlobRatio >= ROI_BLOB_THRESHOLD) ||
         elongated;
+      // Result-state exit uses lower thresholds: a small/distant item still
+      // registers as "present" so the result stays on screen.
+      const resultHasFg =
+        (analysis.roiForegroundRatio >= RESULT_FG_THRESHOLD &&
+         analysis.roiLargestBlobRatio >= RESULT_BLOB_THRESHOLD) ||
+        elongated;
 
       // ── Pending-item queue ──
       if (state !== "idle") {
@@ -433,7 +444,8 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
 
       if (state === "result") {
         // Result stays on screen until item is removed — no minimum display time.
-        if (!roiHasFg) {
+        // Uses lenient resultHasFg so distant/small items don't prematurely dismiss.
+        if (!resultHasFg) {
           goneCountRef.current++;
           if (goneCountRef.current >= RESULT_GONE_FRAMES) {
             // Item removed — boost BG adaptation so the

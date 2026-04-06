@@ -32,7 +32,7 @@ const BG_LEARN_RATE = 0.015; // absorbs camera drift in ~10s; BG continues durin
 const BG_INIT_RATE = 0.15;
 const BG_INIT_FRAMES = 30; // ~4.5s of init at 7fps
 const BG_SETTLE_FRAMES = 45; // detection blocked until this many frames
-const FG_PIXEL_THRESHOLD = 40; // per-pixel diff threshold for foreground classification
+const FG_PIXEL_THRESHOLD = 25; // per-pixel diff threshold for foreground classification
 
 // ── Thresholds (exported for state machine) ──
 /**
@@ -41,7 +41,7 @@ const FG_PIXEL_THRESHOLD = 40; // per-pixel diff threshold for foreground classi
  * ~288 pixels after the ≥2-neighbor erosion pass (4800 × 0.06).
  * Paired with ROI_BLOB_THRESHOLD in KioskDisplay for coherence gating.
  */
-export const ROI_FG_THRESHOLD = 0.06;
+export const ROI_FG_THRESHOLD = 0.03;
 export const MOTION_RATIO_THRESHOLD = 0.12; // kept for external consumers
 export const MAX_SKIN_RATIO = 0.80; // >80% skin in foreground → too much hand
 

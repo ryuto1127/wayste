@@ -455,6 +455,18 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
             transition("cooldown");
           }
         } else {
+          // If goneCount > 0, the previous item briefly disappeared — this is a
+          // new item. Reset and classify immediately without waiting for cooldown.
+          if (goneCountRef.current > 0 && roiHasFg) {
+            setStableResults([]); setResultRequestIds([]);
+            setError(null);
+            goneCountRef.current = 0;
+            fgPersistRef.current = 0;
+            objectDetectedFrameRef.current = 0;
+            analyzer.boostBackgroundAdaptation();
+            triggerClassification(analysis);
+            return;
+          }
           goneCountRef.current = 0;
 
           // Persistent-leftover escape hatch

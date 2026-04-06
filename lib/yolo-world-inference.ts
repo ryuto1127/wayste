@@ -138,7 +138,7 @@ export async function warmUpYoloWorld(): Promise<void> {
 export async function runYoloWorldInference(
   video: HTMLVideoElement,
   roiMargin = 0.15,
-  minBoxArea = 5000,
+  minBoxArea = 1500,
   confidenceThreshold = 0.45,
 ): Promise<YoloDetection[]> {
   if (!session || !ort) return [];

@@ -83,7 +83,7 @@ class OnnxBackend implements InferenceBackend {
   async detect(
     video: HTMLVideoElement,
     _roiMargin = 0,
-    minBoxArea = 5000,
+    minBoxArea = 1500,
     confidenceThreshold = 0.65,
   ): Promise<YoloDetection[]> {
     if (!this.yolo) return [];
@@ -112,7 +112,7 @@ class OnnxBackend implements InferenceBackend {
   async detectWorld(
     video: HTMLVideoElement,
     _roiMargin = 0,
-    minBoxArea = 5000,
+    minBoxArea = 1500,
     confidenceThreshold = 0.45,
   ): Promise<YoloDetection[]> {
     if (!this.yoloWorld) return [];
@@ -145,7 +145,7 @@ class HttpBackend implements InferenceBackend {
   async detect(
     video: HTMLVideoElement,
     _roiMargin = 0,
-    minBoxArea = 5000,
+    minBoxArea = 1500,
     confidenceThreshold = 0.65,
   ): Promise<YoloDetection[]> {
     if (!this.ready) return [];

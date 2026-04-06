@@ -36,6 +36,7 @@ import ResultScreen from "./ResultScreen";
 const ANALYSIS_INTERVAL_MS = 30;  // ~33 fps local CV
 const COOLDOWN_MS = 1500; // pause before re-scanning (BG model recovery)
 const OBJECT_GONE_FRAMES = 3;     // frames below ROI threshold before "gone" (~90ms at 33fps)
+const RESULT_GONE_FRAMES = 8;     // result state uses a longer window to resist camera flicker (~240ms at 33fps)
 const FG_PERSIST_FRAMES = 3;      // consecutive ROI-blob frames required to leave idle (~90ms at 33fps)
 /**
  * Consecutive frames in idle with both foreground presence AND acceptable
@@ -48,7 +49,7 @@ const SHARP_FG_FRAMES_REQUIRED = 3;
  * still visible (e.g., a tissue leftover that never leaves), force a transition
  * to cooldown so the BG model gets a full-rate update window in idle.
  */
-const RESULT_TIMEOUT_MS = 30_000;
+const RESULT_TIMEOUT_MS = 20_000;
 /** Minimum time an error message is visible before being cleared. */
 const ERROR_HOLD_MS = 4_000;
 /** Abort API call if it takes longer than this. */
@@ -433,7 +434,7 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
         // Result stays on screen until item is removed — no minimum display time.
         if (!roiHasFg) {
           goneCountRef.current++;
-          if (goneCountRef.current >= OBJECT_GONE_FRAMES) {
+          if (goneCountRef.current >= RESULT_GONE_FRAMES) {
             // Item removed — boost BG adaptation so the
             // model rapidly absorbs the current scene (was frozen during result).
             analyzer.boostBackgroundAdaptation();

@@ -11,9 +11,14 @@ export interface HourlyDataPoint {
 }
 
 export interface FeedbackStats {
+  /** All pilot log entries (matches review page total) */
+  totalClassifications: number;
+  /** Entries with admin verdicts (correct or wrong) */
   total: number;
   correct: number;
   wrong: number;
+  falseDetections: number;
+  pending: number;
   accuracyRate: number;
   recentFeedback: FeedbackEntry[];
   hourlyTrend: HourlyDataPoint[];
@@ -37,15 +42,20 @@ export async function loadFeedback(): Promise<FeedbackEntry[]> {
 }
 
 /**
- * Build feedback entries from admin review verdicts only.
- * Verdicts evaluate whether the model's class name matches the image,
- * NOT whether the waste stream is correct.
+ * Load all pilot log entries and build reviewed FeedbackEntry list.
+ * Returns both the full pilot list and the reviewed-only subset.
  */
-async function loadAllFeedback(): Promise<FeedbackEntry[]> {
-  const [pilotRaw, verdicts] = await Promise.all([
+async function loadAllFeedback(): Promise<{
+  pilotEntries: PilotLogEntry[];
+  reviewedEntries: FeedbackEntry[];
+  verdicts: Record<string, string>;
+}> {
+  const [pilotRaw, verdictsRaw] = await Promise.all([
     redis.lrange(KEYS.pilotLog, 0, -1),
     redis.hgetall(VERDICTS_KEY) as Promise<Record<string, string> | null>,
   ]);
+
+  const verdicts = verdictsRaw ?? {};
 
   const pilotEntries = pilotRaw
     .map((item) => {
@@ -57,14 +67,12 @@ async function loadAllFeedback(): Promise<FeedbackEntry[]> {
     })
     .filter((e): e is PilotLogEntry => e !== null);
 
-  const entries: FeedbackEntry[] = [];
+  const reviewedEntries: FeedbackEntry[] = [];
   for (const entry of pilotEntries) {
     if (!entry.requestId) continue;
-
-    const verdict = verdicts?.[entry.requestId];
+    const verdict = verdicts[entry.requestId];
     if (!verdict || verdict === "false_detection") continue;
-
-    entries.push({
+    reviewedEntries.push({
       id: entry.requestId,
       timestamp: entry.timestamp,
       itemName: entry.itemName,
@@ -77,23 +85,48 @@ async function loadAllFeedback(): Promise<FeedbackEntry[]> {
     });
   }
 
-  return entries;
+  return { pilotEntries, reviewedEntries, verdicts };
 }
 
 export async function analyzeFeedback(siteId?: string): Promise<FeedbackStats> {
-  let entries = await loadAllFeedback();
+  const { pilotEntries, reviewedEntries, verdicts } = await loadAllFeedback();
 
+  let entries = reviewedEntries;
   if (siteId) {
     entries = entries.filter((e) => e.siteId === siteId);
   }
+
+  const totalClassifications = siteId ? pilotEntries.length : pilotEntries.length;
+  const falseDetections = pilotEntries.filter(
+    (e) => e.requestId && verdicts[e.requestId] === "false_detection",
+  ).length;
+  const pending = pilotEntries.filter(
+    (e) => !e.requestId || !verdicts[e.requestId],
+  ).length;
 
   const total = entries.length;
   const correct = entries.filter((e) => e.feedback === "correct").length;
   const wrong = total - correct;
   const accuracyRate = total > 0 ? correct / total : 0;
 
-  // Recent feedback (last 20, newest first)
-  const recentFeedback = entries.slice(-20).reverse();
+  // Recent feedback: last 20 pilot log entries (all, not just reviewed), newest first
+  const recentFeedback = pilotEntries
+    .slice()
+    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+    .slice(0, 20)
+    .map((e) => ({
+      id: e.requestId ?? e.timestamp,
+      timestamp: e.timestamp,
+      itemName: e.itemName,
+      predictedStream: e.wasteStream as WasteStream,
+      confidence: e.confidence,
+      feedback: (e.requestId && verdicts[e.requestId] && verdicts[e.requestId] !== "false_detection"
+        ? verdicts[e.requestId] === "wrong" ? "wrong" : "correct"
+        : null) as "correct" | "wrong" | null,
+      siteId: "default",
+      imageUrl: e.imageUrl,
+      requestId: e.requestId,
+    })) as FeedbackEntry[];
 
   // ── Hourly trend (last 24 hours) ──
   const now = Date.now();
@@ -120,9 +153,12 @@ export async function analyzeFeedback(siteId?: string): Promise<FeedbackStats> {
   );
 
   return {
+    totalClassifications,
     total,
     correct,
     wrong,
+    falseDetections,
+    pending,
     accuracyRate,
     recentFeedback,
     hourlyTrend,

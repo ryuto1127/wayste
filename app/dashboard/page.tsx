@@ -86,23 +86,24 @@ export default function DashboardPage() {
           </Suspense>
         </div>
 
-        {!stats || stats.total === 0 ? (
+        {!stats || stats.totalClassifications === 0 ? (
           <div className="bg-neutral-900 rounded-2xl p-12 text-center">
             <p className="text-neutral-400 text-lg">{T("noFeedbackYet")}</p>
           </div>
         ) : (
           <>
             {/* Stats cards */}
-            <div className="grid grid-cols-3 gap-4 mb-8">
+            <div className="grid grid-cols-3 gap-4 mb-4">
               <StatCard
-                label={T("totalFeedback")}
-                value={stats.total.toString()}
+                label={locale === "ja" ? "総分類数" : "Total Classifications"}
+                value={stats.totalClassifications.toString()}
               />
               <StatCard
                 label={T("accuracyRate")}
-                value={`${Math.round(stats.accuracyRate * 100)}%`}
+                value={stats.total > 0 ? `${Math.round(stats.accuracyRate * 100)}%` : "—"}
                 color={
-                  stats.accuracyRate >= 0.8
+                  stats.total === 0 ? "text-neutral-500"
+                  : stats.accuracyRate >= 0.8
                     ? "text-emerald-400"
                     : stats.accuracyRate >= 0.6
                       ? "text-amber-400"
@@ -114,6 +115,24 @@ export default function DashboardPage() {
                 value={stats.wrong.toString()}
                 color="text-amber-400"
               />
+            </div>
+
+            {/* Review progress sub-row */}
+            <div className="flex flex-wrap gap-3 mb-8 text-sm">
+              <div className="bg-neutral-900 rounded-xl px-4 py-2">
+                <span className="text-neutral-400">{locale === "ja" ? "レビュー済" : "Reviewed"}: </span>
+                <span className="text-emerald-400 font-semibold">{stats.total}</span>
+              </div>
+              <div className="bg-neutral-900 rounded-xl px-4 py-2">
+                <span className="text-neutral-400">{locale === "ja" ? "未レビュー" : "Pending"}: </span>
+                <span className="text-orange-400 font-semibold">{stats.pending}</span>
+              </div>
+              {stats.falseDetections > 0 && (
+                <div className="bg-neutral-900 rounded-xl px-4 py-2">
+                  <span className="text-neutral-400">{locale === "ja" ? "誤検出" : "False detections"}: </span>
+                  <span className="text-neutral-500 font-semibold">{stats.falseDetections}</span>
+                </div>
+              )}
             </div>
 
             {/* 24-hour trend */}
@@ -190,9 +209,11 @@ export default function DashboardPage() {
                         </td>
                         <td className="py-2.5 pr-4">
                           {entry.feedback === "correct" ? (
-                            <span className="text-emerald-400 text-xs font-medium">✓ Correct</span>
+                            <span className="text-emerald-400 text-xs font-medium">✓ {locale === "ja" ? "正解" : "Correct"}</span>
+                          ) : entry.feedback === "wrong" ? (
+                            <span className="text-red-400 text-xs font-medium">✗ {locale === "ja" ? "不正解" : "Wrong"}</span>
                           ) : (
-                            <span className="text-red-400 text-xs font-medium">✗ Wrong</span>
+                            <span className="text-neutral-600 text-xs">{locale === "ja" ? "未レビュー" : "Pending"}</span>
                           )}
                         </td>
                         <td className="py-2.5 text-neutral-500 text-xs">

@@ -198,7 +198,7 @@ export interface FeedbackEntry {
   itemName: string;
   predictedStream: WasteStream;
   confidence: number;
-  feedback: "correct" | "wrong";
+  feedback: "correct" | "wrong" | null;
   actualStream?: WasteStream;
   actualItemName?: string;
   siteId: string;

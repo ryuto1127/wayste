@@ -83,7 +83,7 @@ export default function IdleScreen({
       {/* Branding */}
       <div className="relative z-10 mb-4 text-center">
         <h1 className="text-2xl font-bold text-white tracking-tight">
-          ♻️ Recycling Buddy
+          Wayste
         </h1>
       </div>
 

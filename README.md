@@ -1,4 +1,4 @@
-# Recycling Buddy Kiosk
+# Wayste
 
 A real-time AI-powered waste sorting kiosk. Hold any item in front of the camera and it tells you which bin it belongs in — no app, no phone, no buttons required.
 
@@ -77,8 +77,8 @@ Built for office and public-space pilots, with full English and Japanese support
 ### Install and run
 
 ```bash
-git clone https://github.com/ryuto1127/recycling-buddy-kiosk.git
-cd recycling-buddy-kiosk
+git clone https://github.com/ryuto1127/wayste.git
+cd wayste
 npm install
 ```
 

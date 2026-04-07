@@ -11,7 +11,7 @@ const notoSansJP = Noto_Sans_JP({
 });
 
 export const metadata: Metadata = {
-  title: "Recycling Buddy",
+  title: "Wayste",
   description:
     "Smart waste sorting assistant — hold an item in front of the camera to find the right bin.",
 };

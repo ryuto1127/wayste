@@ -1,6 +1,6 @@
 #!/bin/bash
 # ──────────────────────────────────────────────────────────────
-# Recycling Buddy Kiosk — macOS 起動スクリプト (M1/M2 Mac 向け)
+# Wayste Kiosk — macOS 起動スクリプト (M1/M2 Mac 向け)
 #
 # 使い方:
 #   1. chmod +x start-kiosk-mac.sh
@@ -14,11 +14,11 @@
 set -e
 
 # ── 設定 ──
-KIOSK_URL="${KIOSK_URL:-https://recycling-buddy-kiosk.vercel.app/}"
-LOG_FILE="/tmp/recycling-buddy-kiosk.log"
+KIOSK_URL="${KIOSK_URL:-https://wayste-kiosk.vercel.app/}"
+LOG_FILE="/tmp/wayste-kiosk.log"
 CHROME_APP="/Applications/Google Chrome.app"
 
-echo "[$(date)] Starting Recycling Buddy Kiosk..." | tee "$LOG_FILE"
+echo "[$(date)] Starting Wayste Kiosk..." | tee "$LOG_FILE"
 echo "[$(date)] URL: $KIOSK_URL" | tee -a "$LOG_FILE"
 
 # ── Chrome がインストールされているか確認 ──

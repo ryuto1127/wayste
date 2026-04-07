@@ -1,6 +1,6 @@
 [Desktop Entry]
 Type=Application
-Name=Recycling Buddy Kiosk
+Name=Wayste Kiosk
 Comment=AI waste sorting kiosk application
 Exec=/home/pi/start-kiosk.sh
 X-GNOME-Autostart-enabled=true

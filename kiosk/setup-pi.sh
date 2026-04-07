@@ -8,7 +8,7 @@
 
 set -e
 
-echo "=== Recycling Buddy Kiosk: Raspberry Pi Setup ==="
+echo "=== Wayste Kiosk: Raspberry Pi Setup ==="
 
 # ── 1. システム更新 ──
 echo "[1/5] Updating system packages..."

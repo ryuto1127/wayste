@@ -1,6 +1,6 @@
 #!/bin/bash
 # ──────────────────────────────────────────────────────────────
-# Recycling Buddy Kiosk — macOS 初期セットアップ (M1/M2 Mac 向け)
+# Wayste Kiosk — macOS 初期セットアップ (M1/M2 Mac 向け)
 #
 # 実行: bash kiosk/setup-mac.sh
 #
@@ -16,12 +16,12 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PLIST_NAME="com.recycling-buddy.kiosk"
+PLIST_NAME="com.wayste.kiosk"
 PLIST_PATH="$HOME/Library/LaunchAgents/${PLIST_NAME}.plist"
 
 # ── 復元モード ──
 if [ "$1" = "--restore" ]; then
-  echo "=== Recycling Buddy Kiosk: macOS 設定の復元 ==="
+  echo "=== Wayste Kiosk: macOS 設定の復元 ==="
 
   echo "[1/3] スクリーンセーバー・ロックを元に戻します..."
   defaults delete com.apple.screensaver idleTime 2>/dev/null || true
@@ -40,7 +40,7 @@ if [ "$1" = "--restore" ]; then
   exit 0
 fi
 
-echo "=== Recycling Buddy Kiosk: macOS Setup ==="
+echo "=== Wayste Kiosk: macOS Setup ==="
 echo ""
 
 # ── 1. スクリーンセーバー・自動ロックの無効化 ──
@@ -86,9 +86,9 @@ cat > "$PLIST_PATH" <<PLIST
   <key>KeepAlive</key>
   <false/>
   <key>StandardOutPath</key>
-  <string>/tmp/recycling-buddy-kiosk.log</string>
+  <string>/tmp/wayste-kiosk.log</string>
   <key>StandardErrorPath</key>
-  <string>/tmp/recycling-buddy-kiosk.log</string>
+  <string>/tmp/wayste-kiosk.log</string>
 </dict>
 </plist>
 PLIST
@@ -101,7 +101,7 @@ echo ""
 echo "次のステップ:"
 echo "  1. Google Chrome をインストール (まだの場合): brew install --cask google-chrome"
 echo "  2. Chrome を一度手動で開き、カメラ権限を許可してください"
-echo "     → ${KIOSK_URL:-https://recycling-buddy-kiosk.vercel.app/} にアクセス"
+echo "     → ${KIOSK_URL:-https://wayste-kiosk.vercel.app/} にアクセス"
 echo "     → カメラ許可のダイアログで「許可」をクリック"
 echo "  3. テスト起動: ./kiosk/start-kiosk-mac.sh"
 echo "     (Ctrl+C で停止)"
@@ -115,4 +115,4 @@ echo "設定の復元:"
 echo "  bash kiosk/setup-mac.sh --restore"
 echo ""
 echo "ログの確認:"
-echo "  cat /tmp/recycling-buddy-kiosk.log"
+echo "  cat /tmp/wayste-kiosk.log"

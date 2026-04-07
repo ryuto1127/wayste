@@ -83,7 +83,7 @@ describe("offline-cache", () => {
     cacheResult(makeResult({ itemName: "Expired Item" }));
 
     // Manually age the cache entry
-    const cacheKey = "recycling-buddy-cache";
+    const cacheKey = "wayste-cache";
     const raw = localStorageMock.getItem(cacheKey);
     expect(raw).not.toBeNull();
 

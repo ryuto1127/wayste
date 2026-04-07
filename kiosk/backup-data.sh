@@ -1,6 +1,6 @@
 #!/bin/bash
 # ──────────────────────────────────────────────────────────────
-# Recycling Buddy — 実証実験データ一括バックアップ
+# Wayste — 実証実験データ一括バックアップ
 #
 # Vercel 上のログ（Redis）と画像（Blob）をローカルにダウンロードします。
 # ファインチューニング用のデータセット収集に使います。
@@ -11,7 +11,7 @@
 #
 # 必要な環境変数:
 #   ADMIN_API_KEY       — admin API認証キー
-#   KIOSK_URL           — デプロイURL（デフォルト: https://recycling-buddy-kiosk.vercel.app）
+#   KIOSK_URL           — デプロイURL（デフォルト: https://wayste-kiosk.vercel.app）
 #
 # 出力先: ./backup/<日付>/
 #   ├── pilot-log.jsonl        — 全分類ログ
@@ -23,7 +23,7 @@
 set -e
 
 # ── 設定 ──
-KIOSK_URL="${KIOSK_URL:-https://recycling-buddy-kiosk.vercel.app}"
+KIOSK_URL="${KIOSK_URL:-https://wayste-kiosk.vercel.app}"
 DATE=$(date +%Y-%m-%d)
 BACKUP_DIR="./backup/${DATE}"
 IMAGES_DIR="${BACKUP_DIR}/images"
@@ -62,7 +62,7 @@ fi
 
 AUTH_HEADER="x-api-key: ${ADMIN_API_KEY}"
 
-echo "=== Recycling Buddy Data Backup ==="
+echo "=== Wayste Data Backup ==="
 echo "URL:    ${KIOSK_URL}"
 echo "出力先: ${BACKUP_DIR}"
 if [ -n "$DATE_FROM" ] || [ -n "$DATE_TO" ]; then

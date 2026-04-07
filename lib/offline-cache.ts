@@ -1,6 +1,6 @@
 import type { ClassificationResponse } from "./types";
 
-const CACHE_KEY = "recycling-buddy-cache";
+const CACHE_KEY = "wayste-cache";
 const MAX_CACHE_SIZE = 50;
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 

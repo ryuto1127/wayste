@@ -1,6 +1,6 @@
 #!/bin/bash
 # ──────────────────────────────────────────────────────────────
-# Recycling Buddy Kiosk — Raspberry Pi 起動スクリプト
+# Wayste Kiosk — Raspberry Pi 起動スクリプト
 #
 # 使い方:
 #   1. このファイルを Raspberry Pi にコピー
@@ -10,10 +10,10 @@
 # ──────────────────────────────────────────────────────────────
 
 # ── 設定 ──
-KIOSK_URL="${KIOSK_URL:-https://recycling-buddy-kiosk.vercel.app/}"
+KIOSK_URL="${KIOSK_URL:-https://wayste-kiosk.vercel.app/}"
 LOG_FILE="/tmp/kiosk.log"
 
-echo "[$(date)] Starting Recycling Buddy Kiosk..." > "$LOG_FILE"
+echo "[$(date)] Starting Wayste Kiosk..." > "$LOG_FILE"
 echo "[$(date)] URL: $KIOSK_URL" >> "$LOG_FILE"
 
 export DISPLAY=:0

@@ -346,14 +346,19 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
         return;
       }
 
-      // Set BG adaptation rate based on pipeline state
+      // Set BG adaptation rate based on pipeline state.
+      // "nothing detected" results keep BG learning — there is no valid result
+      // to protect, and freezing would cause the item's absence to look like
+      // foreground when it leaves (because idle partially absorbed it).
       const currentState = stateRef.current;
       const bgRate =
         currentState === "idle" || currentState === "cooldown"
           ? BG_RATE_IDLE
-          : currentState === "result"
-            ? BG_RATE_RESULT
-            : BG_RATE_FROZEN;
+          : currentState === "result" && nothingDetectedCountRef.current > 0
+            ? BG_RATE_IDLE
+            : currentState === "result"
+              ? BG_RATE_RESULT
+              : BG_RATE_FROZEN;
       analyzer.setBgRate(bgRate);
 
       const analysis = analyzer.analyze(video);
@@ -486,7 +491,7 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
         // After repeated "nothing detected", use progressively longer cooldowns
         // to let the background model absorb persistent non-waste objects.
         const effectiveCooldown = nothingDetectedCountRef.current > 1
-          ? Math.min(COOLDOWN_MS * nothingDetectedCountRef.current, 4_000)
+          ? Math.min(COOLDOWN_MS * nothingDetectedCountRef.current, 2_500)
           : COOLDOWN_MS;
         const cooldownElapsed = Date.now() - cooldownStartRef.current >= effectiveCooldown;
         const errorHeld = !errorRef.current || (Date.now() - errorSetAtRef.current >= ERROR_HOLD_MS);

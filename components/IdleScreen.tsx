@@ -81,9 +81,10 @@ export default function IdleScreen({
       </div>
 
       {/* Branding */}
-      <div className="relative z-10 mb-4 text-center">
+      <div className="relative z-10 mb-4 flex items-center justify-center gap-2">
+        <img src="/icon.png" alt="" className="w-8 h-8" />
         <h1 className="text-2xl font-bold text-white tracking-tight">
-          Wayste
+          wayste
         </h1>
       </div>
 

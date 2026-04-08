@@ -236,25 +236,26 @@ function FullscreenResult({
         <div className="text-6xl font-black text-white uppercase text-center">
           {streamLabel(locale, result.wasteStream)}
         </div>
+        {/* Key action tip — shown inline below bin name for instant readability */}
+        {(result.preAction || result.specialInstructions) && (
+          <p className="mt-4 text-xl font-semibold text-white/90 text-center max-w-sm">
+            {result.preAction || result.specialInstructions}
+          </p>
+        )}
       </div>
 
-      {/* Bottom info strip — pre-action, notes, compound, special instructions */}
-      {(result.preAction || result.siteNote || result.specialInstructions || (result.isCompound && result.components?.length)) && (
+      {/* Bottom info strip — secondary notes & compound breakdown */}
+      {(result.siteNote || (result.preAction && result.specialInstructions) || (result.isCompound && result.components?.length)) && (
         <div className="px-6 py-4 space-y-2 bg-neutral-950/80">
-          {result.preAction && (
-            <div className="flex items-start gap-2">
-              <span className="text-amber-300 font-bold text-sm">!</span>
-              <p className="text-amber-100 text-sm font-medium">{result.preAction}</p>
-            </div>
+          {/* Show specialInstructions here only when preAction already took the hero slot */}
+          {result.preAction && result.specialInstructions && (
+            <p className="text-blue-300 text-sm">{result.specialInstructions}</p>
           )}
           {result.siteNote && (
             <p className="text-blue-300 text-sm">{result.siteNote}</p>
           )}
           {result.isCompound && result.components && result.components.length > 0 && (
             <CompoundBreakdown components={result.components} locale={locale} />
-          )}
-          {result.specialInstructions && (
-            <p className="text-blue-300 text-sm">{result.specialInstructions}</p>
           )}
         </div>
       )}
@@ -324,20 +325,21 @@ function MultiItemCard({
           <div className="text-3xl font-black text-white uppercase">
             {streamLabel(locale, result.wasteStream)}
           </div>
+          {(result.preAction || result.specialInstructions) && (
+            <p className="text-sm font-semibold text-white/85 mt-1">
+              {result.preAction || result.specialInstructions}
+            </p>
+          )}
         </div>
       </div>
 
-      {/* Optional info */}
-      {(result.preAction || result.siteNote || result.specialInstructions) && (
+      {/* Secondary info */}
+      {(result.siteNote || (result.preAction && result.specialInstructions)) && (
         <div className="px-4 py-2.5 space-y-1.5">
-          {result.preAction && (
-            <div className="flex items-start gap-2">
-              <span className="text-amber-300 font-bold text-xs">!</span>
-              <p className="text-amber-100 text-xs font-medium">{result.preAction}</p>
-            </div>
+          {result.preAction && result.specialInstructions && (
+            <p className="text-blue-300 text-xs">{result.specialInstructions}</p>
           )}
           {result.siteNote && <p className="text-blue-300 text-xs">{result.siteNote}</p>}
-          {result.specialInstructions && <p className="text-blue-300 text-xs">{result.specialInstructions}</p>}
         </div>
       )}
     </div>

@@ -44,18 +44,9 @@ const translations = {
     showOneItem: "Show one item at a time",
     multipleItemsDetected: "Multiple items detected",
     itemNumber: "Item {n}",
-
-    // Feedback
-    correct: "Correct",
-    wrong: "Wrong",
-    whatCorrectDisposal: "What was the correct disposal?",
     cancel: "Cancel",
-    saving: "Saving...",
-    thanksFeedback: "Thanks for the feedback",
-    scanDone: "Done",
-    lowConfidenceWarning: "Low confidence — please verify or ask staff",
 
-    // Feedback streams
+    // Streams
     recycling: "Recycling",
     compost: "Compost",
     landfill: "Landfill",
@@ -201,15 +192,7 @@ const translations = {
     showOneItem: "アイテムを1つずつ見せてください",
     multipleItemsDetected: "複数のアイテムを検出しました",
     itemNumber: "アイテム {n}",
-
-    correct: "正しい",
-    wrong: "間違い",
-    whatCorrectDisposal: "正しい分別先は？",
     cancel: "キャンセル",
-    saving: "保存中...",
-    thanksFeedback: "フィードバックありがとうございます",
-    scanDone: "完了",
-    lowConfidenceWarning: "確信度が低い — スタッフにご確認ください",
 
     recycling: "リサイクル",
     compost: "コンポスト",

@@ -1046,11 +1046,6 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [classify, transition, T]);
 
-  const handleFeedbackGiven = useCallback(() => {
-    setStableResults([]); setResultRequestIds([]);
-    cooldownStartRef.current = Date.now();
-    transition("cooldown");
-  }, [transition]);
 
   // ── Derive which full-screen UI to show ──
   if (!mounted) return null;
@@ -1108,12 +1103,9 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
       {uiScreen === "result" && stableResults.length > 0 && (
         <ResultScreen
           results={stableResults}
-          requestIds={resultRequestIds}
           locale={locale}
-          onFeedbackGiven={handleFeedbackGiven}
           onToggleLocale={toggleLocale}
           voiceEnabled={voiceEnabled}
-          sessionToken={sessionTokenRef.current || undefined}
         />
       )}
     </div>

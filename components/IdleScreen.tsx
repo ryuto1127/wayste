@@ -82,8 +82,8 @@ export default function IdleScreen({
 
       {/* Branding */}
       <div className="relative z-10 mb-4 flex items-center justify-center gap-3">
-        <img src="/logo.svg" alt="wayste logo" className="w-10 h-10" />
-        <h1 className="text-2xl font-bold text-white tracking-tight">
+        <img src="/logo.svg" alt="wayste logo" className="w-14 h-14" />
+        <h1 className="text-3xl font-bold text-teal-400 tracking-tight">
           wayste
         </h1>
       </div>

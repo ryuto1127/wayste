@@ -18,6 +18,8 @@ let ort: OrtModule | null = null;
 let session: InferenceSession | null = null;
 let loading: Promise<boolean> | null = null;
 let warmedUp = false;
+/** The execution provider that was actually used ("webgpu" | "wasm"). */
+let activeProvider: string = "unknown";
 
 const MODEL_INPUT_SIZE = 640;
 
@@ -93,6 +95,7 @@ export function initYoloWorld(modelUrl = "/models/yolo-world-s.onnx"): Promise<b
         logSeverityLevel: 3,
       });
 
+      activeProvider = provider;
       console.log(`[yolo-world] Model loaded (${provider}, ${ort.env.wasm.numThreads} threads)`);
       return true;
     } catch (err) {
@@ -107,6 +110,11 @@ export function initYoloWorld(modelUrl = "/models/yolo-world-s.onnx"): Promise<b
 
 export function isYoloWorldReady(): boolean {
   return session !== null;
+}
+
+/** Get the active execution provider ("webgpu" | "wasm" | "unknown"). */
+export function getYoloWorldProvider(): string {
+  return activeProvider;
 }
 
 /**

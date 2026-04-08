@@ -72,12 +72,31 @@ export default function IdleScreen({
         >
           {voiceEnabled ? "\uD83D\uDD0A" : "\uD83D\uDD07"} {voiceEnabled ? T("voiceOn") : T("voiceOff")}
         </button>
-        <button
-          onClick={onToggleLocale}
-          className="px-3 py-1.5 text-neutral-500 hover:text-neutral-300 text-xs font-medium transition-colors"
-        >
-          {T("switchLang")}
-        </button>
+        {/* Language toggle — dual-button so both options are always visible */}
+        <div className="flex items-center bg-neutral-800/60 rounded-lg overflow-hidden">
+          <button
+            onClick={locale === "ja" ? onToggleLocale : undefined}
+            className={`px-3.5 py-1.5 text-xs font-bold transition-colors ${
+              locale === "en"
+                ? "bg-teal-600/30 text-teal-300"
+                : "text-neutral-500 hover:text-neutral-300"
+            }`}
+            aria-pressed={locale === "en"}
+          >
+            EN
+          </button>
+          <button
+            onClick={locale === "en" ? onToggleLocale : undefined}
+            className={`px-3.5 py-1.5 text-xs font-bold transition-colors ${
+              locale === "ja"
+                ? "bg-teal-600/30 text-teal-300"
+                : "text-neutral-500 hover:text-neutral-300"
+            }`}
+            aria-pressed={locale === "ja"}
+          >
+            日本語
+          </button>
+        </div>
       </div>
 
       {/* Branding */}

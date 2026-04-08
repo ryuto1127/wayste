@@ -31,6 +31,7 @@ import CameraFeed, { type CameraFeedHandle } from "./CameraFeed";
 import IdleScreen from "./IdleScreen";
 import CameraScreen from "./CameraScreen";
 import ResultScreen from "./ResultScreen";
+import SystemStatusBadge from "./SystemStatusBadge";
 
 // ── Timing constants ──
 const ANALYSIS_INTERVAL_MS = 30;  // ~33 fps local CV
@@ -126,6 +127,8 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
   const [stableResults, setStableResults] =
     useState<ClassificationResponse[]>([]);
   const [resultRequestIds, setResultRequestIds] = useState<(string | undefined)[]>([]);
+  /** Stream definitions from site config — passed to ResultScreen for bin position display. */
+  const [siteStreams, setSiteStreams] = useState<import("@/lib/types").StreamDefinition[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [locale, setLocale] = useState<Locale>(defaultLocale ?? "en");
   /** Track whether the user has manually toggled the language. */
@@ -184,6 +187,23 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
   /** Inference backend (ONNX or HTTP — resolved at init). */
   const inferenceRef = useRef<InferenceBackend | null>(null);
 
+  // ── Thermal monitoring ──
+  // Track CV analysis duration to detect M1 MBA thermal throttling.
+  // If analysis time consistently exceeds 2× baseline, reduce idle fps to ~15.
+  const [thermalWarning, setThermalWarning] = useState(false);
+  const thermalRef = useRef({
+    /** Rolling window of recent analysis durations (ms). */
+    durations: [] as number[],
+    /** Baseline average (computed from first 60 stable samples). */
+    baseline: 0,
+    /** How many samples have been collected for baseline. */
+    baselineSamples: 0,
+    /** Whether throttling is currently detected. */
+    throttling: false,
+    /** Frame counter for skip-frame throttling. */
+    frameCounter: 0,
+  });
+
   // Prevent SSR — this component requires browser APIs (camera, OffscreenCanvas)
   useEffect(() => setMounted(true), []);
 
@@ -192,11 +212,8 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
     Promise.all([
       getInferenceBackend().then((backend) => {
         inferenceRef.current = backend;
-        // Eagerly start loading YOLO World in the background (lazy init)
-        backend.initYoloWorld().then((ok) => {
-          if (ok) console.log("[init] YOLO World ready for fallback");
-          else console.log("[init] YOLO World not available — will skip tier 2");
-        });
+        // YOLO World is now pre-warmed in parallel during OnnxBackend.init() —
+        // no separate initYoloWorld() call needed here.
       }),
       loadYoloRules(),
       loadYoloWorldRules(),
@@ -204,6 +221,7 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
         .then((r) => r.json())
         .then((data: SiteConfig) => {
           siteConfigRef.current = data;
+          if (data.streams) setSiteStreams(data.streams);
         })
         .catch(() => {}),
     ]);
@@ -335,6 +353,13 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
       const video = cameraRef.current?.getVideo();
       if (!video) return;
 
+      // ── Thermal throttling: skip every other frame during idle ──
+      const thermal = thermalRef.current;
+      thermal.frameCounter++;
+      if (thermal.throttling && stateRef.current === "idle" && thermal.frameCounter % 2 === 0) {
+        return; // effectively ~15fps during idle when throttling
+      }
+
       // During classifying, skip all heavy work — only check timeout.
       if (stateRef.current === "classifying") {
         if (Date.now() - classifyStartRef.current >= CLASSIFYING_TIMEOUT_MS) {
@@ -362,9 +387,38 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
               : BG_RATE_FROZEN;
       analyzer.setBgRate(bgRate);
 
+      const analysisStart = performance.now();
       const analysis = analyzer.analyze(video);
       if (!analysis) return;
       lastAnalysisRef.current = analysis;
+
+      // ── Thermal monitoring: track analysis duration ──
+      const analysisDuration = performance.now() - analysisStart;
+      if (thermal.baselineSamples < 60) {
+        // Collecting baseline (first ~2 seconds)
+        thermal.durations.push(analysisDuration);
+        thermal.baselineSamples++;
+        if (thermal.baselineSamples === 60) {
+          thermal.baseline = thermal.durations.reduce((a, b) => a + b, 0) / thermal.durations.length;
+          thermal.durations = [];
+          console.log(`[thermal] Baseline analysis time: ${thermal.baseline.toFixed(2)}ms`);
+        }
+      } else {
+        thermal.durations.push(analysisDuration);
+        if (thermal.durations.length > 30) thermal.durations.shift();
+        const avg = thermal.durations.reduce((a, b) => a + b, 0) / thermal.durations.length;
+        const wasThrottling = thermal.throttling;
+        // Trigger at 2× baseline, recover at 1.5× baseline (hysteresis)
+        if (avg > thermal.baseline * 2) {
+          thermal.throttling = true;
+        } else if (avg < thermal.baseline * 1.5) {
+          thermal.throttling = false;
+        }
+        if (thermal.throttling !== wasThrottling) {
+          console.log(`[thermal] ${thermal.throttling ? "⚠️ Throttling detected" : "✅ Throttling resolved"} (avg=${avg.toFixed(2)}ms, baseline=${thermal.baseline.toFixed(2)}ms)`);
+          setThermalWarning(thermal.throttling);
+        }
+      }
 
       const state = stateRef.current;
 
@@ -1107,8 +1161,12 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
           locale={locale}
           onToggleLocale={toggleLocale}
           voiceEnabled={voiceEnabled}
+          streams={siteStreams}
         />
       )}
+
+      {/* System status badge — always visible in bottom-left */}
+      <SystemStatusBadge thermalWarning={thermalWarning} />
     </div>
   );
 }

@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { redis } from "@/lib/redis";
+import { sendErrorNotification } from "@/lib/notifications";
+import { runInBackground } from "@/lib/background-task";
 
 interface CheckResult {
   status: "ok" | "error";
@@ -63,6 +65,30 @@ export async function GET() {
   } else {
     status = "ok";
     httpStatus = 200;
+  }
+
+  // ── Notify on failures (non-blocking) ──
+  // Each failed service triggers its own deduped notification.
+  // Notifications run in the background via waitUntil so they never block the response.
+  const failedChecks: { type: string; error: string }[] = [];
+  if (redisCheck.status === "error") {
+    failedChecks.push({ type: "Redis Down", error: redisCheck.error ?? "Redis unreachable" });
+  }
+  if (openaiCheck.status === "error") {
+    failedChecks.push({ type: "OpenAI API Down", error: openaiCheck.error ?? "OpenAI unavailable" });
+  }
+  if (blobCheck.status === "error") {
+    failedChecks.push({ type: "Blob Storage Down", error: blobCheck.error ?? "Blob storage unavailable" });
+  }
+
+  if (failedChecks.length > 0) {
+    runInBackground(
+      Promise.allSettled(
+        failedChecks.map((check) =>
+          sendErrorNotification(check.type, check.error)
+        ),
+      ).then(() => undefined),
+    );
   }
 
   return NextResponse.json(

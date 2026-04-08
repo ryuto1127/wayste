@@ -7,6 +7,7 @@ import { generateRequestId } from "@/lib/request-id";
 import { del as deleteBlob } from "@vercel/blob";
 import type { PilotLogEntry } from "@/lib/types";
 import { validateSessionToken } from "@/lib/session-token";
+import { checkAndSendMilestoneNotification } from "@/lib/milestone-check";
 
 export async function GET(request: Request) {
   // GET is read-only (review page) — no auth required.
@@ -95,6 +96,11 @@ export async function POST(request: Request) {
         meta: entry.meta,
         yoloDetections: entry.yoloDetections,
       });
+
+      // Check for milestone notification (non-blocking, best-effort)
+      await checkAndSendMilestoneNotification().catch((err) =>
+        console.warn("[pilot-log] Milestone check failed:", err)
+      );
     })()
   );
 
@@ -109,7 +115,7 @@ export async function POST(request: Request) {
  *   ?from=...&to=...    — delete entries in a date range
  *   ?all=true           — delete ALL entries (full reset)
  *
- * Also deletes associated Blob images and clears feedback + review verdicts
+ * Also deletes associated Blob images and clears review verdicts
  * for the deleted entries.
  */
 export async function DELETE(request: Request) {
@@ -160,6 +166,11 @@ export async function DELETE(request: Request) {
       }
     }
 
+    // Nothing to delete
+    if (toDelete.length === 0 && !deleteAll) {
+      return NextResponse.json({ deleted: 0, kept: toKeep.length, blobsDeleted: 0 });
+    }
+
     // ── Delete Blob images (best-effort, non-blocking) ──
     const imageUrls = toDelete
       .map((e) => e.imageUrl)
@@ -178,54 +189,13 @@ export async function DELETE(request: Request) {
       );
     }
 
-    // ── Clean up feedback entries (by timestamp, not just requestId) ──
-    const feedbackRaw = await redis.lrange(KEYS.feedback, 0, -1);
-    const feedbackToKeep: string[] = [];
-    const deletedFeedbackIds: string[] = [];
-
-    for (const item of feedbackRaw) {
-      try {
-        const f = (typeof item === "string" ? JSON.parse(item) : item) as { id?: string; timestamp?: string };
-        const fMs = f.timestamp ? new Date(f.timestamp).getTime() : 0;
-        const shouldDeleteFb = deleteAll
-          || (beforeDate && fMs < beforeMs)
-          || (fromDate && fMs >= fromMs && fMs <= toMs);
-
-        if (shouldDeleteFb) {
-          if (f.id) deletedFeedbackIds.push(f.id);
-        } else {
-          feedbackToKeep.push(typeof item === "string" ? item : JSON.stringify(item));
-        }
-      } catch {
-        feedbackToKeep.push(typeof item === "string" ? item : JSON.stringify(item));
-      }
-    }
-
-    // Nothing to delete in either list
-    if (toDelete.length === 0 && deletedFeedbackIds.length === 0 && !deleteAll) {
-      return NextResponse.json({ deleted: 0, kept: toKeep.length, blobsDeleted: 0 });
-    }
-
-    // ── Rebuild Redis lists with remaining entries ──
+    // ── Rebuild Redis list with remaining entries ──
     const pipeline = redis.pipeline();
     pipeline.del(KEYS.pilotLog);
     if (toKeep.length > 0) {
       for (const entry of toKeep) {
         pipeline.rpush(KEYS.pilotLog, JSON.stringify(entry));
       }
-    }
-
-    pipeline.del(KEYS.feedback);
-    if (feedbackToKeep.length > 0) {
-      for (const item of feedbackToKeep) {
-        pipeline.rpush(KEYS.feedback, item);
-      }
-    }
-
-    // Clean up corrections for deleted feedback entries
-    for (const id of deletedFeedbackIds) {
-      pipeline.hdel("recycling:corrections", id);
-      pipeline.hdel("recycling:corrections:names", id);
     }
 
     // Clean up review verdicts for deleted pilot log entries
@@ -238,21 +208,15 @@ export async function DELETE(request: Request) {
 
     // If deleting all, wipe the hash keys entirely (faster than per-key hdel)
     if (deleteAll) {
-      pipeline.del("recycling:corrections");
-      pipeline.del("recycling:corrections:names");
       pipeline.del("recycling:review-verdicts");
-      // Clean up legacy keys that are no longer used
-      pipeline.del("recycling:review-verdicts:streams");
-      pipeline.del("recycling:review-verdicts:names");
     }
 
     await pipeline.exec();
 
-    const totalDeleted = toDelete.length + deletedFeedbackIds.length;
-    console.log(`[pilot-log] Purged ${toDelete.length} log entries, ${deletedFeedbackIds.length} feedback, ${blobsDeleted} blobs`);
+    console.log(`[pilot-log] Purged ${toDelete.length} log entries, ${blobsDeleted} blobs`);
 
     return NextResponse.json({
-      deleted: totalDeleted,
+      deleted: toDelete.length,
       kept: toKeep.length,
       blobsDeleted,
     });

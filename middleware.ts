@@ -2,9 +2,7 @@
  * Next.js middleware — protects admin pages and their backing API routes.
  *
  * Protected paths:
- *   /dashboard, /review            — admin UI pages
- *   /api/stats-stream              — SSE for dashboard
- *   /api/feedback-stats            — dashboard stats
+ *   /review                        — admin review UI
  *   /api/review, /api/review/*     — review data + export
  *   /api/pilot-log GET             — pilot log viewer
  *   /api/overrides                 — override management
@@ -28,10 +26,7 @@ const SESSION_MAX_AGE = 60 * 60 * 24 * 7; // 7 days
 
 /** Paths that require admin Basic Auth. */
 const ADMIN_PATHS = [
-  "/dashboard",
   "/review",
-  "/api/stats-stream",
-  "/api/feedback-stats",
   "/api/review",
   "/api/pilot-log",
   "/api/overrides",
@@ -126,10 +121,7 @@ export async function middleware(request: NextRequest) {
 export const config = {
   // Only run middleware on admin paths (skip static files, images, etc.)
   matcher: [
-    "/dashboard/:path*",
     "/review/:path*",
-    "/api/stats-stream",
-    "/api/feedback-stats",
     "/api/review/:path*",
     "/api/pilot-log",
     "/api/overrides/:path*",

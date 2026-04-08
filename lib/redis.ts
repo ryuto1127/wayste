@@ -13,7 +13,6 @@ export const redis = new Redis({
 
 export const KEYS = {
   pilotLog: "recycling:pilot-log",
-  feedback: "recycling:feedback",
 } as const;
 
 /** Maximum entries to keep per list (oldest are trimmed automatically). */

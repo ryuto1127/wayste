@@ -1,7 +1,7 @@
 /**
  * Cron job: daily data maintenance.
  *
- * 1. Export pilot log + feedback data to Vercel Blob as JSONL archive.
+ * 1. Export pilot log data to Vercel Blob as JSONL archive.
  * 2. Clean up Blob images older than RETENTION_DAYS.
  *
  * Triggered by Vercel Cron (see vercel.json). Protected by CRON_SECRET.
@@ -24,11 +24,10 @@ export async function GET(request: Request) {
 
   const results = { exported: false, deletedBlobs: 0, errors: [] as string[] };
 
-  // ── Step 1: Archive data to Blob ──
+  // ── Step 1: Archive pilot log to Blob ──
   try {
     const date = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
 
-    // Export pilot log
     const pilotRaw = await redis.lrange(KEYS.pilotLog, 0, -1);
     if (pilotRaw.length > 0) {
       const jsonl = pilotRaw
@@ -41,21 +40,8 @@ export async function GET(request: Request) {
       });
     }
 
-    // Export feedback
-    const feedbackRaw = await redis.lrange(KEYS.feedback, 0, -1);
-    if (feedbackRaw.length > 0) {
-      const jsonl = feedbackRaw
-        .map((item) => (typeof item === "string" ? item : JSON.stringify(item)))
-        .join("\n");
-      await put(`archives/${date}/feedback.jsonl`, jsonl, {
-        access: "public",
-        contentType: "application/jsonl",
-        addRandomSuffix: false,
-      });
-    }
-
     results.exported = true;
-    console.log(`[cron/cleanup] Archived ${pilotRaw.length} pilot entries + ${feedbackRaw.length} feedback entries`);
+    console.log(`[cron/cleanup] Archived ${pilotRaw.length} pilot entries`);
   } catch (err) {
     const msg = `Archive failed: ${err}`;
     console.error(`[cron/cleanup] ${msg}`);

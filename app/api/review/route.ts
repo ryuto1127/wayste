@@ -11,6 +11,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod/v4";
 import { redis, KEYS } from "@/lib/redis";
 import type { PilotLogEntry } from "@/lib/types";
+import { recordCalibrationVerdict } from "@/lib/calibration";
 
 /** Human review verdicts for pilot log entries: requestId → "correct" | "wrong" | "false_detection" */
 const VERDICTS_KEY = "recycling:review-verdicts";
@@ -19,22 +20,10 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    const [pilotRaw, feedbackRaw, verdicts] = await Promise.all([
+    const [pilotRaw, verdicts] = await Promise.all([
       redis.lrange(KEYS.pilotLog, 0, -1),
-      redis.lrange(KEYS.feedback, 0, -1),
       redis.hgetall(VERDICTS_KEY) as Promise<Record<string, string> | null>,
     ]);
-
-    // Build a map of kiosk user feedback keyed by requestId
-    const kioskFeedbackMap = new Map<string, "correct" | "wrong">();
-    for (const raw of feedbackRaw) {
-      try {
-        const fb = (typeof raw === "string" ? JSON.parse(raw) : raw) as { requestId?: string; feedback?: string };
-        if (fb.requestId && (fb.feedback === "correct" || fb.feedback === "wrong")) {
-          kioskFeedbackMap.set(fb.requestId, fb.feedback);
-        }
-      } catch { /* skip */ }
-    }
 
     const entries = pilotRaw
       .map((item) => {
@@ -47,7 +36,6 @@ export async function GET() {
       .map((entry) => ({
         ...entry,
         verdict: entry.requestId ? (verdicts?.[entry.requestId] ?? null) : null,
-        kioskFeedback: entry.requestId ? (kioskFeedbackMap.get(entry.requestId) ?? null) : null,
       }));
 
     const reviewed = entries.filter((e) => e.verdict !== null).length;
@@ -121,6 +109,24 @@ export async function POST(request: Request) {
   try {
     const { requestId, verdict } = parsed.data;
     await redis.hset(VERDICTS_KEY, { [requestId]: verdict });
+
+    // Record calibration data — look up original confidence from pilot log
+    try {
+      const allRaw: string[] = await redis.lrange(KEYS.pilotLog, 0, 200);
+      for (const item of allRaw) {
+        const entry = (typeof item === "string" ? JSON.parse(item) : item) as PilotLogEntry;
+        if (entry.requestId === requestId) {
+          await recordCalibrationVerdict(
+            entry.confidence,
+            verdict === "correct",
+          );
+          break;
+        }
+      }
+    } catch {
+      // Best-effort — don't fail the verdict save
+    }
+
     return NextResponse.json({ saved: true });
   } catch (err) {
     console.error("[review] POST failed:", err);

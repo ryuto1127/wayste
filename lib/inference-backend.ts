@@ -36,6 +36,42 @@ export const YOLO_API_PARALLEL_THRESHOLD = 0.3;
 /** YOLO World confidence below this falls through to API. */
 export const YOLO_WORLD_ACCEPT_THRESHOLD = 0.45;
 
+// ── System status (observable by UI components) ──
+export type ModelStatus = "loading" | "ready" | "error";
+export type ProviderType = "webgpu" | "wasm" | "http" | "unknown";
+
+export interface SystemStatus {
+  yolo26m: ModelStatus;
+  yoloWorld: ModelStatus;
+  provider: ProviderType;
+}
+
+/** Current system status — read by SystemStatusBadge. */
+let _systemStatus: SystemStatus = {
+  yolo26m: "loading",
+  yoloWorld: "loading",
+  provider: "unknown",
+};
+/** Subscribers notified when status changes. */
+const _statusListeners: Set<(s: SystemStatus) => void> = new Set();
+
+function updateStatus(patch: Partial<SystemStatus>) {
+  _systemStatus = { ..._systemStatus, ...patch };
+  for (const fn of _statusListeners) fn(_systemStatus);
+}
+
+/** Subscribe to system status changes. Returns an unsubscribe function. */
+export function subscribeSystemStatus(fn: (s: SystemStatus) => void): () => void {
+  _statusListeners.add(fn);
+  fn(_systemStatus); // emit current state immediately
+  return () => { _statusListeners.delete(fn); };
+}
+
+/** Read current system status (snapshot). */
+export function getSystemStatus(): SystemStatus {
+  return _systemStatus;
+}
+
 // ── Backend interface ──
 export interface InferenceBackend {
   /** Initialize the backend (load model, warm up, etc.). */
@@ -71,8 +107,21 @@ class OnnxBackend implements InferenceBackend {
 
   async init(): Promise<boolean> {
     this.yolo = await import("./yolo-inference");
+
+    // Start YOLO World loading in parallel — don't await it here.
+    // By the time a user first needs Tier 2, the model may already be warm.
+    this.initYoloWorld().catch(() => {});
+
     const ok = await this.yolo.initYolo();
-    if (ok) await this.yolo.warmUpYolo();
+    if (ok) {
+      await this.yolo.warmUpYolo();
+      updateStatus({
+        yolo26m: "ready",
+        provider: this.yolo.getYoloProvider() as ProviderType,
+      });
+    } else {
+      updateStatus({ yolo26m: "error" });
+    }
     return ok;
   }
 
@@ -97,10 +146,16 @@ class OnnxBackend implements InferenceBackend {
     try {
       this.yoloWorld = await import("./yolo-world-inference");
       const ok = await this.yoloWorld.initYoloWorld();
-      if (ok) await this.yoloWorld.warmUpYoloWorld();
+      if (ok) {
+        await this.yoloWorld.warmUpYoloWorld();
+        updateStatus({ yoloWorld: "ready" });
+      } else {
+        updateStatus({ yoloWorld: "error" });
+      }
       return ok;
     } catch (err) {
       console.warn("[inference] YOLO World init failed:", err);
+      updateStatus({ yoloWorld: "error" });
       return false;
     }
   }

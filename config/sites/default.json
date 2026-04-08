@@ -8,25 +8,29 @@
       "id": "recycling",
       "label": "Recycling",
       "color": "#2563EB",
-      "description": "Clean paper, cardboard, plastic bottles and containers (#1-#5), metal cans, glass bottles and jars. Items must be empty and rinsed."
+      "description": "Clean paper, cardboard, plastic bottles and containers (#1-#5), metal cans, glass bottles and jars. Items must be empty and rinsed.",
+      "position": "far-left"
     },
     {
       "id": "compost",
       "label": "Compost",
       "color": "#16A34A",
-      "description": "Food scraps, fruit and vegetable peels, coffee grounds, tea bags, soiled paper napkins, paper towels, yard waste, compostable containers marked BPI-certified."
+      "description": "Food scraps, fruit and vegetable peels, coffee grounds, tea bags, soiled paper napkins, paper towels, yard waste, compostable containers marked BPI-certified.",
+      "position": "left"
     },
     {
       "id": "landfill",
       "label": "Landfill",
       "color": "#525252",
-      "description": "Chip bags, candy wrappers, styrofoam, plastic wrap, plastic bags, lined coffee cups, straws, mixed-material packaging, broken ceramics, diapers."
+      "description": "Chip bags, candy wrappers, styrofoam, plastic wrap, plastic bags, lined coffee cups, straws, mixed-material packaging, broken ceramics, diapers.",
+      "position": "center"
     },
     {
       "id": "special",
       "label": "Special Disposal",
       "color": "#DC2626",
-      "description": "Batteries, electronics, light bulbs, medications, paint, motor oil, hazardous chemicals. Do not place in regular bins."
+      "description": "Batteries, electronics, light bulbs, medications, paint, motor oil, hazardous chemicals. Do not place in regular bins.",
+      "position": "right"
     },
     {
       "id": "needs_review",

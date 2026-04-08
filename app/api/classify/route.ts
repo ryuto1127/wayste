@@ -14,6 +14,7 @@ import { uploadFrameToBlob } from "@/lib/blob-store";
 import { redis } from "@/lib/redis";
 import { generateRequestId } from "@/lib/request-id";
 import { validateSessionToken } from "@/lib/session-token";
+import { recordCalibrationPrediction } from "@/lib/calibration";
 
 // ── Request validation ──
 const RequestSchema = z.object({
@@ -315,8 +316,11 @@ export async function POST(request: Request) {
     });
 
     runInBackground(
-      uploadFrameToBlob(image, result.itemName, result.wasteStream, logTimestamp)
-        .then((imageUrl) =>
+      Promise.all([
+        recordCalibrationPrediction(result.confidence, modelUsed),
+        uploadFrameToBlob(image, result.itemName, result.wasteStream, logTimestamp),
+      ])
+        .then(([, imageUrl]) =>
           logPilotEntry({
             timestamp: logTimestamp,
             modelUsed,

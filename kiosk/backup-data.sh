@@ -73,7 +73,7 @@ echo ""
 mkdir -p "$IMAGES_DIR"
 
 # ── 1. 分類ログ (pilot-log) のダウンロード ──
-echo "[1/4] 分類ログをダウンロード中..."
+echo "[1/3] 分類ログをダウンロード中..."
 HTTP_CODE=$(curl -s -o "${BACKUP_DIR}/pilot-log.jsonl" -w "%{http_code}" \
   -H "${AUTH_HEADER}" \
   "${KIOSK_URL}/api/pilot-log")
@@ -100,20 +100,8 @@ else
   echo "  [WARN] HTTP ${HTTP_CODE} — ログの取得に失敗"
 fi
 
-# ── 2. フィードバックデータのダウンロード ──
-echo "[2/4] フィードバックデータをダウンロード中..."
-HTTP_CODE=$(curl -s -o "${BACKUP_DIR}/feedback.jsonl" -w "%{http_code}" \
-  -H "${AUTH_HEADER}" \
-  "${KIOSK_URL}/api/feedback-stats")
-
-if [ "$HTTP_CODE" = "200" ]; then
-  echo "  saved"
-else
-  echo "  [WARN] HTTP ${HTTP_CODE} — フィードバックの取得に失敗"
-fi
-
-# ── 3. ファインチューニングデータセットのダウンロード ──
-echo "[3/4] ファインチューニングデータセットをダウンロード中..."
+# ── 2. ファインチューニングデータセットのダウンロード ──
+echo "[2/3] ファインチューニングデータセットをダウンロード中..."
 HTTP_CODE=$(curl -s -o "${BACKUP_DIR}/finetune-dataset.jsonl" -w "%{http_code}" \
   -H "${AUTH_HEADER}" \
   "${KIOSK_URL}/api/review/export?format=finetune${EXPORT_PARAMS:+&${EXPORT_PARAMS}}")
@@ -128,8 +116,8 @@ else
   echo "  [WARN] HTTP ${HTTP_CODE} — データセットの取得に失敗"
 fi
 
-# ── 4. 画像の一括ダウンロード ──
-echo "[4/4] 画像をダウンロード中..."
+# ── 3. 画像の一括ダウンロード ──
+echo "[3/3] 画像をダウンロード中..."
 
 if [ ! -f "${BACKUP_DIR}/pilot-log.jsonl" ]; then
   echo "  [SKIP] pilot-log.jsonl がないため画像ダウンロードをスキップ"

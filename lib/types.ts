@@ -172,11 +172,16 @@ export interface SiteConfig {
   tips?: { text: string }[];
 }
 
+/** Physical bin position relative to the kiosk monitor. */
+export type BinPosition = "far-left" | "left" | "center" | "right" | "far-right";
+
 export interface StreamDefinition {
   id: WasteStream;
   label: string;
   color: string;
   description: string;
+  /** Physical bin position relative to the kiosk (omit for non-physical streams like needs_review). */
+  position?: BinPosition;
 }
 
 export interface ItemOverride {
@@ -190,20 +195,6 @@ export interface SiteRule {
   instruction: string;
   stream?: WasteStream;
   requiresStaff?: boolean;
-}
-
-export interface FeedbackEntry {
-  id: string;
-  timestamp: string;
-  itemName: string;
-  predictedStream: WasteStream;
-  confidence: number;
-  feedback: "correct" | "wrong" | null;
-  actualStream?: WasteStream;
-  actualItemName?: string;
-  siteId: string;
-  imageUrl?: string;  // Vercel Blob URL of the captured frame
-  requestId?: string;
 }
 
 export type KioskAction =

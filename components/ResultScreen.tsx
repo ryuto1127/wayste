@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useCallback } from "react";
-import type { ClassificationResponse } from "@/lib/types";
+import type { ClassificationResponse, StreamDefinition, BinPosition } from "@/lib/types";
 import type { Locale, TranslationKey } from "@/lib/i18n";
 import { t } from "@/lib/i18n";
 
@@ -53,6 +53,8 @@ interface ResultScreenProps {
   locale: Locale;
   onToggleLocale: () => void;
   voiceEnabled?: boolean;
+  /** Stream definitions from site config — used to look up physical bin positions. */
+  streams?: StreamDefinition[];
 }
 
 export default function ResultScreen({
@@ -60,14 +62,21 @@ export default function ResultScreen({
   locale,
   onToggleLocale,
   voiceEnabled = false,
+  streams = [],
 }: ResultScreenProps) {
   const T = useCallback(
     (key: TranslationKey) => t(locale, key),
     [locale]
   );
 
-  const isMulti = results.length > 1;
-  const firstResult = results[0];
+  // Cap at 3 items max — if more, show only top 3 by confidence
+  const displayResults =
+    results.length > 3
+      ? [...results].sort((a, b) => b.confidence - a.confidence).slice(0, 3)
+      : results;
+
+  const isMulti = displayResults.length > 1;
+  const firstResult = displayResults[0];
   const isNothingDetected = firstResult.itemName === "nothing_detected";
 
   // ── Voice announcement via Web Speech API ──
@@ -116,12 +125,30 @@ export default function ResultScreen({
         aria-live="assertive"
         aria-atomic="true"
       >
-        <button
-          onClick={onToggleLocale}
-          className="absolute top-6 right-6 z-30 px-3 py-1.5 text-neutral-400 hover:text-neutral-200 text-xs font-medium transition-colors"
-        >
-          {T("switchLang")}
-        </button>
+        <div className="absolute top-6 right-6 z-30 flex items-center bg-neutral-800/60 rounded-lg overflow-hidden">
+          <button
+            onClick={locale === "ja" ? onToggleLocale : undefined}
+            className={`px-3.5 py-1.5 text-xs font-bold transition-colors ${
+              locale === "en"
+                ? "bg-teal-600/30 text-teal-300"
+                : "text-neutral-500 hover:text-neutral-300"
+            }`}
+            aria-pressed={locale === "en"}
+          >
+            EN
+          </button>
+          <button
+            onClick={locale === "en" ? onToggleLocale : undefined}
+            className={`px-3.5 py-1.5 text-xs font-bold transition-colors ${
+              locale === "ja"
+                ? "bg-teal-600/30 text-teal-300"
+                : "text-neutral-500 hover:text-neutral-300"
+            }`}
+            aria-pressed={locale === "ja"}
+          >
+            日本語
+          </button>
+        </div>
 
         <div className="flex-1 flex flex-col items-center justify-center p-6 gap-6 max-w-md mx-auto w-full text-center">
           <div className="text-6xl" aria-hidden="true">&#x2753;</div>
@@ -143,32 +170,53 @@ export default function ResultScreen({
       aria-live="assertive"
       aria-atomic="true"
     >
-      {/* Language toggle */}
-      <button
-        onClick={onToggleLocale}
-        className="absolute top-6 right-6 z-30 px-3 py-1.5 text-neutral-400 hover:text-neutral-200 text-xs font-medium transition-colors"
-      >
-        {T("switchLang")}
-      </button>
+      {/* Language toggle — dual-button */}
+      <div className="absolute top-6 right-6 z-30 flex items-center bg-neutral-800/60 rounded-lg overflow-hidden">
+        <button
+          onClick={locale === "ja" ? onToggleLocale : undefined}
+          className={`px-3.5 py-1.5 text-xs font-bold transition-colors ${
+            locale === "en"
+              ? "bg-teal-600/30 text-teal-300"
+              : "text-neutral-500 hover:text-neutral-300"
+          }`}
+          aria-pressed={locale === "en"}
+        >
+          EN
+        </button>
+        <button
+          onClick={locale === "en" ? onToggleLocale : undefined}
+          className={`px-3.5 py-1.5 text-xs font-bold transition-colors ${
+            locale === "ja"
+              ? "bg-teal-600/30 text-teal-300"
+              : "text-neutral-500 hover:text-neutral-300"
+          }`}
+          aria-pressed={locale === "ja"}
+        >
+          日本語
+        </button>
+      </div>
 
       {isMulti ? (
-        /* Multi-item: stack cards vertically */
-        <div className="flex-1 flex flex-col p-4 gap-3 overflow-y-auto">
-          <div className="text-xs font-semibold uppercase tracking-widest text-neutral-400 mb-1 pt-8">
-            {T("multipleItemsDetected")}
-          </div>
-          {results.map((result, idx) => (
-            <MultiItemCard
+        /* Multi-item: side-by-side split-screen */
+        <div
+          className="flex-1 grid h-full pt-12"
+          style={{
+            gridTemplateColumns: `repeat(${displayResults.length}, 1fr)`,
+          }}
+        >
+          {displayResults.map((result, idx) => (
+            <SplitScreenCard
               key={`${result.itemName}::${result.wasteStream}::${idx}`}
               result={result}
               locale={locale}
-              index={idx}
+              streams={streams}
+              isLast={idx === displayResults.length - 1}
             />
           ))}
         </div>
       ) : (
         /* Single item: fullscreen hero */
-        <FullscreenResult result={firstResult} locale={locale} />
+        <FullscreenResult result={firstResult} locale={locale} streams={streams} onToggleLocale={onToggleLocale} />
       )}
     </div>
   );
@@ -179,9 +227,13 @@ export default function ResultScreen({
 function FullscreenResult({
   result,
   locale,
+  streams = [],
+  onToggleLocale,
 }: {
   result: ClassificationResponse;
   locale: Locale;
+  streams?: StreamDefinition[];
+  onToggleLocale: () => void;
 }) {
   const T = useCallback(
     (key: TranslationKey) => t(locale, key),
@@ -204,6 +256,32 @@ function FullscreenResult({
 
   return (
     <div className="flex-1 flex flex-col">
+      {/* Language toggle */}
+      <div className="absolute top-6 right-6 z-30 flex items-center bg-neutral-800/60 rounded-lg overflow-hidden">
+        <button
+          onClick={locale === "ja" ? onToggleLocale : undefined}
+          className={`px-3.5 py-1.5 text-xs font-bold transition-colors ${
+            locale === "en"
+              ? "bg-teal-600/30 text-teal-300"
+              : "text-neutral-500 hover:text-neutral-300"
+          }`}
+          aria-pressed={locale === "en"}
+        >
+          EN
+        </button>
+        <button
+          onClick={locale === "en" ? onToggleLocale : undefined}
+          className={`px-3.5 py-1.5 text-xs font-bold transition-colors ${
+            locale === "ja"
+              ? "bg-teal-600/30 text-teal-300"
+              : "text-neutral-500 hover:text-neutral-300"
+          }`}
+          aria-pressed={locale === "ja"}
+        >
+          日本語
+        </button>
+      </div>
+
       {/* Screen reader summary */}
       <span className="sr-only">
         {result.itemName}: {streamLabel(locale, result.wasteStream)}.
@@ -236,6 +314,13 @@ function FullscreenResult({
         <div className="text-6xl font-black text-white uppercase text-center">
           {streamLabel(locale, result.wasteStream)}
         </div>
+        {/* Physical bin position indicator */}
+        <BinPositionIndicator
+          wasteStream={result.wasteStream}
+          streams={streams}
+          locale={locale}
+          size="large"
+        />
         {/* Key action tip — shown inline below bin name for instant readability */}
         {(result.preAction || result.specialInstructions) && (
           <p className="mt-4 text-xl font-semibold text-white/90 text-center max-w-sm">
@@ -263,16 +348,19 @@ function FullscreenResult({
   );
 }
 
-// ── Multi-item card (compact) ──
+// ── Split-screen card (full-height column for multi-item layout) ──
 
-function MultiItemCard({
+function SplitScreenCard({
   result,
   locale,
-  index,
+  streams = [],
+  isLast,
 }: {
   result: ClassificationResponse;
   locale: Locale;
-  index: number;
+  streams?: StreamDefinition[];
+  /** Whether this is the last column (no right border). */
+  isLast: boolean;
 }) {
   const T = useCallback(
     (key: TranslationKey) => t(locale, key),
@@ -294,54 +382,231 @@ function MultiItemCard({
         : "bg-red-600";
 
   return (
-    <div className="bg-neutral-900/60 rounded-2xl border border-neutral-800 overflow-hidden">
+    <div
+      className={`relative flex flex-col h-full overflow-hidden${
+        isLast ? "" : " border-r-2 border-neutral-800/60"
+      }`}
+    >
       {/* Screen reader summary */}
       <span className="sr-only">
         {result.itemName}: {streamLabel(locale, result.wasteStream)}.
         {result.preAction && ` ${result.preAction}.`}
       </span>
 
-      {/* Item header */}
-      <div className="px-4 pt-3 pb-2 flex items-center gap-2">
-        <span className="text-xs font-semibold text-neutral-500 uppercase tracking-wider">
-          {T("itemNumber").replace("{n}", String(index + 1))}
-        </span>
-        <span className="text-sm font-bold text-white flex-1 truncate">{result.itemName}</span>
-        <span className={`${trustColor} text-white text-[10px] font-bold uppercase px-2 py-0.5 rounded-md`}>
+      {/* Confidence badge — top-right corner */}
+      <div className="absolute top-2 right-3 z-10">
+        <span
+          className={`${trustColor} text-white text-[10px] font-bold uppercase px-2 py-0.5 rounded-md`}
+        >
           {trustLabel}
         </span>
       </div>
 
-      {/* Bin display */}
-      <div
-        className="px-4 py-5 flex items-center gap-3 transition-colors duration-300"
-        style={{ backgroundColor: result.binColor }}
-      >
-        <span className="text-4xl" aria-hidden="true">{streamIcon(result.wasteStream)}</span>
-        <div>
-          <div className="text-[10px] font-semibold uppercase tracking-widest text-white/70">
-            {T("putThisInBin")}
-          </div>
-          <div className="text-3xl font-black text-white uppercase">
-            {streamLabel(locale, result.wasteStream)}
-          </div>
-          {(result.preAction || result.specialInstructions) && (
-            <p className="text-sm font-semibold text-white/85 mt-1">
-              {result.preAction || result.specialInstructions}
-            </p>
-          )}
+      {/* Item name bar (top) */}
+      <div className="px-4 pt-3 pb-2 bg-neutral-950/80 shrink-0">
+        <div className="text-lg font-bold text-white leading-tight truncate pr-16">
+          {result.itemName}
         </div>
       </div>
 
-      {/* Secondary info */}
+      {/* Hero bin — fills most of the column space */}
+      <div
+        className="flex-1 flex flex-col items-center justify-center px-4 transition-colors duration-300"
+        style={{ backgroundColor: result.binColor }}
+      >
+        <div className="text-[10px] font-semibold uppercase tracking-widest text-white/70 mb-2">
+          {T("putThisInBin")}
+        </div>
+        <div className="text-6xl leading-none mb-2" aria-hidden="true">
+          {streamIcon(result.wasteStream)}
+        </div>
+        <div className="text-3xl font-black text-white uppercase text-center">
+          {streamLabel(locale, result.wasteStream)}
+        </div>
+
+        {/* Physical bin position indicator */}
+        <BinPositionIndicator
+          wasteStream={result.wasteStream}
+          streams={streams}
+          locale={locale}
+          size="small"
+        />
+
+        {/* Pre-action or special instructions */}
+        {(result.preAction || result.specialInstructions) && (
+          <p className="mt-3 text-sm font-semibold text-white/90 text-center max-w-xs">
+            {result.preAction || result.specialInstructions}
+          </p>
+        )}
+      </div>
+
+      {/* Compound item separation guide */}
+      {result.isCompound && result.components && result.components.length > 0 && (
+        <div className="px-3 py-3 bg-neutral-950/80 shrink-0">
+          <SplitScreenCompoundBreakdown components={result.components} locale={locale} />
+        </div>
+      )}
+
+      {/* Secondary info strip */}
       {(result.siteNote || (result.preAction && result.specialInstructions)) && (
-        <div className="px-4 py-2.5 space-y-1.5">
+        <div className="px-3 py-2 space-y-1 bg-neutral-950/80 shrink-0">
           {result.preAction && result.specialInstructions && (
             <p className="text-blue-300 text-xs">{result.specialInstructions}</p>
           )}
           {result.siteNote && <p className="text-blue-300 text-xs">{result.siteNote}</p>}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Compound item breakdown for split-screen cards.
+ * Shows a numbered step list with stream badges — compact for column width.
+ */
+function SplitScreenCompoundBreakdown({
+  components,
+  locale,
+}: {
+  components: { partName: string; wasteStream: string; instruction: string }[];
+  locale: Locale;
+}) {
+  const T = useCallback(
+    (key: TranslationKey) => t(locale, key),
+    [locale]
+  );
+
+  return (
+    <div>
+      <div className="text-[10px] font-semibold uppercase tracking-widest text-amber-400 mb-1.5">
+        {T("separateInto")}
+      </div>
+      <div className="space-y-1.5">
+        {components.map((c, i) => (
+          <div
+            key={i}
+            className="flex items-start gap-2 bg-neutral-800/60 rounded-lg px-2.5 py-1.5"
+          >
+            <span className="text-[10px] font-bold text-amber-400 mt-0.5 shrink-0">
+              {T("separationStep").replace("{n}", String(i + 1))}
+            </span>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-1.5">
+                <StreamBadge stream={c.wasteStream} />
+                <span className="text-xs font-medium text-neutral-200 truncate">
+                  {c.partName}
+                </span>
+              </div>
+              <div className="text-[10px] text-neutral-400 mt-0.5">{c.instruction}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Bin position indicator ──
+
+/** Ordered list of all physical bin positions from left to right. */
+const BIN_POSITIONS: BinPosition[] = ["far-left", "left", "center", "right", "far-right"];
+
+/** Map a BinPosition to its i18n label key. */
+const positionLabelKey: Record<BinPosition, TranslationKey> = {
+  "far-left": "binPositionFarLeft",
+  "left": "binPositionLeft",
+  "center": "binPositionCenter",
+  "right": "binPositionRight",
+  "far-right": "binPositionFarRight",
+};
+
+/** Map a BinPosition to its i18n arrow key. */
+const positionArrowKey: Record<BinPosition, TranslationKey> = {
+  "far-left": "binPositionArrowFarLeft",
+  "left": "binPositionArrowLeft",
+  "center": "binPositionArrowCenter",
+  "right": "binPositionArrowRight",
+  "far-right": "binPositionArrowFarRight",
+};
+
+/**
+ * Visual indicator showing which physical bin to use.
+ * Renders a row of 5 dots (one per bin position) with the active bin
+ * highlighted in its stream color, plus a directional label below.
+ */
+function BinPositionIndicator({
+  wasteStream,
+  streams,
+  locale,
+  size = "large",
+}: {
+  wasteStream: string;
+  streams: StreamDefinition[];
+  locale: Locale;
+  size?: "large" | "small";
+}) {
+  const streamDef = streams.find((s) => s.id === wasteStream);
+  const position = streamDef?.position;
+
+  // Don't render if no position (e.g. needs_review or config without positions)
+  if (!position) return null;
+
+  const T = (key: TranslationKey) => t(locale, key);
+
+  // Build the set of all positions that have physical bins in this site config
+  const sitePositions = new Set<BinPosition>();
+  for (const s of streams) {
+    if (s.position) sitePositions.add(s.position);
+  }
+
+  // Only render positions that exist in the site config
+  const activePositions = BIN_POSITIONS.filter((p) => sitePositions.has(p));
+  if (activePositions.length === 0) return null;
+
+  const binColor = streamDef?.color ?? "#FFFFFF";
+  const isLarge = size === "large";
+  const dotSize = isLarge ? "w-5 h-5" : "w-3 h-3";
+  const activeDotSize = isLarge ? "w-7 h-7" : "w-4 h-4";
+  const gapSize = isLarge ? "gap-3" : "gap-2";
+
+  return (
+    <div
+      className={`flex flex-col items-center ${isLarge ? "mt-6" : "px-4 py-2.5"}`}
+      aria-label={`${T(positionLabelKey[position])}`}
+    >
+      {/* Dot row — each dot represents a physical bin slot */}
+      <div className={`flex items-center ${gapSize}`}>
+        {activePositions.map((pos) => {
+          const isActive = pos === position;
+          // Find the stream at this position for its color (inactive dots)
+          const streamAtPos = streams.find((s) => s.position === pos);
+          return (
+            <div
+              key={pos}
+              className={`rounded-full transition-all duration-300 ${
+                isActive
+                  ? `${activeDotSize} ring-2 ring-white/80 shadow-lg`
+                  : `${dotSize} opacity-30`
+              }`}
+              style={{
+                backgroundColor: isActive
+                  ? binColor
+                  : streamAtPos?.color ?? "#6B7280",
+              }}
+              aria-hidden="true"
+            />
+          );
+        })}
+      </div>
+      {/* Direction label */}
+      <div
+        className={`font-bold text-white/90 ${
+          isLarge ? "mt-2 text-xl" : "mt-1 text-xs"
+        }`}
+      >
+        <span aria-hidden="true">{T(positionArrowKey[position])} </span>
+        {T(positionLabelKey[position])}
+      </div>
     </div>
   );
 }

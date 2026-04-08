@@ -10,7 +10,6 @@ import { t } from "@/lib/i18n";
 
 type ReviewEntry = PilotLogEntry & {
   verdict: "correct" | "wrong" | "false_detection" | null;
-  kioskFeedback: "correct" | "wrong" | null;
 };
 
 type Verdict = "correct" | "wrong" | "false_detection";
@@ -330,15 +329,6 @@ function EntryCard({
       {verdictBadge && (
         <p className={`text-xs font-medium ${verdictBadge.color}`}>
           {verdictBadge.text}
-        </p>
-      )}
-
-      {/* Kiosk user feedback badge */}
-      {entry.kioskFeedback && (
-        <p className={`text-[11px] font-medium ${
-          entry.kioskFeedback === "correct" ? "text-sky-400" : "text-amber-400"
-        }`}>
-          {entry.kioskFeedback === "correct" ? T("kioskFeedbackCorrect") : T("kioskFeedbackWrong")}
         </p>
       )}
 

@@ -68,36 +68,18 @@ const translations = {
     langLabel: "EN",
     switchLang: "日本語",
 
-    // Dashboard
-    feedbackDashboard: "Feedback Dashboard",
-    totalFeedback: "Total Feedback",
+    // Admin
     accuracyRate: "Accuracy Rate",
-    corrections: "Corrections Needed",
-    recentFeedback: "Recent Feedback",
     item: "Item",
     predicted: "Predicted",
     time: "Time",
-    noFeedbackYet: "No feedback collected yet. Use the kiosk to classify items and provide feedback.",
     backToKiosk: "Back to Kiosk",
-    adaptiveThreshold: "Adaptive Threshold",
-    currentThreshold: "Current threshold",
-    suggestedThreshold: "Suggested",
-    basedOnFeedback: "Based on feedback accuracy",
 
     // Review page
     imageReview: "Image Review",
     imageReviewSubtitle: "Review all classifications and mark each as correct, wrong, or false detection",
-    pendingCount: "pending",
-    correctedCount: "corrected",
-    noWrongEntries: "No wrong feedback entries yet.",
-    needsCorrection: "Needs correction",
-    correctedSection: "Corrected",
     imageUnavailable: "Image unavailable (upload failed)",
     noImage: "No image",
-    editName: "Edit name",
-    saveName: "Save",
-    cancelEdit: "Cancel",
-    correctedName: "Corrected name",
 
     // Idle screen
     todaysStats: "Today's Stats",
@@ -130,8 +112,6 @@ const translations = {
     verdictFalse: "False detection",
     deleteEntry: "Delete",
     confirmDelete: "Delete this entry?",
-    kioskFeedbackCorrect: "User: Correct",
-    kioskFeedbackWrong: "User: Wrong",
 
     // Voice guidance
     voiceOn: "Sound On",
@@ -140,6 +120,22 @@ const translations = {
     voicePreAction: "First: {action}",
     voiceNeedsReview: "Not sure about this item. Please check with staff.",
     voiceItemDetected: "Item detected. Hold steady.",
+
+    // Bin positions
+    binPositionFarLeft: "Far Left",
+    binPositionLeft: "Left",
+    binPositionCenter: "Center",
+    binPositionRight: "Right",
+    binPositionFarRight: "Far Right",
+    binPositionArrowFarLeft: "\u2190\u2190",
+    binPositionArrowLeft: "\u2190",
+    binPositionArrowCenter: "\u25CF",
+    binPositionArrowRight: "\u2192",
+    binPositionArrowFarRight: "\u2192\u2192",
+
+    // Compound item separation (split-screen)
+    separateInto: "Separate into:",
+    separationStep: "Step {n}",
 
     // Stream icons (used alongside color + text for triple encoding)
     streamIconRecycling: "♻️",
@@ -214,36 +210,17 @@ const translations = {
     langLabel: "日本語",
     switchLang: "English",
 
-    feedbackDashboard: "フィードバック ダッシュボード",
-    totalFeedback: "フィードバック合計",
     accuracyRate: "正解率",
-    corrections: "修正が必要",
-    recentFeedback: "最近のフィードバック",
     item: "アイテム",
     predicted: "予測",
     time: "時間",
-    noFeedbackYet:
-      "まだフィードバックがありません。キオスクでアイテムを分類してフィードバックしてください。",
     backToKiosk: "キオスクに戻る",
-    adaptiveThreshold: "適応型しきい値",
-    currentThreshold: "現在のしきい値",
-    suggestedThreshold: "推奨値",
-    basedOnFeedback: "フィードバック精度に基づく",
 
     // Review page
     imageReview: "画像レビュー",
     imageReviewSubtitle: "全ての分類結果を確認し、正解・不正解・誤検出を判定します",
-    pendingCount: "件 未対応",
-    correctedCount: "件 修正済み",
-    noWrongEntries: "まだ間違いのフィードバックはありません。",
-    needsCorrection: "修正が必要",
-    correctedSection: "修正済み",
     imageUnavailable: "画像が利用できません（アップロード失敗）",
     noImage: "画像なし",
-    editName: "名前を編集",
-    saveName: "保存",
-    cancelEdit: "キャンセル",
-    correctedName: "修正済み名前",
 
     // Idle screen
     todaysStats: "今日の統計",
@@ -276,8 +253,6 @@ const translations = {
     verdictFalse: "誤検出と確認済み",
     deleteEntry: "削除",
     confirmDelete: "このエントリーを削除しますか？",
-    kioskFeedbackCorrect: "ユーザー: 正解",
-    kioskFeedbackWrong: "ユーザー: 不正解",
 
     // Voice guidance
     voiceOn: "音声オン",
@@ -286,6 +261,22 @@ const translations = {
     voicePreAction: "まず：{action}",
     voiceNeedsReview: "この品目は不明です。スタッフに確認してください。",
     voiceItemDetected: "アイテムを検出しました。動かさないでください。",
+
+    // Bin positions
+    binPositionFarLeft: "\u5DE6\u7AEF",
+    binPositionLeft: "\u5DE6",
+    binPositionCenter: "\u4E2D\u592E",
+    binPositionRight: "\u53F3",
+    binPositionFarRight: "\u53F3\u7AEF",
+    binPositionArrowFarLeft: "\u2190\u2190",
+    binPositionArrowLeft: "\u2190",
+    binPositionArrowCenter: "\u25CF",
+    binPositionArrowRight: "\u2192",
+    binPositionArrowFarRight: "\u2192\u2192",
+
+    // Compound item separation (split-screen)
+    separateInto: "分解してください：",
+    separationStep: "手順 {n}",
 
     // Stream icons
     streamIconRecycling: "♻️",

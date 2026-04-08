@@ -36,7 +36,7 @@ import ResultScreen from "./ResultScreen";
 const ANALYSIS_INTERVAL_MS = 30;  // ~33 fps local CV
 const COOLDOWN_MS = 1500; // pause before re-scanning (BG model recovery)
 const OBJECT_GONE_FRAMES = 3;     // frames below ROI threshold before "gone" (~90ms at 33fps)
-const RESULT_GONE_FRAMES = 8;     // result state uses a longer window to resist camera flicker (~240ms at 33fps)
+const RESULT_GONE_FRAMES = 5;     // result state exit window (~150ms at 33fps) — balanced against flicker risk
 const FG_PERSIST_FRAMES = 3;      // consecutive ROI-blob frames required to leave idle (~90ms at 33fps)
 /**
  * Consecutive frames in idle with both foreground presence AND acceptable
@@ -76,10 +76,11 @@ const DETECTION_ROI_MARGIN = 0.10;
 // ── Entry coherence gate ──
 const ROI_BLOB_THRESHOLD = 0.01;
 
-// ── Result-state exit gate (more lenient — keeps result visible for distant/small items) ──
-// Lower than entry gate: item shrunken from distance should not dismiss the result.
-const RESULT_FG_THRESHOLD = 0.015;
-const RESULT_BLOB_THRESHOLD = 0.005;
+// ── Result-state exit gate ──
+// Slightly below entry gate so distant/small items don't prematurely dismiss,
+// but high enough that hand-exit shadows and residual noise don't stall the transition.
+const RESULT_FG_THRESHOLD = 0.022;
+const RESULT_BLOB_THRESHOLD = 0.008;
 
 // ── Elongated-object gate ──
 const ROI_BLOB_DIAGONAL_THRESHOLD = 0.35;

@@ -158,9 +158,9 @@
     },
     "aluminum foil": {
       "itemName": "Aluminum Foil",
-      "wasteStream": "recycling",
-      "reasoning": "Clean aluminum foil is recyclable — scrunch into a ball first.",
-      "preAction": "Clean and scrunch into a ball"
+      "wasteStream": "landfill",
+      "reasoning": "Aluminum foil is not accepted in most curbside recycling programs.",
+      "preAction": ""
     },
     "banana peel": {
       "itemName": "Banana Peel",

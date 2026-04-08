@@ -1,6 +1,6 @@
 {
   "siteId": "default",
-  "siteName": "Wayste",
+  "siteName": "wayste",
   "defaultLocale": "en",
   "reviewThreshold": 0.55,
   "streams": [
@@ -48,8 +48,8 @@
     },
     {
       "pattern": "pizza box",
-      "stream": "compost",
-      "note": "Grease-soiled cardboard should go to compost, not recycling."
+      "stream": "landfill",
+      "note": "Grease-soiled cardboard is not recyclable or compostable in most facilities."
     },
     {
       "pattern": "plastic bag",
@@ -137,7 +137,7 @@
     { "text": "Paper coffee cups have a plastic lining — they go in landfill, not recycling." },
     { "text": "When in doubt, landfill is safer than contaminating the recycling stream." },
     { "text": "Remove caps and lids before recycling bottles — they are often a different material." },
-    { "text": "Pizza boxes with grease stains go in compost, not recycling." },
+    { "text": "Pizza boxes with grease stains go in landfill — grease contaminates both recycling and compost." },
     { "text": "Batteries and electronics need special disposal — never put them in regular bins." }
   ]
 }

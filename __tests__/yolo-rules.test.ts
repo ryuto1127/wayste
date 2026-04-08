@@ -203,7 +203,7 @@ describe("Tier 2: YOLO World detection → waste stream", () => {
       ["paper bag", "recycling"],
       ["milk carton", "recycling"],
       ["juice box", "recycling"],
-      ["aluminum foil", "recycling"],
+      ["aluminum foil", "landfill"],
       ["egg carton", "recycling"],
       ["plastic bottle cap", "recycling"],
       ["glass jar", "recycling"],

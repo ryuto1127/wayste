@@ -80,9 +80,15 @@ export async function loadSiteConfigWithDynamic(siteId: string = "default"): Pro
  * No compound-item handling; that escalates to mini.
  */
 export function buildNanoPrompt(siteConfig: SiteConfig, locale = "en"): string {
+  const streamIds = siteConfig.streams.map((s) => s.id);
   const streams = siteConfig.streams
     .map((s) => `"${s.id}" (${s.label})`)
     .join(", ");
+
+  const overridesSection =
+    siteConfig.overrides && siteConfig.overrides.length > 0
+      ? `\nItem rules — these override your general knowledge:\n${siteConfig.overrides.map((o) => `- ${o.pattern} → ${o.stream}`).join("\n")}\n`
+      : "";
 
   const langNote =
     locale === "ja"
@@ -93,6 +99,9 @@ export function buildNanoPrompt(siteConfig: SiteConfig, locale = "en"): string {
 Identify the item being held in front of the camera and classify it.
 
 Streams: ${streams}
+${overridesSection}
+wasteStream must be exactly one of: ${streamIds.join(", ")}
+If the item does not clearly fit any stream, use "needs_review".
 
 Respond with ONLY this JSON:
 {"itemName":"short name","wasteStream":"stream_id","confidence":0.0-1.0,"reasoning":"one sentence","preAction":""}
@@ -106,9 +115,15 @@ Be honest about confidence — do not inflate it when uncertain.${langNote}`;
  * Detailed prompt for GPT-5.4 mini — handles compound items, detailed reasoning.
  */
 export function buildClassificationPrompt(siteConfig: SiteConfig, locale = "en"): string {
+  const streamIds = siteConfig.streams.map((s) => s.id);
   const streamList = siteConfig.streams
     .map((s) => `- "${s.id}" (${s.label}): ${s.description}`)
     .join("\n");
+
+  const overridesSection =
+    siteConfig.overrides && siteConfig.overrides.length > 0
+      ? `\nItem rules — these override your general knowledge:\n${siteConfig.overrides.map((o) => `- ${o.pattern} → ${o.stream}${o.note ? ` (${o.note})` : ""}`).join("\n")}\n`
+      : "";
 
   const siteRulesSection =
     siteConfig.siteRules && siteConfig.siteRules.length > 0
@@ -119,10 +134,10 @@ export function buildClassificationPrompt(siteConfig: SiteConfig, locale = "en")
 
 Available waste streams at this location:
 ${streamList}
-${siteRulesSection}
+${overridesSection}${siteRulesSection}
 Rules:
 1. Identify the most prominent item being held or shown.
-2. Classify it into exactly one of the waste streams listed above.
+2. wasteStream must be exactly one of: ${streamIds.join(", ")}. If the item does not clearly fit any stream, use "needs_review".
 3. If the image is unclear, blurry, too dark, shows no item, or shows only a person without a discernible waste item, set confidence to 0 and itemName to "nothing detected".
 4. Be honest about confidence. Do NOT inflate confidence when the item is ambiguous or partially occluded. When genuinely uncertain, use a low confidence value (below 0.5).
 5. Consider the material composition of the item, not just its name.
@@ -131,7 +146,7 @@ Rules:
 Respond with ONLY a JSON object in this exact format, no other text:
 {
   "itemName": "short name of the identified item",
-  "wasteStream": "one of: ${siteConfig.streams.map((s) => s.id).join(", ")}",
+  "wasteStream": "one of: ${streamIds.join(", ")}",
   "confidence": 0.0 to 1.0,
   "reasoning": "one sentence explaining why this item goes in this stream",
   "preAction": "",

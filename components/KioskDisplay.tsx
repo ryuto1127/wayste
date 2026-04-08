@@ -532,6 +532,7 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
       detections: YoloDetection[],
       latencyMs: number,
       analysis: FrameAnalysis,
+      modelUsed: "yolo-local" | "yolo-world" = "yolo-local",
     ) {
       // Capture the same center short-side square that YOLO sees (e.g. 720×720
       // from 1280×720). Log images preserve full resolution for fine-tuning.
@@ -557,7 +558,7 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
             body: JSON.stringify({
               image: frame,
               entry: {
-                modelUsed: "yolo-local",
+                modelUsed,
                 escalated: false,
                 itemName: result.itemName,
                 wasteStream: result.wasteStream,
@@ -745,7 +746,7 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
               if (result) {
                 console.log(`[tier2] YOLO World HIT: ${worldBest.className} (${(worldBest.confidence * 100).toFixed(1)}%) → ${result.wasteStream} in ${worldMs}ms`);
                 apiController.abort();
-                logYoloOnlyResult(video, result, yoloDetections, yoloMs + worldMs, analysis);
+                logYoloOnlyResult(video, result, yoloDetections, yoloMs + worldMs, analysis, "yolo-world");
                 handleClassificationResult(result, undefined);
                 return;
               }

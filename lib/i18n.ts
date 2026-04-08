@@ -52,6 +52,7 @@ const translations = {
     cancel: "Cancel",
     saving: "Saving...",
     thanksFeedback: "Thanks for the feedback",
+    scanDone: "Done",
     lowConfidenceWarning: "Low confidence — please verify or ask staff",
 
     // Feedback streams
@@ -207,6 +208,7 @@ const translations = {
     cancel: "キャンセル",
     saving: "保存中...",
     thanksFeedback: "フィードバックありがとうございます",
+    scanDone: "完了",
     lowConfidenceWarning: "確信度が低い — スタッフにご確認ください",
 
     recycling: "リサイクル",

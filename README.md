@@ -21,8 +21,10 @@ Built for office and public-space pilots, with full English and Japanese support
   - Low confidence → best guess with **"When in doubt, use Landfill"** fallback
 - Shows **pre-disposal guidance** when needed (e.g. "Empty contents and remove cap") before the bin directive
 - Supports **English and Japanese** with configurable default locale per site
-- Lets users tap **Correct / Wrong** to give feedback — the "Wrong" correction menu dynamically shows the site's configured streams
-- Logs every scan and all feedback to Redis for post-pilot analysis
+- Detects **compound items** (e.g. a coffee cup with a plastic lid) and breaks them down into per-component disposal instructions
+- Shows a **split-screen layout** when multiple distinct items are detected simultaneously, with one fullscreen bin card per item
+- **Thermal throttling detection** on the kiosk device — when CV analysis times out 2× above baseline, the pipeline automatically halves its frame rate to stay responsive
+- Logs every scan to Redis for post-pilot analysis
 - Saves captured images to **Vercel Blob** with public access + random-suffix URLs (non-guessable, non-enumerable); only exposed through admin-authenticated routes
 - Automatically archives pilot data to Blob and purges old images via a daily cron job
 
@@ -31,10 +33,10 @@ Built for office and public-space pilots, with full English and Japanese support
 ## How to use it
 
 1. Open the kiosk URL on any device with a camera
-2. Hold one item in front of the camera
+2. Hold one item (or multiple items) in front of the camera
 3. Wait for the result — instant for common items (YOLO26m), ~200–800 ms for recycling-specific items (YOLO World), or 1–3 seconds (API fallback)
-4. Dispose of the item in the indicated bin
-5. Optionally tap **Correct** or **Wrong** to give feedback
+4. Dispose of the item in the indicated bin — a physical bin position indicator shows where the bin sits in the row
+5. Walk away or tap **Done** to return to the idle screen early
 
 ---
 
@@ -52,11 +54,11 @@ Built for office and public-space pilots, with full English and Japanese support
 
 | Layer | Technology |
 |-------|-----------|
-| Framework | Next.js 16 (App Router, TypeScript) |
+| Framework | Next.js 16.2.1 (App Router, TypeScript) |
 | Styling | Tailwind CSS v4 |
 | Local inference (Tier 1) | YOLO26m FP16 (COCO-80, 39 MB) via ONNX Runtime Web — on-demand |
 | Local inference (Tier 2) | YOLO World S (23 consolidated recycling classes, 47.9 MB) via ONNX Runtime Web — on-demand fallback |
-| AI classification | OpenAI GPT-5.4 vision — nano (fast) with mini escalation (accurate) |
+| AI classification | OpenAI GPT-5.4 — `gpt-5.4-nano` (fast) with `gpt-5.4-mini` escalation (compound items / low confidence) |
 | Local detection | OffscreenCanvas background subtraction at 120×120 (square), ~33 fps, HSV-based skin filtering |
 | Response validation | Zod schema validation on all model output |
 | API security | HMAC-signed session tokens + two-tier auth (kiosk token / admin key) |
@@ -138,7 +140,7 @@ vercel env pull
 | `KIOSK_API_TOKEN` | No | Bearer token required by kiosk endpoints (classify, feedback, pilot-log). Omit to skip auth in dev. |
 | `ADMIN_API_KEY` | No | API key required by admin endpoints (overrides, review). Omit to skip auth in dev. |
 | `CRON_SECRET` | No | Vercel Cron authentication secret for `/api/cron/cleanup`. |
-| `BLOB_RETENTION_DAYS` | No | How many days to keep captured images before the cron job deletes them (default: `7`). |
+| `BLOB_RETENTION_DAYS` | No | How many days to keep captured images before the cron job deletes them (default: `90`). |
 | `NEXT_PUBLIC_INFERENCE_BACKEND` | No | `onnx` (default, browser ONNX Runtime) or `http` (local inference server). |
 | `NEXT_PUBLIC_INFERENCE_URL` | No | URL of the local inference server when `NEXT_PUBLIC_INFERENCE_BACKEND=http` (default: `http://localhost:8000/detect`). |
 
@@ -184,6 +186,7 @@ YOLO World confidence < 0.45.
         → escalates to GPT-5.4 mini (accurate path, ~2–4s)
         → mini result used only if it improves on nano
   · Zod validates model JSON output; unknown stream IDs fall back to needs_review
+  · Compound items (multi-part objects) are detected and broken down into per-component disposal instructions
         ↓
 ── Common path ────────────────────────────────────────────────────────────
 Override rules applied (word-boundary pattern matching, sorted by specificity)
@@ -195,7 +198,8 @@ Trust level determined:
         ↓
 Pre-action shown if applicable (e.g. "Empty contents and remove cap")
         ↓
-Result shown to user; frame upload to Blob + Redis logging happen asynchronously (non-blocking)
+Result shown to user in fullscreen hero (single item) or split-screen (multiple items);
+frame upload to Blob + Redis logging happen asynchronously (non-blocking)
 ```
 
 ---
@@ -213,6 +217,7 @@ Result shown to user; frame upload to Blob + Redis logging happen asynchronously
 | **Session tokens** | HMAC-signed tokens issued at page load limit classify API abuse; client auto-refreshes via `/api/session` before expiry |
 | **YOLO fallback** | If ONNX Runtime or either YOLO model fails to load, the pipeline falls back to the next tier transparently |
 | **Parallel API race** | When YOLO26m confidence < 0.30, the API fires in parallel with YOLO World — whichever finishes first wins, so low-confidence items never block on two sequential inferences |
+| **Thermal throttling** | CV analysis duration is tracked continuously; when average exceeds 2× baseline (M1/M2 Mac thermal throttle), the frame rate halves automatically and a warning badge appears |
 
 ---
 
@@ -323,7 +328,9 @@ All raw data is in your Upstash console:
 
 A Vercel Cron job runs daily at 03:00 UTC (`/api/cron/cleanup`). It:
 1. Archives the current pilot log and feedback data as JSONL files to `archives/YYYY-MM-DD/` in Blob
-2. Deletes captured images older than `BLOB_RETENTION_DAYS` days (default: 7)
+2. Deletes captured images older than `BLOB_RETENTION_DAYS` days (default: 90)
+
+A second weekly cron (`/api/cron/export-finetuning`) exports the pilot log as a structured fine-tuning dataset to Blob, ready for model retraining.
 
 You can also trigger manual purges from the dashboard using the date-range data management UI, which calls `DELETE /api/pilot-log`.
 
@@ -334,11 +341,12 @@ You can also trigger manual purges from the dashboard using the date-range data 
 ```
 ├── app/
 │   ├── api/
+│   │   ├── calibration/    # Model calibration prediction tracking
 │   │   ├── classify/       # Classification endpoint (YOLO + OpenAI + waste rules + rate limiting)
 │   │   ├── cron/
-│   │   │   └── cleanup/    # Daily cron: archive data to Blob, delete old images
+│   │   │   ├── cleanup/             # Daily cron: archive data to Blob, delete old images
+│   │   │   └── export-finetuning/   # Weekly cron: export pilot log as fine-tuning dataset to Blob
 │   │   ├── feedback/       # User feedback endpoint
-│   │   ├── feedback-stats/ # Aggregated stats for dashboard
 │   │   ├── health/         # Service health check
 │   │   ├── kiosk-stats/    # Today's classification success rate
 │   │   ├── overrides/      # Dynamic override management
@@ -346,8 +354,7 @@ You can also trigger manual purges from the dashboard using the date-range data 
 │   │   ├── pilot-log/      # Pilot log read/write/purge (GET/POST/DELETE)
 │   │   ├── review/         # Review verdicts, entry deletion, data export
 │   │   ├── session/        # Session token issuance (rate limited)
-│   │   ├── site-config/    # Returns site defaultLocale + streams for client use
-│   │   └── stats-stream/   # Server-sent events for live dashboard
+│   │   └── site-config/    # Returns site defaultLocale + streams for client use
 │   ├── dashboard/          # Live stats (accuracy rate, most-corrected items)
 │   ├── review/             # Human review — Correct/Wrong/Nothing verdicts, ZIP export for annotation
 │   └── page.tsx            # Kiosk entry point (server component, passes site config to client)
@@ -358,7 +365,8 @@ You can also trigger manual purges from the dashboard using the date-range data 
 │   ├── ErrorBoundary.tsx   # Crash recovery with auto-reload
 │   ├── IdleScreen.tsx      # Idle / attract screen
 │   ├── KioskDisplay.tsx    # 6-state CV pipeline + state machine orchestrator
-│   └── ResultScreen.tsx    # Trust-level result display + feedback UI
+│   ├── ResultScreen.tsx    # Fullscreen/split-screen bin result display with bin position indicator
+│   └── SystemStatusBadge.tsx  # YOLO model + thermal warning status indicator
 ├── config/
 │   └── sites/              # Per-location waste rule JSON files
 │       ├── default.json
@@ -388,6 +396,7 @@ You can also trigger manual purges from the dashboard using the date-range data 
     ├── empty-module.js      # Stub for ONNX Runtime server-side imports
     ├── auto-override.ts     # Automatic override suggestion from feedback data
     ├── background-task.ts   # waitUntil wrapper for post-response work
+    ├── calibration.ts       # Calibration prediction tracking
     ├── blob-store.ts        # Vercel Blob upload helper (private by default)
     ├── feedback-analysis.ts # Feedback aggregation + override suggestions
     ├── frame-analyzer.ts    # Local CV pipeline (background model, blob detection)
@@ -417,7 +426,7 @@ You can also trigger manual purges from the dashboard using the date-range data 
 npm test
 ```
 
-87 unit tests covering the state machine, CV pipeline thresholds, HSV skin detection, override pattern matching, Japanese site config, offline cache, and classification API route.
+106 unit tests across 7 suites covering the state machine, CV pipeline thresholds, HSV skin detection, override pattern matching, Japanese site config, offline cache, notifications, and classification API route.
 
 ---
 

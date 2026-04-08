@@ -7,7 +7,7 @@
  * blobs, so images use public access. Security is enforced at the app layer:
  *   - URLs include a random suffix (non-guessable / non-enumerable)
  *   - URLs are only exposed through admin-authenticated routes (/review)
- *   - Images are auto-deleted after BLOB_RETENTION_DAYS (default: 7)
+ *   - Images are auto-deleted after BLOB_RETENTION_DAYS (default: 90)
  *   - Set BLOB_ENABLED=false to disable image uploads entirely
  */
 

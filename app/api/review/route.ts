@@ -48,43 +48,106 @@ export async function GET() {
   }
 }
 
-// ── DELETE: remove a single pilot-log entry by requestId ──
+// ── DELETE: remove entries by requestId (single) or bulk date range ──
+//
+//   Single:  ?requestId=<id>
+//   Bulk:    ?all=true
+//            ?before=<ISO>
+//            ?from=<ISO>&to=<ISO>
 
 export async function DELETE(request: Request) {
   const { searchParams } = new URL(request.url);
   const requestId = searchParams.get("requestId");
-  if (!requestId) {
-    return NextResponse.json({ error: "requestId is required." }, { status: 400 });
+
+  // ── Single entry delete ──
+  if (requestId) {
+    try {
+      const allRaw: string[] = await redis.lrange(KEYS.pilotLog, 0, -1);
+      let removed = false;
+      for (const item of allRaw) {
+        try {
+          const entry = (typeof item === "string" ? JSON.parse(item) : item) as PilotLogEntry;
+          if (entry.requestId === requestId) {
+            const idx = allRaw.indexOf(item);
+            const sentinel = `__DELETED__${Date.now()}`;
+            const pipe = redis.pipeline();
+            pipe.lset(KEYS.pilotLog, idx, sentinel);
+            pipe.lrem(KEYS.pilotLog, 1, sentinel);
+            await pipe.exec();
+            removed = true;
+            break;
+          }
+        } catch {
+          // skip malformed
+        }
+      }
+      await redis.hdel(VERDICTS_KEY, requestId);
+      return NextResponse.json({ deleted: removed ? 1 : 0 });
+    } catch (err) {
+      console.error("[review] DELETE failed:", err);
+      return NextResponse.json({ error: "Failed to delete entry." }, { status: 500 });
+    }
+  }
+
+  // ── Bulk delete ──
+  const all = searchParams.get("all") === "true";
+  const before = searchParams.get("before");
+  const from = searchParams.get("from");
+  const to = searchParams.get("to");
+
+  if (!all && !before && !(from && to)) {
+    return NextResponse.json(
+      { error: "Provide requestId, all=true, before=<ISO>, or from=<ISO>&to=<ISO>." },
+      { status: 400 },
+    );
   }
 
   try {
     const allRaw: string[] = await redis.lrange(KEYS.pilotLog, 0, -1);
-    let removed = false;
-    for (const item of allRaw) {
+    const beforeMs = before ? new Date(before).getTime() : null;
+    const fromMs = from ? new Date(from).getTime() : null;
+    const toMs = to ? new Date(to).getTime() : null;
+
+    const deleteIndices = new Set<number>();
+    const verdictIds: string[] = [];
+
+    for (let i = 0; i < allRaw.length; i++) {
       try {
-        const entry = (typeof item === "string" ? JSON.parse(item) : item) as PilotLogEntry;
-        if (entry.requestId === requestId) {
-          const idx = allRaw.indexOf(item);
-          const sentinel = `__DELETED__${Date.now()}`;
-          const pipe = redis.pipeline();
-          pipe.lset(KEYS.pilotLog, idx, sentinel);
-          pipe.lrem(KEYS.pilotLog, 1, sentinel);
-          await pipe.exec();
-          removed = true;
-          break;
+        const entry = (typeof allRaw[i] === "string" ? JSON.parse(allRaw[i]) : allRaw[i]) as PilotLogEntry;
+        const ts = new Date(entry.timestamp).getTime();
+        const match =
+          all ||
+          (beforeMs !== null && ts < beforeMs) ||
+          (fromMs !== null && toMs !== null && ts >= fromMs && ts <= toMs);
+
+        if (match) {
+          deleteIndices.add(i);
+          if (entry.requestId) verdictIds.push(entry.requestId);
         }
       } catch {
         // skip malformed
       }
     }
 
-    // Clean up verdict hash
-    await redis.hdel(VERDICTS_KEY, requestId);
+    if (deleteIndices.size === 0) {
+      return NextResponse.json({ deleted: 0 });
+    }
 
-    return NextResponse.json({ deleted: removed });
+    const remaining = allRaw.filter((_, i) => !deleteIndices.has(i));
+    const pipe = redis.pipeline();
+    pipe.del(KEYS.pilotLog);
+    if (remaining.length > 0) {
+      pipe.rpush(KEYS.pilotLog, ...remaining);
+    }
+    if (verdictIds.length > 0) {
+      pipe.hdel(VERDICTS_KEY, ...verdictIds);
+    }
+    await pipe.exec();
+
+    return NextResponse.json({ deleted: deleteIndices.size });
   } catch (err) {
-    console.error("[review] DELETE failed:", err);
-    return NextResponse.json({ error: "Failed to delete entry." }, { status: 500 });
+    console.error("[review] bulk DELETE failed:", err);
+    return NextResponse.json({ error: "Failed to bulk delete entries." }, { status: 500 });
   }
 }
 

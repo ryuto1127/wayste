@@ -93,6 +93,17 @@ function ImageReviewPage() {
     }
   }, []);
 
+  const bulkDelete = useCallback(async (params: URLSearchParams) => {
+    const res = await fetch(`/api/review?${params.toString()}`, { method: "DELETE" });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error((err as { error?: string }).error ?? `Delete failed: ${res.status}`);
+    }
+    const data = await res.json();
+    await load();
+    return (data as { deleted: number }).deleted;
+  }, [load]);
+
   const handleExport = useCallback(async () => {
     setExporting(true);
     try {
@@ -197,6 +208,9 @@ function ImageReviewPage() {
             </button>
           )}
         </div>
+
+        {/* Bulk delete */}
+        <BulkDeletePanel onDelete={bulkDelete} locale={locale} />
 
         {/* Filter tabs */}
         <div className="flex gap-2 mb-6">
@@ -397,6 +411,176 @@ function EntryCard({
             {T("deleteEntry")}
           </button>
         )
+      )}
+    </div>
+  );
+}
+
+type BulkMode = "before" | "between" | "all";
+
+function BulkDeletePanel({
+  onDelete,
+  locale,
+}: {
+  onDelete: (params: URLSearchParams) => Promise<number>;
+  locale: Locale;
+}) {
+  const [open, setOpen] = useState(false);
+  const [mode, setMode] = useState<BulkMode>("before");
+  const [beforeDate, setBeforeDate] = useState("");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+  const [confirming, setConfirming] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [lastResult, setLastResult] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const ja = locale === "ja";
+
+  const buildParams = (): URLSearchParams | null => {
+    const p = new URLSearchParams();
+    if (mode === "all") {
+      p.set("all", "true");
+    } else if (mode === "before") {
+      if (!beforeDate) return null;
+      // end of that day
+      p.set("before", new Date(`${beforeDate}T23:59:59.999Z`).toISOString());
+    } else {
+      if (!fromDate || !toDate) return null;
+      p.set("from", new Date(`${fromDate}T00:00:00.000Z`).toISOString());
+      p.set("to", new Date(`${toDate}T23:59:59.999Z`).toISOString());
+    }
+    return p;
+  };
+
+  const handleConfirm = async () => {
+    const params = buildParams();
+    if (!params) return;
+    setDeleting(true);
+    setError(null);
+    try {
+      const count = await onDelete(params);
+      setLastResult(count);
+      setConfirming(false);
+      setOpen(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Delete failed");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const canProceed =
+    mode === "all" ||
+    (mode === "before" && !!beforeDate) ||
+    (mode === "between" && !!fromDate && !!toDate && fromDate <= toDate);
+
+  return (
+    <div className="mb-6">
+      <div className="flex items-center gap-3">
+        <button
+          onClick={() => { setOpen((v) => !v); setConfirming(false); setError(null); setLastResult(null); }}
+          className="text-xs text-neutral-500 hover:text-red-400 transition-colors"
+        >
+          {open ? (ja ? "▲ 一括削除を閉じる" : "▲ Close bulk delete") : (ja ? "▼ 一括削除..." : "▼ Bulk delete...")}
+        </button>
+        {lastResult !== null && (
+          <span className="text-xs text-emerald-400">
+            {ja ? `${lastResult} 件削除しました` : `${lastResult} entries deleted`}
+          </span>
+        )}
+      </div>
+
+      {open && (
+        <div className="mt-3 bg-neutral-900 border border-neutral-800 rounded-xl p-4 flex flex-col gap-4 max-w-lg">
+          {/* Mode selector */}
+          <div className="flex gap-2">
+            {(["before", "between", "all"] as BulkMode[]).map((m) => (
+              <button
+                key={m}
+                onClick={() => { setMode(m); setConfirming(false); }}
+                className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors ${
+                  mode === m ? "bg-neutral-700 text-white" : "bg-neutral-800 text-neutral-400 hover:bg-neutral-700"
+                }`}
+              >
+                {m === "before" ? (ja ? "日付より前" : "Before date")
+                  : m === "between" ? (ja ? "期間指定" : "Between dates")
+                  : (ja ? "すべて" : "All")}
+              </button>
+            ))}
+          </div>
+
+          {/* Inputs */}
+          {mode === "before" && (
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-neutral-400 whitespace-nowrap">
+                {ja ? "この日付より前:" : "Before:"}
+              </label>
+              <input
+                type="date"
+                value={beforeDate}
+                onChange={(e) => { setBeforeDate(e.target.value); setConfirming(false); }}
+                className="bg-neutral-800 text-white text-xs rounded-lg px-3 py-1.5 border border-neutral-700 focus:outline-none focus:border-neutral-500"
+              />
+            </div>
+          )}
+
+          {mode === "between" && (
+            <div className="flex items-center gap-2 flex-wrap">
+              <label className="text-xs text-neutral-400">{ja ? "から:" : "From:"}</label>
+              <input
+                type="date"
+                value={fromDate}
+                onChange={(e) => { setFromDate(e.target.value); setConfirming(false); }}
+                className="bg-neutral-800 text-white text-xs rounded-lg px-3 py-1.5 border border-neutral-700 focus:outline-none focus:border-neutral-500"
+              />
+              <label className="text-xs text-neutral-400">{ja ? "まで:" : "To:"}</label>
+              <input
+                type="date"
+                value={toDate}
+                onChange={(e) => { setToDate(e.target.value); setConfirming(false); }}
+                className="bg-neutral-800 text-white text-xs rounded-lg px-3 py-1.5 border border-neutral-700 focus:outline-none focus:border-neutral-500"
+              />
+            </div>
+          )}
+
+          {mode === "all" && (
+            <p className="text-xs text-red-400">
+              {ja ? "ログに記録されたすべてのエントリを削除します。" : "This will delete every entry in the log."}
+            </p>
+          )}
+
+          {error && <p className="text-xs text-red-400">{error}</p>}
+
+          {/* Action */}
+          {!confirming ? (
+            <button
+              onClick={() => setConfirming(true)}
+              disabled={!canProceed}
+              className="self-start px-4 py-1.5 rounded-lg text-xs font-medium bg-red-900 hover:bg-red-800 text-red-300 transition-colors disabled:opacity-40"
+            >
+              {ja ? "削除する..." : "Delete..."}
+            </button>
+          ) : (
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-red-400 font-medium">
+                {ja ? "本当に削除しますか？" : "Are you sure?"}
+              </span>
+              <button
+                onClick={handleConfirm}
+                disabled={deleting}
+                className="px-3 py-1 rounded-lg text-xs font-medium bg-red-700 hover:bg-red-600 text-white disabled:opacity-40"
+              >
+                {deleting ? (ja ? "削除中..." : "Deleting...") : (ja ? "はい、削除" : "Yes, delete")}
+              </button>
+              <button
+                onClick={() => setConfirming(false)}
+                className="px-3 py-1 rounded-lg text-xs font-medium bg-neutral-800 hover:bg-neutral-700 text-neutral-400"
+              >
+                {ja ? "キャンセル" : "Cancel"}
+              </button>
+            </div>
+          )}
+        </div>
       )}
     </div>
   );

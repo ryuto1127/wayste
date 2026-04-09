@@ -232,7 +232,7 @@ On page load the server component generates an HMAC-SHA256-signed session token 
 | Tier | Env var | Mechanism | Endpoints protected |
 |------|---------|-----------|---------------------|
 | Kiosk | `KIOSK_API_TOKEN` | Bearer token in route handler | `/api/classify`, `/api/feedback`, `/api/pilot-log` (POST) |
-| Admin | `ADMIN_API_KEY` | HTTP Basic Auth → session cookie (middleware) | `/dashboard`, `/review`, `/api/review/*`, `/api/overrides`, `/api/stats-stream`, `/api/pilot-log` (DELETE) |
+| Admin | `ADMIN_API_KEY` | HTTP Basic Auth → session cookie (middleware) | `/dashboard`, `/review`, `/api/review/*`, `/api/stats-stream`, `/api/pilot-log` (DELETE) |
 
 Both default to open (no auth) when the env var is unset, so local development requires no configuration. Admin auth is handled entirely by middleware — after the initial Basic Auth prompt, a session cookie (7 days) eliminates further password prompts.
 
@@ -322,7 +322,7 @@ All raw data is in your Upstash console:
 - `recycling:pilot-log` — every classification (item, stream, confidence, model used, latency, image URL)
 - `recycling:feedback` — every kiosk user response (correct / wrong + actual stream if provided)
 - `recycling:review-verdicts` — admin review verdicts (correct / wrong / false_detection) keyed by requestId
-- `recycling:dynamic-overrides:{siteId}` — overrides added via the dashboard
+
 
 ### Data retention
 

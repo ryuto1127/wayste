@@ -32,7 +32,6 @@ export interface FrameAnalysis {
    *   bottle / cup     → 0.20 – 0.50
    */
   roiLargestBlobDiagonalRatio: number;
-  skinRatio: number;
   sharpnessScore: number;
   /** False during the startup convergence window — detection is blocked until the background model has settled. */
   isSettled: boolean;
@@ -44,7 +43,6 @@ export type ImageQuality = "good" | "fair" | "poor";
 
 // ── Client-side CV metadata sent with classify request ──
 export interface ClassifyMeta {
-  skinRatio: number;
   sharpnessScore: number;
   imageQuality: ImageQuality;
 }
@@ -109,6 +107,14 @@ export interface ComponentPart {
   partName: string;
   wasteStream: WasteStream;
   instruction: string;
+  /** When true, this part may or may not be present — UI shows "if attached" framing. */
+  optional?: boolean;
+}
+
+export interface CompoundConfig {
+  /** Pattern matched against itemName (same word-boundary logic as overrides). */
+  pattern: string;
+  components: ComponentPart[];
 }
 
 export interface ClassificationResponse {
@@ -123,7 +129,6 @@ export interface ClassificationResponse {
   needsReview: boolean;
   isCompound: boolean;
   components?: ComponentPart[];
-  siteNote?: string;
   modelUsed?: "nano" | "mini" | "yolo-local" | "yolo-world";
   imageUrl?: string;  // Vercel Blob URL of the captured frame
 }
@@ -158,8 +163,13 @@ export interface SiteConfig {
   streams: StreamDefinition[];
   overrides: ItemOverride[];
   defaultStream: WasteStream;
-  siteRules?: SiteRule[];
   staffHandlingItems?: string[];
+  /**
+   * Config-driven compound item rules. When an item matches a pattern here,
+   * the system forces compound mode with these components — regardless of what
+   * the AI or YOLO detected. Takes priority over AI-generated compound detection.
+   */
+  compounds?: CompoundConfig[];
   reviewThreshold?: number;
   /**
    * Whether to horizontally flip the camera feed.
@@ -170,6 +180,12 @@ export interface SiteConfig {
   mirrorCamera?: boolean;
   /** Sorting tips shown on the idle screen. Language should match defaultLocale. */
   tips?: { text: string }[];
+  /**
+   * Preferred item names the AI should use when naming detected items.
+   * Improves override hit-rate by reducing non-deterministic naming.
+   * If the item doesn't match any canonical name, the AI falls back to free-form.
+   */
+  canonicalNames?: string[];
 }
 
 /** Physical bin position relative to the kiosk monitor. */
@@ -186,15 +202,30 @@ export interface StreamDefinition {
 
 export interface ItemOverride {
   pattern: string;
-  stream: WasteStream;
+  /** Target stream. Omit (or set requiresStaff) to force needs_review. */
+  stream?: WasteStream;
   note?: string;
+  /** When true, forces needs_review regardless of stream. */
+  requiresStaff?: boolean;
+  /** Alternative stream to use when the condition is met (GPT tier only). */
+  conditionalStream?: WasteStream;
+  /** Condition that must be met for conditionalStream to apply (e.g. "clean", "dry", "empty"). */
+  condition?: string;
 }
 
-export interface SiteRule {
-  pattern: string;
-  instruction: string;
-  stream?: WasteStream;
-  requiresStaff?: boolean;
+// ── Local model candidate (passed to GPT prompts as context) ──
+export interface LocalModelCandidate {
+  className: string;
+  confidence: number;
+}
+
+// ── RGB material analysis hint ──
+export interface MaterialHint {
+  dominantHue: number;
+  saturation: number;
+  isMetallic: boolean;
+  isTransparent: boolean;
+  suggestedMaterial: string | null;
 }
 
 export type KioskAction =

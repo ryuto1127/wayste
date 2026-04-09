@@ -621,7 +621,6 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
                 latencyMs,
                 yoloDetections: toDetectionLogs(detections),
                 meta: {
-                  skinRatio: analysis.skinRatio,
                   sharpnessScore: analysis.sharpnessScore,
                   imageQuality: imageQualityBand(analysis),
                 },
@@ -1080,7 +1079,6 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
       const base64Ms = Date.now() - procStart - cropMs - blobMs;
 
       const meta: ClassifyMeta = {
-        skinRatio: analysis.skinRatio,
         sharpnessScore: analysis.sharpnessScore,
         imageQuality: imageQualityBand(analysis),
       };

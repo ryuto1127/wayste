@@ -4,19 +4,20 @@ import type {
   SiteConfig,
   ClassificationResponse,
   ComponentPart,
-  ItemOverride,
+  LocalModelCandidate,
+  MaterialHint,
 } from "./types";
-import { redis } from "./redis";
 
 // Re-export all pure functions from the browser-safe core module.
 // Server-side consumers (API routes, tests) continue to import from this file.
 export {
   matchesPattern,
   applyOverrides,
-  applySiteRules,
+  applyCompounds,
   getStreamDefinition,
   buildClassificationResult,
 } from "./waste-rules-core";
+export type { OverrideResult } from "./waste-rules-core";
 
 /** Cache TTL in milliseconds — config is re-read from disk after this period. */
 const CONFIG_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
@@ -55,31 +56,15 @@ export function loadSiteConfig(siteId: string = "default"): SiteConfig {
   return config;
 }
 
-export async function loadDynamicOverrides(siteId: string): Promise<ItemOverride[]> {
-  try {
-    const key = `recycling:dynamic-overrides:${siteId}`;
-    const raw = await redis.get(key);
-    if (!raw) return [];
-    return (typeof raw === "string" ? JSON.parse(raw) : raw) as ItemOverride[];
-  } catch {
-    return [];
-  }
-}
-
-export async function loadSiteConfigWithDynamic(siteId: string = "default"): Promise<SiteConfig> {
-  const config = { ...loadSiteConfig(siteId) };
-  const dynamicOverrides = await loadDynamicOverrides(siteId);
-  if (dynamicOverrides.length > 0) {
-    config.overrides = [...config.overrides, ...dynamicOverrides];
-  }
-  return config;
-}
-
 /**
  * Concise prompt for GPT-5.4 nano — focused on fast, structured classification.
  * No compound-item handling; that escalates to mini.
  */
-export function buildNanoPrompt(siteConfig: SiteConfig, locale = "en"): string {
+export function buildNanoPrompt(
+  siteConfig: SiteConfig,
+  locale = "en",
+  options?: { localCandidates?: LocalModelCandidate[]; materialHint?: MaterialHint },
+): string {
   const streamIds = siteConfig.streams.map((s) => s.id);
   const streams = siteConfig.streams
     .map((s) => `"${s.id}" (${s.label})`)
@@ -90,19 +75,29 @@ export function buildNanoPrompt(siteConfig: SiteConfig, locale = "en"): string {
       ? `\nItem rules — these override your general knowledge:\n${siteConfig.overrides.map((o) => `- ${o.pattern} → ${o.stream}`).join("\n")}\n`
       : "";
 
+  const canonicalSection =
+    siteConfig.canonicalNames && siteConfig.canonicalNames.length > 0
+      ? `\nPreferred item names (use one of these when the item matches; only use a different name if none fit):\n${siteConfig.canonicalNames.join(", ")}\n`
+      : "";
+
   const langNote =
     locale === "ja"
       ? "\nIMPORTANT: Write itemName and reasoning in Japanese (日本語). wasteStream must remain the English stream_id."
       : "";
 
+  const candidatesSection = formatLocalCandidates(options?.localCandidates);
+  const materialSection = formatMaterialHint(options?.materialHint);
+
   return `You are a waste sorting camera at "${siteConfig.siteName}".
 Identify the item being held in front of the camera and classify it.
 
 Streams: ${streams}
-${overridesSection}
+${overridesSection}${canonicalSection}
 wasteStream must be exactly one of: ${streamIds.join(", ")}
 If the item does not clearly fit any stream, use "needs_review".
 
+If the item appears transparent or translucent, identify the specific material (clear PET, clear glass, clear PP, etc.).
+${candidatesSection}${materialSection}
 Respond with ONLY this JSON:
 {"itemName":"short name","wasteStream":"stream_id","confidence":0.0-1.0,"reasoning":"one sentence","preAction":""}
 
@@ -114,7 +109,11 @@ Be honest about confidence — do not inflate it when uncertain.${langNote}`;
 /**
  * Detailed prompt for GPT-5.4 mini — handles compound items, detailed reasoning.
  */
-export function buildClassificationPrompt(siteConfig: SiteConfig, locale = "en"): string {
+export function buildClassificationPrompt(
+  siteConfig: SiteConfig,
+  locale = "en",
+  options?: { localCandidates?: LocalModelCandidate[]; materialHint?: MaterialHint },
+): string {
   const streamIds = siteConfig.streams.map((s) => s.id);
   const streamList = siteConfig.streams
     .map((s) => `- "${s.id}" (${s.label}): ${s.description}`)
@@ -125,16 +124,19 @@ export function buildClassificationPrompt(siteConfig: SiteConfig, locale = "en")
       ? `\nItem rules — these override your general knowledge:\n${siteConfig.overrides.map((o) => `- ${o.pattern} → ${o.stream}${o.note ? ` (${o.note})` : ""}`).join("\n")}\n`
       : "";
 
-  const siteRulesSection =
-    siteConfig.siteRules && siteConfig.siteRules.length > 0
-      ? `\nSite-specific rules for "${siteConfig.siteName}":\n${siteConfig.siteRules.map((r) => `- Items matching "${r.pattern}": ${r.instruction}`).join("\n")}\n`
+  const canonicalSection =
+    siteConfig.canonicalNames && siteConfig.canonicalNames.length > 0
+      ? `\nPreferred item names (use one of these when the item matches; only use a different name if none fit):\n${siteConfig.canonicalNames.join(", ")}\n`
       : "";
+
+  const candidatesSection = formatLocalCandidates(options?.localCandidates);
+  const materialSection = formatMaterialHint(options?.materialHint);
 
   return `You are a waste sorting assistant installed at "${siteConfig.siteName}". A camera is pointed at a waste disposal area. Identify the item being held or presented to the camera and classify it.
 
 Available waste streams at this location:
 ${streamList}
-${overridesSection}${siteRulesSection}
+${overridesSection}${canonicalSection}
 Rules:
 1. Identify the most prominent item being held or shown.
 2. wasteStream must be exactly one of: ${streamIds.join(", ")}. If the item does not clearly fit any stream, use "needs_review".
@@ -143,6 +145,9 @@ Rules:
 5. Consider the material composition of the item, not just its name.
 6. If the item appears to be a compound object with multiple separable parts (e.g., a coffee cup with a plastic lid and cardboard sleeve, a lunch container with food inside, a device with batteries), set isCompound to true and list the components with individual disposal instructions.
 
+If the item appears transparent or translucent, identify the specific material (clear PET, clear glass, clear PP, etc.).
+Assess whether the item is clean enough for recycling or contaminated with food residue. If contaminated, classify to the stream for soiled items and note contamination in reasoning.
+${candidatesSection}${materialSection}
 Respond with ONLY a JSON object in this exact format, no other text:
 {
   "itemName": "short name of the identified item",
@@ -165,4 +170,38 @@ If isCompound is true, populate components like:
       ? '\n\nIMPORTANT: Write itemName, reasoning, and component partName/instruction fields in Japanese (日本語). wasteStream values must remain English stream IDs.'
       : ""
   }`;
+}
+
+// ── Prompt formatting helpers ──
+
+function formatLocalCandidates(candidates?: LocalModelCandidate[]): string {
+  if (!candidates || candidates.length === 0) return "";
+  const lines = candidates
+    .slice(0, 3)
+    .map((c, i) => `  ${i + 1}. ${c.className} (${Math.round(c.confidence * 100)}%)`)
+    .join("\n");
+  return `\nLocal model candidates (may be inaccurate):\n${lines}\n`;
+}
+
+function formatMaterialHint(hint?: MaterialHint): string {
+  if (!hint) return "";
+  const hueNames: Record<number, string> = {
+    0: "red", 30: "orange", 60: "yellow", 120: "green",
+    180: "cyan", 240: "blue", 270: "purple", 300: "magenta",
+  };
+  const closestHueName = Object.entries(hueNames).reduce(
+    (best, [h, name]) =>
+      Math.abs(Number(h) - hint.dominantHue) < Math.abs(Number(best[0]) - hint.dominantHue)
+        ? [h, name]
+        : best,
+    ["0", "red"],
+  )[1];
+
+  const lines = [
+    `  - Dominant hue: ${hint.dominantHue}° (${closestHueName})`,
+    `  - Saturation: ${hint.saturation.toFixed(2)} (${hint.saturation > 0.5 ? "high" : hint.saturation > 0.2 ? "medium" : "low"})`,
+    `  - Metallic reflections: ${hint.isMetallic ? "detected" : "not detected"}`,
+    `  - Transparency: ${hint.isTransparent ? "likely" : "unlikely"}`,
+  ];
+  return `\nColor analysis of detected region:\n${lines.join("\n")}\n`;
 }

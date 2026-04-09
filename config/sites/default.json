@@ -131,8 +131,15 @@
       "note": "Plastic utensils are not recyclable. If marked compostable (BPI-certified), they go in compost."
     }
   ],
-  "siteRules": [],
   "staffHandlingItems": [],
+  "canonicalNames": [
+    "coffee cup", "paper cup", "plastic bottle", "water bottle", "aluminum can",
+    "glass bottle", "cardboard", "pizza box", "plastic bag", "plastic wrap",
+    "styrofoam", "chip bag", "food wrapper", "takeout container",
+    "napkin", "paper towel", "straw", "utensil",
+    "banana peel", "apple core", "food scraps",
+    "battery", "light bulb"
+  ],
   "defaultStream": "landfill",
   "tips": [
     { "text": "Rinse containers before recycling — food residue contaminates the whole batch." },

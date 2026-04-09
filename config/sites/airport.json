@@ -50,5 +50,9 @@
       "note": "Most airport food containers are mixed materials. If marked compostable, use Compost."
     }
   ],
+  "canonicalNames": [
+    "water bottle", "plastic bottle", "coffee cup", "newspaper",
+    "food container", "napkin", "chip bag", "straw", "aluminum can"
+  ],
   "defaultStream": "landfill"
 }

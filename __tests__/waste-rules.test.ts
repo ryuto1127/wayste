@@ -4,7 +4,7 @@
 
 import {
   applyOverrides,
-  applySiteRules,
+  applyCompounds,
   buildClassificationResult,
   loadSiteConfig,
   matchesPattern,
@@ -52,30 +52,37 @@ describe("applyOverrides", () => {
   });
 });
 
-describe("applySiteRules", () => {
+describe("applyOverrides — requiresStaff handling", () => {
   it("returns 'needs_review' for staffHandlingItems", () => {
     const config = makeSiteConfig({
       staffHandlingItems: ["fluorescent", "chemical"],
     });
-    const result = applySiteRules("fluorescent bulb", config);
+    const result = applyOverrides("fluorescent bulb", "recycling", config);
     expect(result.requiresStaff).toBe(true);
-    expect(result.streamOverride).toBe("needs_review");
+    expect(result.stream).toBe("needs_review");
+    expect(result.overrideApplied).toBe(true);
   });
 
-  it("matches siteRules with case-insensitive pattern", () => {
+  it("forces needs_review when override has requiresStaff: true", () => {
     const config = makeSiteConfig({
-      siteRules: [
-        {
-          pattern: "toner",
-          instruction: "Leave by copy room",
-          stream: "special",
-          requiresStaff: true,
-        },
+      overrides: [
+        { pattern: "toner", stream: "special", note: "Leave by copy room", requiresStaff: true },
       ],
     });
-    const result = applySiteRules("TONER cartridge", config);
+    const result = applyOverrides("TONER cartridge", "recycling", config);
     expect(result.requiresStaff).toBe(true);
-    expect(result.streamOverride).toBe("special");
+    expect(result.stream).toBe("needs_review");
+    expect(result.note).toBe("Leave by copy room");
+  });
+
+  it("staffHandlingItems takes priority over overrides", () => {
+    const config = makeSiteConfig({
+      staffHandlingItems: ["fluorescent"],
+      overrides: [{ pattern: "fluorescent", stream: "special" }],
+    });
+    const result = applyOverrides("fluorescent bulb", "recycling", config);
+    expect(result.requiresStaff).toBe(true);
+    expect(result.stream).toBe("needs_review");
   });
 });
 
@@ -144,6 +151,75 @@ describe("matchesPattern — word-boundary matching", () => {
 
   it("does not match empty pattern", () => {
     expect(matchesPattern("something", "")).toBe(false);
+  });
+});
+
+describe("applyCompounds", () => {
+  it("returns isCompound: false when no compounds configured", () => {
+    const config = makeSiteConfig();
+    expect(applyCompounds("plastic bottle", config)).toEqual({ isCompound: false });
+  });
+
+  it("matches a compound pattern and returns components", () => {
+    const config = makeSiteConfig({
+      compounds: [
+        {
+          pattern: "plastic bottle",
+          components: [
+            { partName: "bottle", wasteStream: "recycling", instruction: "Rinse" },
+            { partName: "cap", wasteStream: "landfill", instruction: "Separate", optional: true },
+          ],
+        },
+      ],
+    });
+    const result = applyCompounds("plastic bottle", config);
+    expect(result.isCompound).toBe(true);
+    if (result.isCompound) {
+      expect(result.components).toHaveLength(2);
+      expect(result.components[1].optional).toBe(true);
+    }
+  });
+
+  it("prefers longer compound patterns (more specific wins)", () => {
+    const config = makeSiteConfig({
+      compounds: [
+        {
+          pattern: "bottle",
+          components: [{ partName: "generic bottle", wasteStream: "recycling", instruction: "" }],
+        },
+        {
+          pattern: "plastic bottle",
+          components: [{ partName: "plastic bottle body", wasteStream: "recyclable", instruction: "" }],
+        },
+      ],
+    });
+    const result = applyCompounds("plastic bottle", config);
+    expect(result.isCompound).toBe(true);
+    if (result.isCompound) {
+      expect(result.components[0].partName).toBe("plastic bottle body");
+    }
+  });
+
+  it("config compounds override AI compound detection in buildClassificationResult", () => {
+    const config = makeSiteConfig({
+      reviewThreshold: 0.5,
+      compounds: [
+        {
+          pattern: "plastic bottle",
+          components: [
+            { partName: "bottle", wasteStream: "recycling", instruction: "Rinse" },
+            { partName: "cap", wasteStream: "landfill", instruction: "Separate", optional: true },
+          ],
+        },
+      ],
+    });
+    const result = buildClassificationResult(
+      { itemName: "plastic bottle", wasteStream: "recycling", confidence: 0.9, reasoning: "clear plastic" },
+      config
+    );
+    expect(result.isCompound).toBe(true);
+    expect(result.components).toHaveLength(2);
+    expect(result.components![1].optional).toBe(true);
   });
 });
 
@@ -221,5 +297,113 @@ describe("loadSiteConfig merges default + site-specific config", () => {
   it("falls back to default when site config not found", () => {
     const config = loadSiteConfig("nonexistent-site-xyz");
     expect(config.siteId).toBe("default");
+  });
+});
+
+describe("conditional overrides", () => {
+  it("returns conditionalStream and condition when override has them", () => {
+    const config = makeSiteConfig({
+      overrides: [
+        {
+          pattern: "lunch box",
+          stream: "burnable",
+          note: "Dirty → burnable; clean → plastic",
+          conditionalStream: "plastic",
+          condition: "clean",
+        },
+      ],
+    });
+    const result = applyOverrides("lunch box", "recycling", config);
+    expect(result.stream).toBe("burnable");
+    expect(result.overrideApplied).toBe(true);
+    expect(result.conditionalStream).toBe("plastic");
+    expect(result.condition).toBe("clean");
+  });
+
+  it("does not include conditionalStream for non-conditional overrides", () => {
+    const config = makeSiteConfig({
+      overrides: [
+        { pattern: "newspaper", stream: "recyclable", note: "Recyclable" },
+      ],
+    });
+    const result = applyOverrides("newspaper", "landfill", config);
+    expect(result.stream).toBe("recyclable");
+    expect(result.conditionalStream).toBeUndefined();
+    expect(result.condition).toBeUndefined();
+  });
+
+  it("local tier (buildClassificationResult) uses base stream, not conditional", () => {
+    const config = makeSiteConfig({
+      reviewThreshold: 0.5,
+      overrides: [
+        {
+          pattern: "food tray",
+          stream: "burnable",
+          conditionalStream: "plastic",
+          condition: "clean",
+          note: "Dirty → burnable",
+        },
+      ],
+    });
+    // Local tier: even with high confidence, uses base stream (burnable)
+    const result = buildClassificationResult(
+      { itemName: "food tray", wasteStream: "plastic", confidence: 0.9, reasoning: "clean plastic tray" },
+      config,
+    );
+    expect(result.wasteStream).toBe("burnable");
+  });
+
+  it("pilot config has conditional overrides for 弁当容器", () => {
+    const pilotConfig = loadSiteConfig("pilot");
+    const result = applyOverrides("弁当容器", "plastic", pilotConfig);
+    expect(result.stream).toBe("burnable");
+    expect(result.conditionalStream).toBe("plastic");
+    expect(result.condition).toBe("clean");
+  });
+
+  it("pilot config has new specific can overrides", () => {
+    const pilotConfig = loadSiteConfig("pilot");
+
+    const aluminum = applyOverrides("アルミ缶", "burnable", pilotConfig);
+    expect(aluminum.stream).toBe("recyclable");
+    expect(aluminum.overrideApplied).toBe(true);
+
+    const steel = applyOverrides("スチール缶", "burnable", pilotConfig);
+    expect(steel.stream).toBe("recyclable");
+    expect(steel.overrideApplied).toBe(true);
+  });
+
+  it("pilot config has glass color variant overrides", () => {
+    const pilotConfig = loadSiteConfig("pilot");
+
+    const clear = applyOverrides("透明びん", "burnable", pilotConfig);
+    expect(clear.stream).toBe("recyclable");
+
+    const brown = applyOverrides("茶色びん", "burnable", pilotConfig);
+    expect(brown.stream).toBe("recyclable");
+
+    const other = applyOverrides("その他の色のびん", "burnable", pilotConfig);
+    expect(other.stream).toBe("recyclable");
+  });
+
+  it("pilot config has foam tray color overrides", () => {
+    const pilotConfig = loadSiteConfig("pilot");
+
+    const white = applyOverrides("白色トレイ", "burnable", pilotConfig);
+    expect(white.stream).toBe("plastic");
+
+    const colored = applyOverrides("色付きトレイ", "burnable", pilotConfig);
+    expect(colored.stream).toBe("burnable");
+  });
+
+  it("japan-office config has new specific overrides", () => {
+    const result = applyOverrides("アルミ缶", "burnable", japanOfficeConfig);
+    expect(result.stream).toBe("recyclable");
+
+    const steel = applyOverrides("steel can", "burnable", japanOfficeConfig);
+    expect(steel.stream).toBe("recyclable");
+
+    const glass = applyOverrides("透明びん", "burnable", japanOfficeConfig);
+    expect(glass.stream).toBe("recyclable");
   });
 });

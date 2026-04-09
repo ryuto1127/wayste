@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 import OpenAI from "openai";
 import { z } from "zod/v4";
-import type { ClassifyMeta, ComponentPart, YoloDetectionLog } from "@/lib/types";
+import type { ClassifyMeta, ComponentPart, YoloDetectionLog, LocalModelCandidate, MaterialHint } from "@/lib/types";
 import {
   loadSiteConfig,
   buildNanoPrompt,
   buildClassificationPrompt,
   buildClassificationResult,
+  applyOverrides,
 } from "@/lib/waste-rules";
 import { logPilotEntry } from "@/lib/pilot-log";
 import { runInBackground } from "@/lib/background-task";
@@ -38,6 +39,15 @@ const RequestSchema = z.object({
         bboxNorm: z.tuple([z.number(), z.number(), z.number(), z.number()]),
       })
     )
+    .optional(),
+  materialHint: z
+    .object({
+      dominantHue: z.number(),
+      saturation: z.number(),
+      isMetallic: z.boolean(),
+      isTransparent: z.boolean(),
+      suggestedMaterial: z.string().nullable(),
+    })
     .optional(),
 });
 
@@ -243,16 +253,29 @@ export async function POST(request: Request) {
     );
   }
 
-  const { image, siteId, locale = "en", meta, yoloDetections } = parsed.data;
+  const { image, siteId, locale = "en", meta, yoloDetections, materialHint } = parsed.data;
   const siteConfig = loadSiteConfig(siteId ?? process.env.SITE_ID ?? "default");
   const openai = new OpenAI();
   const startMs = Date.now();
   const requestId = generateRequestId();
 
+  // Build local model candidates from YOLO detections (top 3)
+  const localCandidates: LocalModelCandidate[] | undefined =
+    yoloDetections && yoloDetections.length > 0
+      ? yoloDetections
+          .slice(0, 3)
+          .map((d) => ({ className: d.className, confidence: d.confidence }))
+      : undefined;
+
+  const promptOptions = {
+    localCandidates,
+    materialHint: materialHint as MaterialHint | undefined,
+  };
+
   try {
     // ── Step 1: Nano inference ──
     const step1Start = Date.now();
-    const nanoPrompt = buildNanoPrompt(siteConfig, locale);
+    const nanoPrompt = buildNanoPrompt(siteConfig, locale, promptOptions);
     let raw = await callModel(openai, "gpt-5.4-nano", image, nanoPrompt);
     let modelUsed: "nano" | "mini" = "nano";
     let escalated = false;
@@ -264,7 +287,7 @@ export async function POST(request: Request) {
     if (shouldEscalate(raw, meta)) {
       escalated = true;
       try {
-        const miniPrompt = buildClassificationPrompt(siteConfig, locale);
+        const miniPrompt = buildClassificationPrompt(siteConfig, locale, promptOptions);
         const miniRaw = await callModel(
           openai,
           "gpt-5.4-mini",
@@ -291,6 +314,32 @@ export async function POST(request: Request) {
     const step3Start = Date.now();
     const result = buildClassificationResult(raw, siteConfig);
     result.modelUsed = modelUsed;
+
+    // ── Step 3b: Apply conditional overrides (GPT tier only) ──
+    // When GPT assesses the item meets a condition (e.g. "clean"), upgrade
+    // to the conditionalStream. Local YOLO tier always uses the base stream.
+    const overrideCheck = applyOverrides(raw.itemName, raw.wasteStream, siteConfig);
+    if (
+      overrideCheck.conditionalStream &&
+      overrideCheck.condition &&
+      !overrideCheck.requiresStaff
+    ) {
+      const conditionLower = overrideCheck.condition.toLowerCase();
+      const reasoningLower = (raw.reasoning ?? "").toLowerCase();
+      // Check if the GPT reasoning indicates the condition is met
+      if (reasoningLower.includes(conditionLower)) {
+        const condStreamDef = siteConfig.streams.find(
+          (s) => s.id === overrideCheck.conditionalStream
+        );
+        if (condStreamDef) {
+          result.wasteStream = overrideCheck.conditionalStream;
+          result.binColor = condStreamDef.color;
+          result.binLabel = condStreamDef.label;
+          result.specialInstructions = overrideCheck.note;
+        }
+      }
+    }
+
     const step3Ms = Date.now() - step3Start;
 
     // ── Step 4: Upload frame to Blob + log entry (fire-and-forget, non-blocking) ──

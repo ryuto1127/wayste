@@ -330,14 +330,11 @@ function FullscreenResult({
       </div>
 
       {/* Bottom info strip — secondary notes & compound breakdown */}
-      {(result.siteNote || (result.preAction && result.specialInstructions) || (result.isCompound && result.components?.length)) && (
+      {((result.preAction && result.specialInstructions) || (result.isCompound && result.components?.length)) && (
         <div className="px-6 py-4 space-y-2 bg-neutral-950/80">
           {/* Show specialInstructions here only when preAction already took the hero slot */}
           {result.preAction && result.specialInstructions && (
             <p className="text-blue-300 text-sm">{result.specialInstructions}</p>
-          )}
-          {result.siteNote && (
-            <p className="text-blue-300 text-sm">{result.siteNote}</p>
           )}
           {result.isCompound && result.components && result.components.length > 0 && (
             <CompoundBreakdown components={result.components} locale={locale} />
@@ -448,12 +445,9 @@ function SplitScreenCard({
       )}
 
       {/* Secondary info strip */}
-      {(result.siteNote || (result.preAction && result.specialInstructions)) && (
+      {result.preAction && result.specialInstructions && (
         <div className="px-3 py-2 space-y-1 bg-neutral-950/80 shrink-0">
-          {result.preAction && result.specialInstructions && (
-            <p className="text-blue-300 text-xs">{result.specialInstructions}</p>
-          )}
-          {result.siteNote && <p className="text-blue-300 text-xs">{result.siteNote}</p>}
+          <p className="text-blue-300 text-xs">{result.specialInstructions}</p>
         </div>
       )}
     </div>
@@ -468,7 +462,7 @@ function SplitScreenCompoundBreakdown({
   components,
   locale,
 }: {
-  components: { partName: string; wasteStream: string; instruction: string }[];
+  components: { partName: string; wasteStream: string; instruction: string; optional?: boolean }[];
   locale: Locale;
 }) {
   const T = useCallback(
@@ -491,11 +485,14 @@ function SplitScreenCompoundBreakdown({
               {T("separationStep").replace("{n}", String(i + 1))}
             </span>
             <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-1.5 flex-wrap">
                 <StreamBadge stream={c.wasteStream} />
                 <span className="text-xs font-medium text-neutral-200 truncate">
                   {c.partName}
                 </span>
+                {c.optional && (
+                  <span className="text-[9px] text-neutral-500 italic">{T("ifPresent")}</span>
+                )}
               </div>
               <div className="text-[10px] text-neutral-400 mt-0.5">{c.instruction}</div>
             </div>
@@ -617,7 +614,7 @@ function CompoundBreakdown({
   components,
   locale,
 }: {
-  components: { partName: string; wasteStream: string; instruction: string }[];
+  components: { partName: string; wasteStream: string; instruction: string; optional?: boolean }[];
   locale: Locale;
 }) {
   const T = useCallback(
@@ -638,7 +635,12 @@ function CompoundBreakdown({
           >
             <StreamBadge stream={c.wasteStream} />
             <div className="flex-1 min-w-0">
-              <div className="text-sm font-medium text-neutral-200">{c.partName}</div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-sm font-medium text-neutral-200">{c.partName}</span>
+                {c.optional && (
+                  <span className="text-xs text-neutral-500 italic">{T("ifPresent")}</span>
+                )}
+              </div>
               <div className="text-xs text-neutral-400">{c.instruction}</div>
             </div>
           </div>

@@ -5,7 +5,6 @@
  *   /review                        — admin review UI
  *   /api/review, /api/review/*     — review data + export
  *   /api/pilot-log GET             — pilot log viewer
- *   /api/overrides                 — override management
  *   /api/pilot-image               — captured frame images
  *
  * Auth method: HTTP Basic Auth (first login) → session cookie (subsequent)
@@ -29,7 +28,6 @@ const ADMIN_PATHS = [
   "/review",
   "/api/review",
   "/api/pilot-log",
-  "/api/overrides",
   "/api/pilot-image",
 ];
 
@@ -124,7 +122,6 @@ export const config = {
     "/review/:path*",
     "/api/review/:path*",
     "/api/pilot-log",
-    "/api/overrides/:path*",
     "/api/pilot-image/:path*",
   ],
 };

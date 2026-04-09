@@ -10,7 +10,6 @@ import {
   FrameAnalyzer,
   imageQualityBand,
   ROI_FG_THRESHOLD,
-  MAX_SKIN_RATIO,
 } from "@/lib/frame-analyzer";
 import type { FrameAnalysis } from "@/lib/types";
 
@@ -20,7 +19,6 @@ function makeAnalysis(overrides: Partial<FrameAnalysis> = {}): FrameAnalysis {
     roiForegroundRatio: 0,
     roiLargestBlobRatio: 0,
     roiLargestBlobDiagonalRatio: 0,
-    skinRatio: 0,
     sharpnessScore: 2000,
     isSettled: true,
     timestamp: Date.now(),
@@ -52,20 +50,6 @@ describe("FrameAnalyzer", () => {
     });
   });
 
-  describe("skin ratio gate", () => {
-    it("returns blocked=true when skinRatio > MAX_SKIN_RATIO", () => {
-      const analysis = makeAnalysis({ skinRatio: MAX_SKIN_RATIO + 0.05 });
-      const blocked = analysis.skinRatio > MAX_SKIN_RATIO;
-      expect(blocked).toBe(true);
-    });
-
-    it("returns blocked=false when skinRatio is within limit", () => {
-      const analysis = makeAnalysis({ skinRatio: MAX_SKIN_RATIO - 0.1 });
-      const blocked = analysis.skinRatio > MAX_SKIN_RATIO;
-      expect(blocked).toBe(false);
-    });
-  });
-
   describe("sharpness gate", () => {
     it("returns sharp=false when laplacian variance is low", () => {
       const analysis = makeAnalysis({ sharpnessScore: 50 });
@@ -75,7 +59,7 @@ describe("FrameAnalyzer", () => {
     });
 
     it("returns sharp=true when laplacian variance is high", () => {
-      const analysis = makeAnalysis({ sharpnessScore: 2000, skinRatio: 0.9 });
+      const analysis = makeAnalysis({ sharpnessScore: 2000 });
       const quality = imageQualityBand(analysis);
       expect(quality).toBe("good");
     });
@@ -83,50 +67,16 @@ describe("FrameAnalyzer", () => {
 
 });
 
-describe("HSV-based skin detection", () => {
-  // MAX_SKIN_RATIO was updated from 0.70 to 0.80
-  it("uses updated MAX_SKIN_RATIO threshold of 0.80", () => {
-    expect(MAX_SKIN_RATIO).toBe(0.80);
-  });
-
-  it("light skin tone: skinRatio below threshold passes", () => {
-    // Light skin with small object — skinRatio around 0.5 should pass
-    const analysis = makeAnalysis({ skinRatio: 0.5 });
-    const blocked = analysis.skinRatio > MAX_SKIN_RATIO;
-    expect(blocked).toBe(false);
-  });
-
-  it("dark skin tone: skinRatio below threshold passes", () => {
-    // Dark skin holding object — skinRatio around 0.4 should pass
-    const analysis = makeAnalysis({ skinRatio: 0.4 });
-    const blocked = analysis.skinRatio > MAX_SKIN_RATIO;
-    expect(blocked).toBe(false);
-  });
-
-  it("gloved hand: skinRatio near zero passes", () => {
-    // Glove has no skin-like colors in HSV range
-    const analysis = makeAnalysis({ skinRatio: 0.02 });
-    const blocked = analysis.skinRatio > MAX_SKIN_RATIO;
-    expect(blocked).toBe(false);
-  });
-
-  it("blocks when skinRatio exceeds 0.80", () => {
-    const analysis = makeAnalysis({ skinRatio: 0.85 });
-    const blocked = analysis.skinRatio > MAX_SKIN_RATIO;
-    expect(blocked).toBe(true);
-  });
-});
-
 describe("imageQualityBand", () => {
-  it("returns 'good' for high sharpness (skin ratio irrelevant)", () => {
-    expect(imageQualityBand(makeAnalysis({ sharpnessScore: 2000, skinRatio: 0.9 }))).toBe("good");
+  it("returns 'good' for high sharpness", () => {
+    expect(imageQualityBand(makeAnalysis({ sharpnessScore: 2000 }))).toBe("good");
   });
 
-  it("returns 'fair' for moderate sharpness (skin ratio irrelevant)", () => {
-    expect(imageQualityBand(makeAnalysis({ sharpnessScore: 800, skinRatio: 0.9 }))).toBe("fair");
+  it("returns 'fair' for moderate sharpness", () => {
+    expect(imageQualityBand(makeAnalysis({ sharpnessScore: 800 }))).toBe("fair");
   });
 
   it("returns 'poor' for low sharpness", () => {
-    expect(imageQualityBand(makeAnalysis({ sharpnessScore: 400, skinRatio: 0.0 }))).toBe("poor");
+    expect(imageQualityBand(makeAnalysis({ sharpnessScore: 400 }))).toBe("poor");
   });
 });

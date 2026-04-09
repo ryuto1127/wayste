@@ -96,42 +96,40 @@
       "pattern": "utensil",
       "stream": "compost",
       "note": "This office uses compostable utensils. Check for the BPI logo."
-    }
-  ],
-  "siteRules": [
+    },
     {
       "pattern": "toner",
-      "instruction": "Toner cartridges are collected by facilities. Leave on the shelf by the copy room, do not put in any bin.",
       "stream": "special",
+      "note": "Toner cartridges are collected by facilities. Leave on the shelf by the copy room, do not put in any bin.",
       "requiresStaff": true
     },
     {
       "pattern": "printer cartridge",
-      "instruction": "Printer cartridges are collected by facilities. Leave on the shelf by the copy room.",
       "stream": "special",
+      "note": "Printer cartridges are collected by facilities. Leave on the shelf by the copy room.",
       "requiresStaff": true
     },
     {
       "pattern": "monitor",
-      "instruction": "Monitors and large electronics require a facilities pickup. Email facilities@company.com.",
       "stream": "special",
+      "note": "Monitors and large electronics require a facilities pickup. Email facilities@company.com.",
       "requiresStaff": true
     },
     {
       "pattern": "laptop",
-      "instruction": "Laptops must go through IT asset disposal. Contact IT, do not place in any waste bin.",
       "stream": "special",
+      "note": "Laptops must go through IT asset disposal. Contact IT, do not place in any waste bin.",
       "requiresStaff": true
     },
     {
       "pattern": "plastic #5",
-      "instruction": "Plastic #5 (PP) is not accepted in recycling at this office. Place in landfill.",
-      "stream": "landfill"
+      "stream": "landfill",
+      "note": "Plastic #5 (PP) is not accepted in recycling at this office. Place in landfill."
     },
     {
       "pattern": "polypropylene",
-      "instruction": "Polypropylene containers are not recyclable at this location. Place in landfill.",
-      "stream": "landfill"
+      "stream": "landfill",
+      "note": "Polypropylene containers are not recyclable at this location. Place in landfill."
     }
   ],
   "staffHandlingItems": [
@@ -141,6 +139,14 @@
     "medication",
     "sharps",
     "needle"
+  ],
+  "canonicalNames": [
+    "coffee cup", "k-cup", "plastic bottle", "water bottle", "aluminum can",
+    "glass bottle", "cardboard", "plastic bag",
+    "napkin", "paper towel", "utensil",
+    "battery", "cable", "charger", "usb", "headphone",
+    "toner", "printer cartridge", "monitor", "laptop",
+    "food scraps", "banana peel", "apple core"
   ],
   "defaultStream": "landfill",
   "tips": [

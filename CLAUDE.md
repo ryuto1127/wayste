@@ -52,7 +52,7 @@
 
 ## Do NOT
 - Skip reading `node_modules/next/dist/docs/` before using Next.js 16 APIs — breaking changes from training data
-- Hardcode waste rules in code — use `config/sites/*.json` or dynamic overrides via Redis
+- Hardcode waste rules in code — use `config/sites/*.json`
 - Import Node built-ins (`fs`, `path`, `crypto`) in browser code — they are stubbed to empty modules
 - Send every frame to the API — the CV pipeline gates classification (ROI + sharpness + skin checks)
 - Use Edge Functions (deprecated) or `NEXT_PUBLIC_*` for secrets

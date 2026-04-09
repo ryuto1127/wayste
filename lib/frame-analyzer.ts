@@ -43,23 +43,6 @@ const FG_PIXEL_THRESHOLD = 25; // per-pixel diff threshold for foreground classi
  */
 export const ROI_FG_THRESHOLD = 0.03;
 export const MOTION_RATIO_THRESHOLD = 0.12; // kept for external consumers
-export const MAX_SKIN_RATIO = 0.80; // >80% skin in foreground → too much hand
-
-/** Convert RGB (0-255) to HSV where H is 0-360, S is 0-1, V is 0-1. */
-function rgbToHsv(r: number, g: number, b: number): [number, number, number] {
-  r /= 255; g /= 255; b /= 255;
-  const max = Math.max(r, g, b), min = Math.min(r, g, b);
-  const d = max - min;
-  const s = max === 0 ? 0 : d / max;
-  const v = max;
-  let h = 0;
-  if (d !== 0) {
-    if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) * 60;
-    else if (max === g) h = ((b - r) / d + 2) * 60;
-    else h = ((r - g) / d + 4) * 60;
-  }
-  return [h, s, v];
-}
 
 export class FrameAnalyzer {
   private bgModel: Float32Array | null = null;
@@ -149,7 +132,6 @@ export class FrameAnalyzer {
         roiForegroundRatio: 0,
         roiLargestBlobRatio: 0,
         roiLargestBlobDiagonalRatio: 0,
-        skinRatio: 0,
         sharpnessScore: 0,
         isSettled: false,
         timestamp: Date.now(),
@@ -251,26 +233,6 @@ export class FrameAnalyzer {
     const roiLargestBlobDiagonalRatio =
       roiDiagonal > 0 ? largestBlobDiagonal / roiDiagonal : 0;
 
-    // ── Skin-tone ratio (HSV-based, ROI foreground pixels only) ──
-    let skinCount = 0;
-    let fgPixels = 0;
-    for (let ry = 0; ry < ROI_H; ry++) {
-      for (let rx = 0; rx < ROI_W; rx++) {
-        const ri = ry * ROI_W + rx;
-        if (Math.abs(roiGray[ri] - bg[ri]) <= FG_PIXEL_THRESHOLD) continue;
-        fgPixels++;
-        const o = ((ROI_Y0 + ry) * AW + (ROI_X0 + rx)) * 4;
-        const r = px[o],
-          g = px[o + 1],
-          b = px[o + 2];
-        const [h, s, v] = rgbToHsv(r, g, b);
-        if (h <= 50 && s >= 0.1 && s <= 0.8 && v >= 0.2) {
-          skinCount++;
-        }
-      }
-    }
-    const skinRatio = fgPixels > 0 ? skinCount / fgPixels : 0;
-
     // ── Sharpness (Laplacian variance, foreground pixels only) ──
     // Restricting to erodedMask prevents textured backgrounds from
     // inflating the score and ensures the object itself drives quality.
@@ -319,7 +281,6 @@ export class FrameAnalyzer {
       roiForegroundRatio,
       roiLargestBlobRatio,
       roiLargestBlobDiagonalRatio,
-      skinRatio,
       sharpnessScore,
       /** False during the first BG_SETTLE_FRAMES — detection is blocked until the background model has converged. */
       isSettled: this.frameCount >= BG_SETTLE_FRAMES,

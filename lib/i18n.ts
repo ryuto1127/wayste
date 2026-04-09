@@ -136,6 +136,7 @@ const translations = {
     // Compound item separation (split-screen)
     separateInto: "Separate into:",
     separationStep: "Step {n}",
+    ifPresent: "if attached",
 
     // Stream icons (used alongside color + text for triple encoding)
     streamIconRecycling: "♻️",
@@ -277,6 +278,7 @@ const translations = {
     // Compound item separation (split-screen)
     separateInto: "分解してください：",
     separationStep: "手順 {n}",
+    ifPresent: "ついている場合",
 
     // Stream icons
     streamIconRecycling: "♻️",

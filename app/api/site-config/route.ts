@@ -9,7 +9,6 @@ export async function GET() {
     defaultLocale: config.defaultLocale ?? "en",
     streams: config.streams,
     overrides: config.overrides,
-    siteRules: config.siteRules ?? [],
     staffHandlingItems: config.staffHandlingItems ?? [],
     reviewThreshold: config.reviewThreshold,
     defaultStream: config.defaultStream,

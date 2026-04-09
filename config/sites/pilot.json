@@ -18,8 +18,8 @@
     { "pattern": "plastic bottle", "stream": "recyclable", "note": "キャップとラベルを外して中を洗い、ボトルは資源ゴミへ" },
     { "pattern": "bottle cap", "stream": "plastic", "note": "ペットボトルのキャップはプラスチックへ" },
     { "pattern": "ボトルキャップ", "stream": "plastic", "note": "ペットボトルのキャップはプラスチックへ" },
-    { "pattern": "弁当容器", "stream": "burnable", "note": "汚れた弁当容器は可燃ゴミ。きれいに洗えた場合はプラスチック" },
-    { "pattern": "lunch box", "stream": "burnable", "note": "汚れた弁当容器は可燃ゴミ" },
+    { "pattern": "弁当容器", "stream": "burnable", "note": "汚れた弁当容器は可燃ゴミ。きれいに洗えた場合はプラスチック", "conditionalStream": "plastic", "condition": "clean" },
+    { "pattern": "lunch box", "stream": "burnable", "note": "汚れた弁当容器は可燃ゴミ。きれいに洗えた場合はプラスチック", "conditionalStream": "plastic", "condition": "clean" },
     { "pattern": "紙コップ", "stream": "burnable", "note": "内側にプラスチックコーティングがあるため可燃ゴミ" },
     { "pattern": "coffee cup", "stream": "burnable", "note": "内側にプラスチックコーティングがあるため可燃ゴミ" },
     { "pattern": "paper cup", "stream": "burnable", "note": "内側にプラスチックコーティングがあるため可燃ゴミ" },
@@ -32,10 +32,17 @@
     { "pattern": "レジ袋", "stream": "plastic", "note": "プラスチックへ" },
     { "pattern": "food wrapper", "stream": "burnable", "note": "汚れた包装は可燃ゴミ" },
     { "pattern": "ラップ", "stream": "burnable", "note": "食品ラップは可燃ゴミ" },
-    { "pattern": "食品トレイ", "stream": "plastic", "note": "洗ってプラスチックへ。汚れがひどい場合は可燃ゴミ" },
-    { "pattern": "food tray", "stream": "plastic", "note": "洗ってプラスチックへ" },
+    { "pattern": "白色トレイ", "stream": "plastic", "note": "白い発泡トレイは洗ってプラスチックへ。スーパーの回収ボックスも利用可" },
+    { "pattern": "white foam tray", "stream": "plastic", "note": "白い発泡トレイは洗ってプラスチックへ" },
+    { "pattern": "色付きトレイ", "stream": "burnable", "note": "色付き・柄入り発泡トレイはリサイクル不可。可燃ゴミへ" },
+    { "pattern": "colored tray", "stream": "burnable", "note": "色付き発泡トレイはリサイクル不可。可燃ゴミへ" },
+    { "pattern": "食品トレイ", "stream": "burnable", "note": "食品トレイは汚れていれば可燃ゴミ。きれいに洗えた場合はプラスチック", "conditionalStream": "plastic", "condition": "clean" },
+    { "pattern": "food tray", "stream": "burnable", "note": "食品トレイは汚れていれば可燃ゴミ。きれいに洗えた場合はプラスチック", "conditionalStream": "plastic", "condition": "clean" },
+    { "pattern": "アルミ缶", "stream": "recyclable", "note": "アルミ缶は中を洗って資源ゴミへ。軽くて磁石につかないのが目印" },
+    { "pattern": "aluminum can", "stream": "recyclable", "note": "アルミ缶は中を洗って資源ゴミへ" },
+    { "pattern": "スチール缶", "stream": "recyclable", "note": "スチール缶は中を洗って資源ゴミへ。磁石につくのが目印" },
+    { "pattern": "steel can", "stream": "recyclable", "note": "スチール缶は中を洗って資源ゴミへ" },
     { "pattern": "缶", "stream": "recyclable", "note": "中を洗って資源ゴミへ" },
-    { "pattern": "aluminum can", "stream": "recyclable", "note": "中を洗って資源ゴミへ" },
     { "pattern": "新聞", "stream": "recyclable", "note": "紐でまとめて資源ゴミへ" },
     { "pattern": "段ボール", "stream": "recyclable", "note": "たたんで資源ゴミへ" },
     { "pattern": "cardboard", "stream": "recyclable", "note": "たたんで資源ゴミへ" },
@@ -45,14 +52,44 @@
     { "pattern": "ティッシュ", "stream": "burnable", "note": "可燃ゴミ" },
     { "pattern": "電池", "stream": "special", "note": "電池は特別収集。専用の回収ボックスへ" },
     { "pattern": "battery", "stream": "special", "note": "電池は特別収集。専用の回収ボックスへ" },
+    { "pattern": "透明びん", "stream": "recyclable", "note": "透明びんは中を洗って資源ゴミへ。色付きびんとは分別してください" },
+    { "pattern": "茶色びん", "stream": "recyclable", "note": "茶色びんは中を洗って資源ゴミへ。透明びんとは分別してください" },
+    { "pattern": "その他の色のびん", "stream": "recyclable", "note": "緑・青などの色付きびんは中を洗って資源ゴミへ" },
     { "pattern": "びん", "stream": "recyclable", "note": "中を洗って資源ゴミへ" },
-    { "pattern": "glass bottle", "stream": "recyclable", "note": "中を洗って資源ゴミへ" }
+    { "pattern": "glass bottle", "stream": "recyclable", "note": "中を洗って資源ゴミへ" },
+    { "pattern": "toner", "stream": "special", "note": "総務・管理部門へお渡しください", "requiresStaff": true },
+    { "pattern": "トナー", "stream": "special", "note": "総務・管理部門へお渡しください", "requiresStaff": true }
   ],
-  "siteRules": [
-    { "pattern": "toner", "instruction": "総務・管理部門へお渡しください", "stream": "special", "requiresStaff": true },
-    { "pattern": "トナー", "instruction": "総務・管理部門へお渡しください", "stream": "special", "requiresStaff": true }
+  "compounds": [
+    {
+      "pattern": "plastic bottle",
+      "components": [
+        { "partName": "ボトル本体", "wasteStream": "recyclable", "instruction": "中を洗って資源ゴミへ" },
+        { "partName": "キャップ", "wasteStream": "plastic", "instruction": "プラスチックへ", "optional": true },
+        { "partName": "ラベル", "wasteStream": "plastic", "instruction": "剥がしてプラスチックへ", "optional": true }
+      ]
+    },
+    {
+      "pattern": "ペットボトル",
+      "components": [
+        { "partName": "ボトル本体", "wasteStream": "recyclable", "instruction": "中を洗って資源ゴミへ" },
+        { "partName": "キャップ", "wasteStream": "plastic", "instruction": "プラスチックへ", "optional": true },
+        { "partName": "ラベル", "wasteStream": "plastic", "instruction": "剥がしてプラスチックへ", "optional": true }
+      ]
+    }
   ],
   "staffHandlingItems": ["蛍光灯", "fluorescent", "スプレー缶", "spray can", "注射針", "needle", "薬品", "chemical"],
+  "canonicalNames": [
+    "ペットボトル", "ボトルキャップ", "弁当容器", "紙コップ", "割り箸",
+    "ストロー", "ビニール袋", "レジ袋", "食品トレイ", "ラップ",
+    "アルミ缶", "スチール缶", "缶", "新聞", "段ボール", "ナプキン", "ティッシュ",
+    "透明びん", "茶色びん", "その他の色のびん", "びん", "電池",
+    "白色トレイ", "色付きトレイ",
+    "pet bottle", "bottle cap", "plastic bottle", "coffee cup", "paper cup",
+    "chopstick", "straw", "plastic bag", "food wrapper", "food tray",
+    "aluminum can", "steel can", "newspaper", "cardboard", "napkin", "tissue",
+    "glass bottle", "battery", "white foam tray", "colored tray"
+  ],
   "defaultStream": "burnable",
   "tips": [
     { "text": "ペットボトルはキャップ・ラベルを外し、中を洗ってから捨てましょう。" },

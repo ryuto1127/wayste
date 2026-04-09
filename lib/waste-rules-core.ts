@@ -12,6 +12,7 @@ import type {
   StreamDefinition,
   ClassificationResponse,
   ComponentPart,
+  CompoundConfig,
 } from "./types";
 
 /**
@@ -54,60 +55,82 @@ export function matchesPattern(itemName: string, pattern: string): boolean {
   return false;
 }
 
+export interface OverrideResult {
+  stream: WasteStream;
+  overrideApplied: boolean;
+  note?: string;
+  requiresStaff: boolean;
+  /** Present when the matched override has a conditional stream. */
+  conditionalStream?: WasteStream;
+  /** The condition string (e.g. "clean") for conditional overrides. */
+  condition?: string;
+}
+
 export function applyOverrides(
   itemName: string,
   claudeStream: WasteStream,
   siteConfig: SiteConfig
-): { stream: WasteStream; overrideApplied: boolean; note?: string } {
+): OverrideResult {
+  // Check staffHandlingItems first — these always force needs_review
+  if (siteConfig.staffHandlingItems) {
+    for (const pattern of siteConfig.staffHandlingItems) {
+      if (matchesPattern(itemName, pattern)) {
+        return {
+          stream: "needs_review",
+          overrideApplied: true,
+          note: `In ${siteConfig.siteName}, this item requires staff handling.`,
+          requiresStaff: true,
+        };
+      }
+    }
+  }
+
   const sorted = [...siteConfig.overrides].sort(
     (a, b) => b.pattern.length - a.pattern.length
   );
 
   for (const override of sorted) {
     if (matchesPattern(itemName, override.pattern)) {
+      const requiresStaff = override.requiresStaff ?? false;
+      const stream = requiresStaff || !override.stream ? "needs_review" : override.stream;
       return {
-        stream: override.stream,
+        stream,
         overrideApplied: true,
         note: override.note,
+        requiresStaff,
+        conditionalStream: override.conditionalStream,
+        condition: override.condition,
       };
     }
   }
 
-  return { stream: claudeStream, overrideApplied: false };
+  return { stream: claudeStream, overrideApplied: false, requiresStaff: false };
 }
 
-export function applySiteRules(
+/**
+ * Check if itemName matches a config-defined compound rule.
+ * Config compounds take priority over AI-detected compound detection.
+ * Longer patterns are checked first (more specific wins).
+ */
+export function applyCompounds(
   itemName: string,
   siteConfig: SiteConfig
-): { siteNote?: string; requiresStaff: boolean; streamOverride?: WasteStream } {
-  if (siteConfig.staffHandlingItems) {
-    for (const pattern of siteConfig.staffHandlingItems) {
-      if (matchesPattern(itemName, pattern)) {
-        return {
-          siteNote: `In ${siteConfig.siteName}, this item requires staff handling.`,
-          requiresStaff: true,
-          streamOverride: "needs_review",
-        };
-      }
+): { isCompound: false } | { isCompound: true; components: ComponentPart[] } {
+  if (!siteConfig.compounds || siteConfig.compounds.length === 0) {
+    return { isCompound: false };
+  }
+
+  const sorted = [...siteConfig.compounds].sort(
+    (a, b) => b.pattern.length - a.pattern.length
+  );
+
+  for (const compound of sorted) {
+    if (matchesPattern(itemName, compound.pattern)) {
+      return { isCompound: true, components: compound.components };
     }
   }
 
-  if (siteConfig.siteRules) {
-    const sorted = [...siteConfig.siteRules].sort(
-      (a, b) => b.pattern.length - a.pattern.length
-    );
-    for (const rule of sorted) {
-      if (matchesPattern(itemName, rule.pattern)) {
-        return {
-          siteNote: `In ${siteConfig.siteName}: ${rule.instruction}`,
-          requiresStaff: rule.requiresStaff ?? false,
-          streamOverride: rule.stream,
-        };
-      }
-    }
-  }
-
-  return { requiresStaff: false };
+  return { isCompound: false };
 }
 
 export function getStreamDefinition(
@@ -142,25 +165,21 @@ export function buildClassificationResult(
     raw = { ...raw, wasteStream: "needs_review" };
   }
 
-  const { stream: overriddenStream, note: overrideNote } = applyOverrides(
+  const { stream: overriddenStream, note: overrideNote, requiresStaff } = applyOverrides(
     raw.itemName,
     raw.wasteStream,
     siteConfig
   );
 
-  const { siteNote, requiresStaff, streamOverride: siteStreamOverride } =
-    applySiteRules(raw.itemName, siteConfig);
-
   const isNothingDetected =
     raw.itemName.toLowerCase() === "nothing detected" ||
     raw.itemName.toLowerCase() === "unknown";
 
-  const needsReview =
-    confidence < threshold || requiresStaff || isNothingDetected;
+  const needsReview = confidence < threshold || requiresStaff || isNothingDetected;
 
   let finalStream: WasteStream;
-  if (siteStreamOverride) {
-    finalStream = siteStreamOverride;
+  if (requiresStaff) {
+    finalStream = "needs_review";
   } else if (confidence < threshold && !overrideNote) {
     finalStream = "needs_review";
   } else {
@@ -177,8 +196,12 @@ export function buildClassificationResult(
     ? "Needs Verification"
     : (streamDef?.label ?? "Landfill");
 
-  const isCompound = raw.isCompound ?? false;
-  let components = raw.components;
+  // Config-driven compounds take priority over AI-detected compound detection
+  const configCompound = applyCompounds(raw.itemName, siteConfig);
+  const isCompound = configCompound.isCompound || (raw.isCompound ?? false);
+  let components: ComponentPart[] | undefined =
+    configCompound.isCompound ? configCompound.components : raw.components;
+
   if (isCompound && components) {
     components = components.map((c) => {
       const cStreamDef = getStreamDefinition(c.wasteStream, siteConfig);
@@ -193,7 +216,7 @@ export function buildClassificationResult(
     itemName: raw.itemName,
     wasteStream: finalStream,
     confidence,
-    reasoning: overrideNote ?? siteNote ?? raw.reasoning,
+    reasoning: overrideNote ?? raw.reasoning,
     binColor,
     binLabel,
     specialInstructions: overrideNote,
@@ -201,6 +224,5 @@ export function buildClassificationResult(
     needsReview,
     isCompound,
     components: isCompound ? components : undefined,
-    siteNote,
   };
 }

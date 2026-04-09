@@ -11,8 +11,10 @@ Built for office and public-space pilots, with full English and Japanese support
 - Detects objects held up to the camera using local computer vision — no cloud needed for detection
 - Runs a **3-tier local inference pipeline** entirely in the browser before touching any cloud API:
   - **Tier 1 — YOLO26m (on-demand):** runs when the CV pipeline triggers classification; COCO-80 items with high confidence are resolved instantly (no server call)
-  - **Tier 2 — YOLO World S (on-demand):** 23 consolidated recycling-specific classes (metal cans, cardboard, napkins, styrofoam, straws, etc.) that COCO-80 misses; loaded lazily (47.9 MB) and run when Tier 1 confidence is below 0.65
+  - **Tier 2 — YOLO World S (on-demand):** 23 consolidated recycling-specific classes (metal cans, cardboard, napkins, styrofoam, straws, etc.) that COCO-80 misses; pre-loaded sequentially at startup (47.9 MB) and run when Tier 1 confidence is below 0.65
   - **Tier 3 — OpenAI API:** last resort when both local models fail or confidence stays below 0.30
+- **RGB material analysis** refines YOLO class names using bounding-box color, transparency, metallicity, shape (aspect ratio), and LBP texture analysis — disambiguates "bottle" → "glass bottle" / "PET bottle" / "aluminum can" etc. before waste-rule matching
+- Material hints (hue, saturation, transparency, texture surface) are forwarded to GPT in Tier 3 for improved cloud classification
 - **YOLO26m covers all 80 COCO classes** — non-waste detections (person, car, furniture, animals) resolve to `not_waste` and return `nothing_detected` instantly, skipping YOLO World and the API entirely
 - When Tier 1 confidence is below 0.30, the API fires in parallel with YOLO World so the slower path never adds extra latency
 - Shows a **clear directive** based on confidence level — no raw percentages shown to users:
@@ -22,7 +24,8 @@ Built for office and public-space pilots, with full English and Japanese support
 - Shows **pre-disposal guidance** when needed (e.g. "Empty contents and remove cap") before the bin directive
 - Supports **English and Japanese** with configurable default locale per site
 - Detects **compound items** (e.g. a coffee cup with a plastic lid) and breaks them down into per-component disposal instructions
-- Shows a **split-screen layout** when multiple distinct items are detected simultaneously, with one fullscreen bin card per item
+- Detects **up to 4 simultaneous items** via multi-blob analysis with per-blob quality scoring (sharpness, contrast, skin ratio); shows a responsive split-screen layout (2-column, 3-column, or 2×2 grid) with staggered fade-in animations
+- **Startup loading screen** with sequential model loading — both YOLO models are fully loaded and warmed up before the kiosk accepts input; shows a branded loading screen with progress indicator ("Loading vision model 1/2..." → "2/2..." → "Ready")
 - **Thermal throttling detection** on the kiosk device — when CV analysis times out 2× above baseline, the pipeline automatically halves its frame rate to stay responsive
 - Logs every scan to Redis for post-pilot analysis
 - Saves captured images to **Vercel Blob** with public access + random-suffix URLs (non-guessable, non-enumerable); only exposed through admin-authenticated routes
@@ -59,7 +62,8 @@ Built for office and public-space pilots, with full English and Japanese support
 | Local inference (Tier 1) | YOLO26m FP16 (COCO-80, 39 MB) via ONNX Runtime Web — on-demand |
 | Local inference (Tier 2) | YOLO World S (23 consolidated recycling classes, 47.9 MB) via ONNX Runtime Web — on-demand fallback |
 | AI classification | OpenAI GPT-5.4 — `gpt-5.4-nano` (fast) with `gpt-5.4-mini` escalation (compound items / low confidence) |
-| Local detection | OffscreenCanvas background subtraction at 120×120 (square), ~33 fps, HSV-based skin filtering |
+| Material analysis | RGB color analysis + LBP texture analysis on YOLO bounding boxes — refines class names and feeds hints to GPT |
+| Local detection | OffscreenCanvas background subtraction at 120×120 (square), ~33 fps, multi-blob analysis (up to 4), auto-calibrating thresholds |
 | Response validation | Zod schema validation on all model output |
 | API security | HMAC-signed session tokens + two-tier auth (kiosk token / admin key) |
 | Database | Upstash Redis (pilot logs + feedback) |
@@ -160,6 +164,12 @@ Local CV pipeline detects object
 YOLO26m runs on-demand when the CV pipeline triggers classification.
 Rules cover all 80 COCO classes.
         ↓
+RGB material analysis runs on best detection bounding box:
+  · Color (HSV), transparency, metallicity, bbox aspect ratio
+  · LBP texture analysis → paper / plastic / metal surface suggestion
+  · refineClassName disambiguates generic YOLO labels
+    (e.g. "bottle" → "glass bottle", "PET bottle", or "aluminum can")
+        ↓
 If YOLO26m class resolves to not_waste (person, car, furniture, animals…)
         → nothing_detected returned instantly — no YOLO World, no API call
         ↓
@@ -169,7 +179,7 @@ If YOLO26m confidence ≥ 0.65 AND class has a waste-stream rule
         ↓
 ── Tier 2: YOLO World S (on-demand) ──────────────────────────────────────
 If YOLO26m confidence < 0.65 (or no waste rule for the class):
-  · YOLO World S loads lazily if not yet cached (47.9 MB, ONNX Runtime Web)
+  · YOLO World S is pre-loaded sequentially at startup (47.9 MB, ONNX Runtime Web)
   · Runs on ROI crop — ~200–800 ms on CPU
   · 23 consolidated recycling classes: metal cans, cardboard, napkins,
     styrofoam, straws, food containers, milk cartons, etc.
@@ -181,6 +191,8 @@ If both local models yield confidence < 0.30 — API fires in parallel with
 YOLO World (no extra wait). Otherwise falls through here when
 YOLO World confidence < 0.45.
   · Center short-side square crop (e.g. 720×720 from 1280×720) sent to /api/classify
+  · MaterialHint (color, transparency, texture) included when available —
+    GPT prompt says "Local analysis detected: transparent=true, metallic=false, …"
   · GPT-5.4 nano classifies item + optional preAction guidance (fast path, ~1s)
   · If confidence < 0.5 or item flagged for review
         → escalates to GPT-5.4 mini (accurate path, ~2–4s)
@@ -198,8 +210,10 @@ Trust level determined:
         ↓
 Pre-action shown if applicable (e.g. "Empty contents and remove cap")
         ↓
-Result shown to user in fullscreen hero (single item) or split-screen (multiple items);
-frame upload to Blob + Redis logging happen asynchronously (non-blocking)
+Result shown to user in fullscreen hero (single item) or split-screen grid (2–4 items);
+each blob is matched to YOLO detections by center proximity — unmatched blobs with
+high quality scores (sharpness + contrast) are sent to GPT; low-quality blobs are discarded.
+Frame upload to Blob + Redis logging happen asynchronously (non-blocking)
 ```
 
 ---
@@ -215,7 +229,7 @@ frame upload to Blob + Redis logging happen asynchronously (non-blocking)
 | **Config hot-reload** | Site config is cached for 5 minutes — override updates propagate without restart |
 | **Pending-item queue** | One-slot queue remembers an item detected while busy; cooldown exits directly to `object_detected` so the next scan starts without re-presentation |
 | **Session tokens** | HMAC-signed tokens issued at page load limit classify API abuse; client auto-refreshes via `/api/session` before expiry |
-| **YOLO fallback** | If ONNX Runtime or either YOLO model fails to load, the pipeline falls back to the next tier transparently |
+| **Sequential model startup** | Both YOLO models load sequentially at startup (no GPU/memory contention); loading screen blocks input until ready; if YOLO World fails, Tier 2 degrades gracefully |
 | **Parallel API race** | When YOLO26m confidence < 0.30, the API fires in parallel with YOLO World — whichever finishes first wins, so low-confidence items never block on two sequential inferences |
 | **Thermal throttling** | CV analysis duration is tracked continuously; when average exceeds 2× baseline (M1/M2 Mac thermal throttle), the frame rate halves automatically and a warning badge appears |
 
@@ -250,10 +264,14 @@ Captured images are uploaded to Vercel Blob with public access (required by `@ve
 
 The local CV pipeline uses **HSV color-space skin detection** instead of RGB heuristics. The HSV approach (`h ≤ 50, 0.1 ≤ s ≤ 0.8, v ≥ 0.2`) is significantly more equitable across skin tones — it avoids the bias inherent in RGB-range thresholds that tend to work better for lighter skin. The skin ratio gate (`MAX_SKIN_RATIO = 0.80`) prevents classifying a hand as an object while still allowing items held in-hand.
 
+**Auto-calibration**: during the first 45 frames (background settling), the pipeline measures noise-floor statistics (mean foreground ratio, standard deviation, largest blob baseline). These are used to derive an environment-specific `ROI_FG_THRESHOLD` that adapts to each camera's noise characteristics.
+
+**Sensitivity**: a single `sensitivity` parameter (0.0 = strict, 1.0 = sensitive, default 0.5) in the site config controls all detection and inference thresholds via `computeThresholds()` in `lib/threshold-config.ts`. Auto-calibration overrides the foreground threshold when available.
+
 Timing is tuned for kiosk responsiveness:
 - **Result display**: stays on screen until the item is removed (30-second escape hatch)
 - **Cooldown**: 1.5 seconds between scans
-- **Object removal detection**: 3 consecutive empty frames
+- **Object removal detection**: 3 consecutive empty frames (2 at sensitivity > 0.7)
 
 ### Pending-item queue
 
@@ -273,6 +291,7 @@ Rules live in JSON files in `config/sites/`. No code changes needed.
   "siteName": "My Office — 2nd Floor",
   "defaultLocale": "en",
   "reviewThreshold": 0.55,
+  "sensitivity": 0.5,
   "mirrorCamera": false,
   "streams": [
     { "id": "recycling", "label": "Recycling", "color": "#2563EB", "description": "..." },
@@ -365,7 +384,7 @@ You can also trigger manual purges from the dashboard using the date-range data 
 │   ├── ErrorBoundary.tsx   # Crash recovery with auto-reload
 │   ├── IdleScreen.tsx      # Idle / attract screen
 │   ├── KioskDisplay.tsx    # 6-state CV pipeline + state machine orchestrator
-│   ├── ResultScreen.tsx    # Fullscreen/split-screen bin result display with bin position indicator
+│   ├── ResultScreen.tsx    # Fullscreen/split-screen bin result display (1–4 items, 2×2 grid) with bin position indicator
 │   └── SystemStatusBadge.tsx  # YOLO model + thermal warning status indicator
 ├── config/
 │   └── sites/              # Per-location waste rule JSON files
@@ -399,7 +418,7 @@ You can also trigger manual purges from the dashboard using the date-range data 
     ├── calibration.ts       # Calibration prediction tracking
     ├── blob-store.ts        # Vercel Blob upload helper (private by default)
     ├── feedback-analysis.ts # Feedback aggregation + override suggestions
-    ├── frame-analyzer.ts    # Local CV pipeline (background model, blob detection)
+    ├── frame-analyzer.ts    # Local CV pipeline (background model, multi-blob detection with quality scoring)
     ├── i18n.ts              # EN/JA translations
     ├── inference-backend.ts # YOLO inference backend abstraction (ONNX or HTTP)
     ├── kiosk-auth-client.ts # Client-side session token management
@@ -408,8 +427,10 @@ You can also trigger manual purges from the dashboard using the date-range data 
     ├── pilot-log.ts         # Redis logging
     ├── redis.ts             # Upstash Redis client
     ├── request-id.ts        # Per-request UUID for log correlation
+    ├── rgb-material-analyzer.ts # Post-YOLO RGB/texture material analysis (color, LBP, shape)
     ├── session-token.ts     # HMAC-signed session token generation + validation
     ├── site-streams-context.tsx # React context providing site streams to client components
+    ├── threshold-config.ts  # Master sensitivity → threshold derivation (auto-calibration aware)
     ├── types.ts             # Shared TypeScript types
     ├── waste-rules-core.ts  # Core rules engine (pattern matching, stream resolution)
     ├── waste-rules.ts       # Rules engine public API (overrides, result building)
@@ -426,7 +447,7 @@ You can also trigger manual purges from the dashboard using the date-range data 
 npm test
 ```
 
-106 unit tests across 7 suites covering the state machine, CV pipeline thresholds, HSV skin detection, override pattern matching, Japanese site config, offline cache, notifications, and classification API route.
+281 unit tests across 11 suites covering the state machine, CV pipeline thresholds, threshold sensitivity derivation, HSV skin detection, override pattern matching, Japanese site config, offline cache, notifications, classification API route, RGB material/texture analysis, multi-item blob detection, blob-to-detection matching, and API batch classification.
 
 ---
 

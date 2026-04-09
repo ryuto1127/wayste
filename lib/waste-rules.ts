@@ -202,6 +202,13 @@ function formatMaterialHint(hint?: MaterialHint): string {
     `  - Saturation: ${hint.saturation.toFixed(2)} (${hint.saturation > 0.5 ? "high" : hint.saturation > 0.2 ? "medium" : "low"})`,
     `  - Metallic reflections: ${hint.isMetallic ? "detected" : "not detected"}`,
     `  - Transparency: ${hint.isTransparent ? "likely" : "unlikely"}`,
+    `  - Bbox aspect ratio (w/h): ${hint.bboxAspectRatio.toFixed(2)}`,
   ];
-  return `\nColor analysis of detected region:\n${lines.join("\n")}\n`;
+  if (hint.texture) {
+    lines.push(
+      `  - Texture uniformity: ${hint.texture.uniformity.toFixed(2)} (${hint.texture.uniformity > 0.7 ? "high/matte" : hint.texture.uniformity < 0.5 ? "low/specular" : "medium"})`,
+      `  - Texture surface: ${hint.texture.suggestedSurface}`,
+    );
+  }
+  return `\nLocal analysis of detected region:\n${lines.join("\n")}\nUse these physical properties to determine the exact material and correct disposal stream.\n`;
 }

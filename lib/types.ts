@@ -8,6 +8,24 @@ export type PipelineState =
   | "result"
   | "cooldown";
 
+// ── Per-blob quality metrics (multi-item detection) ──
+export interface BlobInfo {
+  /** Normalized center-x, center-y, width, height within the ROI (0–1). */
+  bboxNorm: [cx: number, cy: number, w: number, h: number];
+  /** Number of foreground pixels in this blob. */
+  pixelCount: number;
+  /** Blob pixel count as a fraction of ROI_PIXEL_COUNT. */
+  ratio: number;
+  /** Laplacian variance over blob pixels — real objects have texture/edges; shadows are smooth. */
+  sharpness: number;
+  /** Mean |roiGray[i] - bg[i]| over blob pixels — real objects differ strongly from background. */
+  contrastScore: number;
+  /** Fraction of blob pixels in skin-tone HSV range. High (>0.6) suggests hand/arm. */
+  skinRatio: number;
+  /** Mean HSV saturation of blob pixels. Informational for material analysis. */
+  saturation: number;
+}
+
 // ── Frame analysis (client-side CV output) ──
 export interface FrameAnalysis {
   /** Noise-suppressed foreground ratio within the central ROI only (erosion-filtered). */
@@ -33,6 +51,8 @@ export interface FrameAnalysis {
    */
   roiLargestBlobDiagonalRatio: number;
   sharpnessScore: number;
+  /** Top-N foreground blobs with per-blob quality metrics (max 4, sorted by size desc). */
+  blobs: BlobInfo[];
   /** False during the startup convergence window — detection is blocked until the background model has settled. */
   isSettled: boolean;
   timestamp: number;
@@ -186,6 +206,12 @@ export interface SiteConfig {
    * If the item doesn't match any canonical name, the AI falls back to free-form.
    */
   canonicalNames?: string[];
+  /**
+   * Master sensitivity for the CV pipeline (0.0 = strict, 1.0 = sensitive).
+   * All detection thresholds are derived from this value via `computeThresholds()`.
+   * Default: 0.5.
+   */
+  sensitivity?: number;
 }
 
 /** Physical bin position relative to the kiosk monitor. */
@@ -219,6 +245,13 @@ export interface LocalModelCandidate {
   confidence: number;
 }
 
+// ── Texture analysis hint (LBP-based) ──
+export interface TextureHint {
+  uniformity: number;
+  edgeDensity: number;
+  suggestedSurface: "paper" | "plastic" | "metal" | "unknown";
+}
+
 // ── RGB material analysis hint ──
 export interface MaterialHint {
   dominantHue: number;
@@ -226,6 +259,8 @@ export interface MaterialHint {
   isMetallic: boolean;
   isTransparent: boolean;
   suggestedMaterial: string | null;
+  bboxAspectRatio: number;
+  texture?: TextureHint;
 }
 
 export type KioskAction =

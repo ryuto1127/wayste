@@ -12,23 +12,25 @@
 - YOLO World S (ONNX Runtime Web) — browser recycling detection, 23 classes
 - OpenAI GPT-5.4 (nano → mini escalation) — cloud fallback
 - Upstash Redis (REST) / Vercel Blob / Vercel Serverless + Cron
-- Zod v4 / Jest v30 (151 tests) / EN+JA i18n (125+ keys)
+- Zod v4 / Jest v30 (281 tests, 11 suites) / EN+JA i18n (125+ keys)
 
 ## Commands
     npm run dev      # Dev server (Turbopack)
     npm run build    # Production build
-    npm test         # 151 Jest tests, 6 suites
+    npm test         # 281 Jest tests, 11 suites
     npm run lint     # ESLint
 
 ## Architecture
-- `app/api/classify/route.ts` — Classification endpoint (GPT-5.4 nano→mini, overrides, Blob upload)
-- `lib/frame-analyzer.ts` — CV pipeline: 120x120 canvas, ~33fps, background subtraction, HSV skin detection, ROI blob check
+- `app/api/classify/route.ts` — Classification endpoint (GPT-5.4 nano→mini, overrides, Blob upload); supports single + batch (up to 4 items) formats
+- `lib/threshold-config.ts` — Master sensitivity (0–1) → all detection/inference thresholds; auto-calibration aware
+- `lib/frame-analyzer.ts` — CV pipeline: 120x120 canvas, ~33fps, background subtraction, auto-calibration, multi-blob detection (top 4 with per-blob sharpness/contrast/skin/saturation scoring)
 - `lib/yolo-inference.ts` — YOLO26m wrapper (Tier 1: confidence >= 0.65 → instant result, no server call); WebGPU primary, WASM fallback
 - `lib/yolo-world-inference.ts` — YOLO World S wrapper (Tier 2: fires when Tier 1 < 0.65, accepts >= 0.45)
-- `lib/inference-backend.ts` — 3-tier orchestration; parallel API call when Tier 1 < 0.30
+- `lib/rgb-material-analyzer.ts` — Post-YOLO RGB/texture analysis: color (HSV), transparency, metallicity, bbox aspect ratio, LBP texture → refines YOLO class names + feeds MaterialHint to GPT
+- `lib/inference-backend.ts` — 3-tier orchestration; sequential model startup with `overallReady` gate; parallel API call when Tier 1 < 0.30
 - `lib/waste-rules-core.ts` — Word-boundary pattern matching + override engine (browser-safe)
 - `lib/waste-rules.ts` — Site config loader + GPT prompt builder (5-min cache)
-- `components/KioskDisplay.tsx` — State machine: idle → object_detected → classifying → result → cooldown
+- `components/KioskDisplay.tsx` — State machine: loading → idle → object_detected → classifying → result → cooldown; multi-item blob-to-detection matching (up to 4), three-way routing (YOLO match → tier system, unmatched+object → API, unmatched+noise → discard)
 - `config/sites/*.json` — Per-site waste rules (5 presets: default, japan-office, office-hq, airport, pilot)
 - `middleware.ts` — Admin auth: HTTP Basic Auth → 7-day session cookie
 
@@ -48,7 +50,8 @@
 - "Wrong" button submits immediately without asking for the correct stream — asking kills feedback rate; corrections happen on the /review dashboard
 - YOLO inference is on-demand, not a continuous loop — lightweight CV runs at ~33fps, heavy inference fires only when object + quality gates pass
 - Result screen stays until the item disappears from view — no auto-dismiss timeout; users need time to read and give feedback
-- Threshold changes are high-risk: one constant change can break downstream behavior; always read both `frame-analyzer.ts` and `KioskDisplay.tsx` before tuning
+- All detection thresholds derive from `sensitivity` in site config via `lib/threshold-config.ts` — never hardcode individual thresholds; change sensitivity or the derivation formula instead
+- Auto-calibration during BG settling overrides ROI_FG_THRESHOLD with environment-specific noise floor; always test with both calibrated and uncalibrated paths
 
 ## Do NOT
 - Skip reading `node_modules/next/dist/docs/` before using Next.js 16 APIs — breaking changes from training data

@@ -29,12 +29,19 @@ const BACKEND = (typeof window !== "undefined"
 const INFERENCE_URL = process.env.NEXT_PUBLIC_INFERENCE_URL ?? "http://localhost:8000/detect";
 
 // ── Confidence thresholds for tiered fallback ──
-/** YOLO26m confidence below this triggers YOLO World fallback. */
-export const YOLO_FALLBACK_THRESHOLD = 0.65;
+// YOLO_FALLBACK_THRESHOLD and YOLO_WORLD_ACCEPT_THRESHOLD are now derived
+// from the master sensitivity parameter via computeThresholds() in
+// threshold-config.ts. These re-exports provide default-sensitivity values
+// for consumers that don't have access to site config (e.g. tests, scripts).
+import { computeThresholds } from "./threshold-config";
+export { computeThresholds, type ThresholdConfig, type Calibration } from "./threshold-config";
+const _defaults = computeThresholds(0.5);
+/** @deprecated Use computeThresholds(sensitivity).YOLO_FALLBACK_THRESHOLD */
+export const YOLO_FALLBACK_THRESHOLD: number = _defaults.YOLO_FALLBACK_THRESHOLD;
 /** YOLO26m confidence below this fires API in parallel with YOLO World. */
 export const YOLO_API_PARALLEL_THRESHOLD = 0.3;
-/** YOLO World confidence below this falls through to API. */
-export const YOLO_WORLD_ACCEPT_THRESHOLD = 0.45;
+/** @deprecated Use computeThresholds(sensitivity).YOLO_WORLD_ACCEPT_THRESHOLD */
+export const YOLO_WORLD_ACCEPT_THRESHOLD: number = _defaults.YOLO_WORLD_ACCEPT_THRESHOLD;
 
 // ── System status (observable by UI components) ──
 export type ModelStatus = "loading" | "ready" | "error";
@@ -44,6 +51,8 @@ export interface SystemStatus {
   yolo26m: ModelStatus;
   yoloWorld: ModelStatus;
   provider: ProviderType;
+  /** True when yolo26m is "ready" (yoloWorld "ready" preferred but not required). */
+  overallReady: boolean;
 }
 
 /** Current system status — read by SystemStatusBadge. */
@@ -51,12 +60,15 @@ let _systemStatus: SystemStatus = {
   yolo26m: "loading",
   yoloWorld: "loading",
   provider: "unknown",
+  overallReady: false,
 };
 /** Subscribers notified when status changes. */
 const _statusListeners: Set<(s: SystemStatus) => void> = new Set();
 
 function updateStatus(patch: Partial<SystemStatus>) {
   _systemStatus = { ..._systemStatus, ...patch };
+  // Derive overallReady: yolo26m must be ready; yoloWorld ready is preferred but not required
+  _systemStatus.overallReady = _systemStatus.yolo26m === "ready";
   for (const fn of _statusListeners) fn(_systemStatus);
 }
 
@@ -106,23 +118,25 @@ class OnnxBackend implements InferenceBackend {
   private yoloWorld: typeof import("./yolo-world-inference") | null = null;
 
   async init(): Promise<boolean> {
+    // ── Step 1: YOLO26m ──
     this.yolo = await import("./yolo-inference");
-
-    // Start YOLO World loading in parallel — don't await it here.
-    // By the time a user first needs Tier 2, the model may already be warm.
-    this.initYoloWorld().catch(() => {});
-
     const ok = await this.yolo.initYolo();
-    if (ok) {
-      await this.yolo.warmUpYolo();
-      updateStatus({
-        yolo26m: "ready",
-        provider: this.yolo.getYoloProvider() as ProviderType,
-      });
-    } else {
+    if (!ok) {
       updateStatus({ yolo26m: "error" });
+      return false;
     }
-    return ok;
+    await this.yolo.warmUpYolo();
+    updateStatus({
+      yolo26m: "ready",
+      provider: this.yolo.getYoloProvider() as ProviderType,
+    });
+
+    // ── Step 2: YOLO World (sequential — avoids GPU/memory contention) ──
+    const worldOk = await this.initYoloWorld();
+    if (!worldOk) {
+      console.warn("[inference] YOLO World unavailable — Tier 2 degraded");
+    }
+    return true;
   }
 
   isReady(): boolean {
@@ -272,7 +286,13 @@ export async function getInferenceBackend(): Promise<InferenceBackend> {
   return _backend;
 }
 
-/** Reset the cached backend (for testing). */
+/** Reset the cached backend and system status (for testing). */
 export function resetInferenceBackend(): void {
   _backend = null;
+  _systemStatus = {
+    yolo26m: "loading",
+    yoloWorld: "loading",
+    provider: "unknown",
+    overallReady: false,
+  };
 }

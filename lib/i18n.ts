@@ -138,6 +138,11 @@ const translations = {
     separationStep: "Step {n}",
     ifPresent: "if attached",
 
+    // Loading screen
+    loading_model_1: "Loading vision model (1/2)...",
+    loading_model_2: "Loading vision model (2/2)...",
+    loading_ready: "Ready",
+
     // Stream icons (used alongside color + text for triple encoding)
     streamIconRecycling: "♻️",
     streamIconCompost: "🍂",
@@ -279,6 +284,11 @@ const translations = {
     separateInto: "分解してください：",
     separationStep: "手順 {n}",
     ifPresent: "ついている場合",
+
+    // Loading screen
+    loading_model_1: "視覚モデルを読み込み中 (1/2)...",
+    loading_model_2: "視覚モデルを読み込み中 (2/2)...",
+    loading_ready: "準備完了",
 
     // Stream icons
     streamIconRecycling: "♻️",

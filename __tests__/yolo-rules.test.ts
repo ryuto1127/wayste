@@ -361,15 +361,18 @@ describe("Rules JSON integrity", () => {
 
 describe("Tiered fallback thresholds", () => {
   it("YOLO_FALLBACK_THRESHOLD, YOLO_API_PARALLEL_THRESHOLD, YOLO_WORLD_ACCEPT_THRESHOLD are correctly exported", () => {
+    /* eslint-disable @typescript-eslint/no-require-imports */
     const {
       YOLO_FALLBACK_THRESHOLD,
       YOLO_API_PARALLEL_THRESHOLD,
       YOLO_WORLD_ACCEPT_THRESHOLD,
     } = require("@/lib/inference-backend");
+    /* eslint-enable @typescript-eslint/no-require-imports */
 
-    expect(YOLO_FALLBACK_THRESHOLD).toBe(0.65);
+    // Default sensitivity (0.5) yields these values
+    expect(YOLO_FALLBACK_THRESHOLD).toBeCloseTo(0.65, 4);
     expect(YOLO_API_PARALLEL_THRESHOLD).toBe(0.3);
-    expect(YOLO_WORLD_ACCEPT_THRESHOLD).toBe(0.45);
+    expect(YOLO_WORLD_ACCEPT_THRESHOLD).toBeCloseTo(0.45, 4);
 
     // Tier ordering: API parallel < World accept < YOLO fallback
     expect(YOLO_API_PARALLEL_THRESHOLD).toBeLessThan(YOLO_WORLD_ACCEPT_THRESHOLD);

@@ -3,6 +3,7 @@
   "siteName": "wayste",
   "defaultLocale": "en",
   "reviewThreshold": 0.55,
+  "sensitivity": 0.5,
   "streams": [
     {
       "id": "recycling",

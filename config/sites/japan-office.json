@@ -3,6 +3,7 @@
   "siteName": "オフィス（日本）",
   "defaultLocale": "ja",
   "reviewThreshold": 0.55,
+  "sensitivity": 0.5,
   "streams": [
     { "id": "burnable", "label": "可燃ゴミ", "color": "#EF4444", "description": "生ゴミ、汚れた紙、ティッシュ、使い捨て紙コップ、割り箸、食品包装フィルム" },
     { "id": "non-burnable", "label": "不燃ゴミ", "color": "#6B7280", "description": "金属製品、ガラス製品、陶磁器、ゴム製品、革製品" },

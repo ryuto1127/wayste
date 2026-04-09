@@ -4,6 +4,7 @@
   "defaultLocale": "ja",
   "mirrorCamera": false,
   "reviewThreshold": 0.55,
+  "sensitivity": 0.5,
   "streams": [
     { "id": "burnable", "label": "可燃ゴミ", "color": "#EF4444", "description": "生ゴミ、汚れた紙、ティッシュ、使い捨て紙コップ、割り箸、食品包装フィルム、ラップ", "position": "far-left" },
     { "id": "recyclable", "label": "資源ゴミ", "color": "#3B82F6", "description": "ペットボトル（洗浄済み）、アルミ缶、スチール缶、びん、新聞紙、段ボール、雑誌", "position": "left" },

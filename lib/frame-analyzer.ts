@@ -6,7 +6,29 @@
  * square canvas) for performance. No frames are sent over the network.
  */
 
-import type { FrameAnalysis, ImageQuality } from "./types";
+import type { FrameAnalysis, ImageQuality, BlobInfo } from "./types";
+import type { Calibration } from "./threshold-config";
+
+// ── Multi-blob quality thresholds (exported for tuning + tests) ──
+/** Minimum Laplacian variance for a blob to be considered a real object. */
+export const BLOB_MIN_SHARPNESS = 300;
+/** Minimum mean |gray - bg| contrast for a blob to be considered a real object. */
+export const BLOB_MIN_CONTRAST = 20;
+/** Maximum skin-tone pixel ratio — above this the blob is likely a hand/arm. */
+export const BLOB_MAX_SKIN_RATIO = 0.6;
+/** Minimum blob size as fraction of ROI pixels to be collected. */
+const BLOB_MIN_SIZE_RATIO = 0.005; // 0.5% of ROI
+/** Maximum blobs to return per frame. */
+const MAX_BLOBS = 4;
+
+/**
+ * Returns true when a blob is likely a real physical object (not shadow, stain, or hand).
+ */
+export function blobIsObject(blob: BlobInfo): boolean {
+  return blob.sharpness > BLOB_MIN_SHARPNESS &&
+    blob.contrastScore > BLOB_MIN_CONTRAST &&
+    blob.skinRatio < BLOB_MAX_SKIN_RATIO;
+}
 
 // ── Analysis resolution (square — matches YOLO's short-side center crop) ──
 // The analysis canvas draws from the same center square as YOLO (short-side
@@ -34,14 +56,6 @@ const BG_INIT_FRAMES = 30; // ~4.5s of init at 7fps
 const BG_SETTLE_FRAMES = 45; // detection blocked until this many frames
 const FG_PIXEL_THRESHOLD = 25; // per-pixel diff threshold for foreground classification
 
-// ── Thresholds (exported for state machine) ──
-/**
- * Total ROI foreground threshold (erosion-filtered).
- * ≥6% of the central ROI must be occupied by noise-suppressed foreground.
- * ~288 pixels after the ≥2-neighbor erosion pass (4800 × 0.06).
- * Paired with ROI_BLOB_THRESHOLD in KioskDisplay for coherence gating.
- */
-export const ROI_FG_THRESHOLD = 0.03;
 export const MOTION_RATIO_THRESHOLD = 0.12; // kept for external consumers
 
 export class FrameAnalyzer {
@@ -52,6 +66,15 @@ export class FrameAnalyzer {
   private frameCount = 0;
   /** Mean luminance of the previous frame (0-255), used for adaptive BG rate. */
   private prevMeanLuminance = 128;
+
+  // ── Auto-calibration (collected during BG_SETTLE_FRAMES) ──
+  private calibrationSamples: { fg: number; blob: number }[] = [];
+  private calibration: Calibration | null = null;
+
+  /** Returns auto-calibration data, or null if settling is not yet complete. */
+  getCalibration(): Calibration | null {
+    return this.calibration;
+  }
 
   /**
    * Controls how fast the background model adapts on this frame.
@@ -133,6 +156,7 @@ export class FrameAnalyzer {
         roiLargestBlobRatio: 0,
         roiLargestBlobDiagonalRatio: 0,
         sharpnessScore: 0,
+        blobs: [],
         isSettled: false,
         timestamp: Date.now(),
       };
@@ -170,12 +194,14 @@ export class FrameAnalyzer {
     }
     const roiForegroundRatio = roiFgCount / ROI_PIXEL_COUNT;
 
-    // ── Largest connected blob in eroded ROI mask ──
-    let roiLargestBlobPixels = 0;
-    let largestBlobMinX = ROI_W;
-    let largestBlobMaxX = 0;
-    let largestBlobMinY = ROI_H;
-    let largestBlobMaxY = 0;
+    // ── Connected-component scan: collect ALL blobs ──
+    const minBlobPixels = Math.max(1, Math.floor(ROI_PIXEL_COUNT * BLOB_MIN_SIZE_RATIO));
+    interface RawBlob {
+      size: number;
+      minX: number; maxX: number; minY: number; maxY: number;
+      pixels: number[]; // indices into ROI space
+    }
+    const allBlobs: RawBlob[] = [];
     const blobVisited = new Uint8Array(ROI_PIXEL_COUNT);
     for (let ry = 0; ry < ROI_H; ry++) {
       for (let rx = 0; rx < ROI_W; rx++) {
@@ -186,11 +212,13 @@ export class FrameAnalyzer {
         let blobMaxX = 0;
         let blobMinY = ROI_H;
         let blobMaxY = 0;
+        const blobPixels: number[] = [];
         const stack = [startIdx];
         blobVisited[startIdx] = 1;
         while (stack.length > 0) {
           const idx = stack.pop()!;
           size++;
+          blobPixels.push(idx);
           const cx = idx % ROI_W;
           const cy = (idx / ROI_W) | 0;
           if (cx < blobMinX) blobMinX = cx;
@@ -214,16 +242,23 @@ export class FrameAnalyzer {
             if (erodedMask[n] && !blobVisited[n]) { blobVisited[n] = 1; stack.push(n); }
           }
         }
-        if (size > roiLargestBlobPixels) {
-          roiLargestBlobPixels = size;
-          largestBlobMinX = blobMinX;
-          largestBlobMaxX = blobMaxX;
-          largestBlobMinY = blobMinY;
-          largestBlobMaxY = blobMaxY;
+        if (size >= minBlobPixels) {
+          allBlobs.push({ size, minX: blobMinX, maxX: blobMaxX, minY: blobMinY, maxY: blobMaxY, pixels: blobPixels });
         }
       }
     }
+
+    // Sort by size descending, keep top MAX_BLOBS
+    allBlobs.sort((a, b) => b.size - a.size);
+    const topBlobs = allBlobs.slice(0, MAX_BLOBS);
+
+    // Backward-compat: largest blob stats
+    const roiLargestBlobPixels = topBlobs.length > 0 ? topBlobs[0].size : 0;
     const roiLargestBlobRatio = roiLargestBlobPixels / ROI_PIXEL_COUNT;
+    const largestBlobMinX = topBlobs.length > 0 ? topBlobs[0].minX : ROI_W;
+    const largestBlobMaxX = topBlobs.length > 0 ? topBlobs[0].maxX : 0;
+    const largestBlobMinY = topBlobs.length > 0 ? topBlobs[0].minY : ROI_H;
+    const largestBlobMaxY = topBlobs.length > 0 ? topBlobs[0].maxY : 0;
 
     const largestBlobDiagonal = Math.sqrt(
       (largestBlobMaxX - largestBlobMinX) ** 2 +
@@ -233,11 +268,93 @@ export class FrameAnalyzer {
     const roiLargestBlobDiagonalRatio =
       roiDiagonal > 0 ? largestBlobDiagonal / roiDiagonal : 0;
 
-    // ── Sharpness (Laplacian variance, foreground pixels only) ──
-    // Restricting to erodedMask prevents textured backgrounds from
-    // inflating the score and ensures the object itself drives quality.
-    let lapSum = 0;
-    let lapN = 0;
+    // ── Compute per-blob quality metrics ──
+    const blobInfos: BlobInfo[] = topBlobs.map((blob) => {
+      // Sharpness: Laplacian variance restricted to this blob's pixels
+      let lapSum = 0;
+      let lapN = 0;
+      for (const idx of blob.pixels) {
+        const bx = idx % ROI_W;
+        const by = (idx / ROI_W) | 0;
+        if (bx < 1 || bx >= ROI_W - 1 || by < 1 || by >= ROI_H - 1) continue;
+        const lap =
+          4 * roiGray[idx] -
+          roiGray[idx - 1] -
+          roiGray[idx + 1] -
+          roiGray[idx - ROI_W] -
+          roiGray[idx + ROI_W];
+        lapSum += lap * lap;
+        lapN++;
+      }
+      const sharpness = lapN >= 10 ? lapSum / lapN : 0;
+
+      // Contrast: mean |gray - bg| over blob pixels
+      let contrastSum = 0;
+      for (const idx of blob.pixels) {
+        contrastSum += Math.abs(roiGray[idx] - bg[idx]);
+      }
+      const contrastScore = blob.size > 0 ? contrastSum / blob.size : 0;
+
+      // Skin ratio + saturation: compute from original RGB pixel data
+      let skinCount = 0;
+      let satSum = 0;
+      for (const idx of blob.pixels) {
+        const ry = (idx / ROI_W) | 0;
+        const rx = idx % ROI_W;
+        const globalX = ROI_X0 + rx;
+        const globalY = ROI_Y0 + ry;
+        const o = (globalY * AW + globalX) * 4;
+        const r = px[o];
+        const g = px[o + 1];
+        const b2 = px[o + 2];
+        // Inline RGB→HSV
+        const rn = r / 255;
+        const gn = g / 255;
+        const bn = b2 / 255;
+        const max = Math.max(rn, gn, bn);
+        const min = Math.min(rn, gn, bn);
+        const d = max - min;
+        let h = 0;
+        if (d !== 0) {
+          if (max === rn) h = ((gn - bn) / d) % 6;
+          else if (max === gn) h = (bn - rn) / d + 2;
+          else h = (rn - gn) / d + 4;
+          h = Math.round(h * 60);
+          if (h < 0) h += 360;
+        }
+        const s = max === 0 ? 0 : d / max;
+        const v = max;
+        satSum += s;
+        // Skin-tone HSV range: H 0-50, S 0.15-0.75, V 0.2-0.85
+        if (h >= 0 && h <= 50 && s >= 0.15 && s <= 0.75 && v >= 0.2 && v <= 0.85) {
+          skinCount++;
+        }
+      }
+      const skinRatio = blob.size > 0 ? skinCount / blob.size : 0;
+      const saturation = blob.size > 0 ? satSum / blob.size : 0;
+
+      // Normalized bbox within ROI (0–1)
+      const bw = blob.maxX - blob.minX + 1;
+      const bh = blob.maxY - blob.minY + 1;
+      const cx = (blob.minX + bw / 2) / ROI_W;
+      const cy = (blob.minY + bh / 2) / ROI_H;
+      const nw = bw / ROI_W;
+      const nh = bh / ROI_H;
+
+      return {
+        bboxNorm: [cx, cy, nw, nh] as [number, number, number, number],
+        pixelCount: blob.size,
+        ratio: blob.size / ROI_PIXEL_COUNT,
+        sharpness,
+        contrastScore,
+        skinRatio,
+        saturation,
+      };
+    });
+
+    // ── Whole-frame sharpness (Laplacian variance, all foreground pixels) ──
+    let globalLapSum = 0;
+    let globalLapN = 0;
     for (let ry = 1; ry < ROI_H - 1; ry++) {
       for (let rx = 1; rx < ROI_W - 1; rx++) {
         const idx = ry * ROI_W + rx;
@@ -248,12 +365,11 @@ export class FrameAnalyzer {
           roiGray[idx + 1] -
           roiGray[idx - ROI_W] -
           roiGray[idx + ROI_W];
-        lapSum += lap * lap;
-        lapN++;
+        globalLapSum += lap * lap;
+        globalLapN++;
       }
     }
-    // Guard: too few foreground pixels → unstable variance; report 0.
-    const sharpnessScore = lapN >= 50 ? lapSum / lapN : 0;
+    const sharpnessScore = globalLapN >= 50 ? globalLapSum / globalLapN : 0;
 
     // ── Update background model (ROI only) ──
     const lumDelta = Math.abs(meanLuminance - this.prevMeanLuminance);
@@ -277,12 +393,39 @@ export class FrameAnalyzer {
 
     this.prevGray = new Uint8Array(roiGray);
 
+    // ── Auto-calibration: collect noise-floor samples during settling ──
+    if (this.frameCount <= BG_SETTLE_FRAMES && !this.calibration) {
+      // Skip the first BG_INIT_FRAMES where the BG model is still bootstrapping
+      if (this.frameCount > BG_INIT_FRAMES) {
+        this.calibrationSamples.push({
+          fg: roiForegroundRatio,
+          blob: roiLargestBlobRatio,
+        });
+      }
+
+      // Derive calibration once settling is complete
+      if (this.frameCount === BG_SETTLE_FRAMES && this.calibrationSamples.length > 0) {
+        const n = this.calibrationSamples.length;
+        const fgValues = this.calibrationSamples.map((s) => s.fg);
+        const blobValues = this.calibrationSamples.map((s) => s.blob);
+
+        const noiseFgMean = fgValues.reduce((a, b) => a + b, 0) / n;
+        const noiseFgStd = Math.sqrt(
+          fgValues.reduce((sum, v) => sum + (v - noiseFgMean) ** 2, 0) / n,
+        );
+        const noiseBlobMean = blobValues.reduce((a, b) => a + b, 0) / n;
+
+        this.calibration = { noiseFgMean, noiseFgStd, noiseBlobMean };
+        this.calibrationSamples = []; // free memory
+      }
+    }
+
     return {
       roiForegroundRatio,
       roiLargestBlobRatio,
       roiLargestBlobDiagonalRatio,
       sharpnessScore,
-      /** False during the first BG_SETTLE_FRAMES — detection is blocked until the background model has converged. */
+      blobs: blobInfos,
       isSettled: this.frameCount >= BG_SETTLE_FRAMES,
       timestamp: Date.now(),
     };
@@ -294,6 +437,8 @@ export class FrameAnalyzer {
     this.prevGray = null;
     this.frameCount = 0;
     this.prevMeanLuminance = 128;
+    this.calibrationSamples = [];
+    this.calibration = null;
   }
 }
 

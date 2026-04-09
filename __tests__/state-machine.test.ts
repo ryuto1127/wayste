@@ -6,7 +6,9 @@
  */
 
 import type { PipelineState, FrameAnalysis } from "@/lib/types";
-import { ROI_FG_THRESHOLD } from "@/lib/frame-analyzer";
+import { computeThresholds } from "@/lib/threshold-config";
+
+const { ROI_FG_THRESHOLD } = computeThresholds(0.5);
 
 // Constants matching KioskDisplay.tsx
 const FG_PERSIST_FRAMES = 2;
@@ -21,8 +23,8 @@ function makeAnalysis(overrides: Partial<FrameAnalysis> = {}): FrameAnalysis {
     roiForegroundRatio: 0.15,
     roiLargestBlobRatio: 0.1,
     roiLargestBlobDiagonalRatio: 0,
-    skinRatio: 0.1,
     sharpnessScore: 2000,
+    blobs: [],
     isSettled: true,
     timestamp: Date.now(),
     ...overrides,
@@ -215,7 +217,7 @@ describe("State machine", () => {
     sim.objectDetectedFrames = 0;
 
     // High skin ratio should NOT block classification — user always holds the item
-    const handHeldFrame = makeAnalysis({ sharpnessScore: 2000, skinRatio: 0.8 });
+    const handHeldFrame = makeAnalysis({ sharpnessScore: 2000 });
 
     for (let i = 0; i < SHARP_FRAMES_REQUIRED; i++) {
       sim.tick(handHeldFrame);

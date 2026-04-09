@@ -18,6 +18,7 @@ export default function SystemStatusBadge({ thermalWarning }: SystemStatusBadgeP
     yolo26m: "loading",
     yoloWorld: "loading",
     provider: "unknown",
+    overallReady: false,
   });
 
   useEffect(() => {

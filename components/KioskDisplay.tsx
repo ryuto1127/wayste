@@ -16,16 +16,20 @@ import { cacheResult } from "@/lib/offline-cache";
 import {
   FrameAnalyzer,
   imageQualityBand,
-  ROI_FG_THRESHOLD,
+  blobIsObject,
 } from "@/lib/frame-analyzer";
+import type { BlobInfo } from "@/lib/types";
 import {
   getInferenceBackend,
+  subscribeSystemStatus,
   type InferenceBackend,
-  YOLO_FALLBACK_THRESHOLD,
+  type SystemStatus,
   YOLO_API_PARALLEL_THRESHOLD,
-  YOLO_WORLD_ACCEPT_THRESHOLD,
 } from "@/lib/inference-backend";
+import { computeThresholds, type ThresholdConfig } from "@/lib/threshold-config";
 import { loadYoloRules, loadYoloWorldRules, resolveYoloDetection, resolveYoloWorldDetection, isYoloClassNotWaste } from "@/lib/yolo-rules";
+import { analyzeMaterial, refineClassName } from "@/lib/rgb-material-analyzer";
+import type { MaterialHint } from "@/lib/types";
 // kioskAuthHeaders replaced by session token (server-generated, HMAC-signed)
 import CameraFeed, { type CameraFeedHandle } from "./CameraFeed";
 import IdleScreen from "./IdleScreen";
@@ -36,9 +40,7 @@ import SystemStatusBadge from "./SystemStatusBadge";
 // ── Timing constants ──
 const ANALYSIS_INTERVAL_MS = 30;  // ~33 fps local CV
 const COOLDOWN_MS = 1500; // pause before re-scanning (BG model recovery)
-const OBJECT_GONE_FRAMES = 3;     // frames below ROI threshold before "gone" (~90ms at 33fps)
 const RESULT_GONE_FRAMES = 5;     // result state exit window (~150ms at 33fps) — balanced against flicker risk
-const FG_PERSIST_FRAMES = 3;      // consecutive ROI-blob frames required to leave idle (~90ms at 33fps)
 /**
  * Consecutive frames in idle with both foreground presence AND acceptable
  * image quality (not "poor") required to trigger classification.
@@ -74,17 +76,6 @@ const BG_RATE_FROZEN = 0;
 // 1280×720), then applies this inset → detection ROI = center 80% (576×576).
 const DETECTION_ROI_MARGIN = 0.10;
 
-// ── Entry coherence gate ──
-const ROI_BLOB_THRESHOLD = 0.01;
-
-// ── Result-state exit gate ──
-// Slightly below entry gate so distant/small items don't prematurely dismiss,
-// but high enough that hand-exit shadows and residual noise don't stall the transition.
-const RESULT_FG_THRESHOLD = 0.022;
-const RESULT_BLOB_THRESHOLD = 0.008;
-
-// ── Elongated-object gate ──
-const ROI_BLOB_DIAGONAL_THRESHOLD = 0.35;
 const ROI_BLOB_DIAGONAL_MIN_AREA = 0.01;
 
 const YOLO_MODEL_SIZE = 640;
@@ -119,6 +110,10 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
   const analyzerRef = useRef<FrameAnalyzer | null>(null);
   /** Current session token — refreshed periodically. */
   const sessionTokenRef = useRef<string>(initialToken ?? "");
+
+  // ── Model loading state ──
+  const [overallReady, setOverallReady] = useState(false);
+  const [loadingMessage, setLoadingMessage] = useState<"loading_model_1" | "loading_model_2" | "loading_ready">("loading_model_1");
 
   // ── Pipeline state ──
   const stateRef = useRef<PipelineState>("idle");
@@ -178,6 +173,8 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
   const lastAnalysisRef = useRef<FrameAnalysis | null>(null);
   const lastCachedRef = useRef("");
   const errorSetAtRef = useRef(0);
+  /** Whether auto-calibration has been applied to thresholds. */
+  const calibrationAppliedRef = useRef(false);
   const errorRef = useRef<string | null>(null);
   /** Mirror of `locale` state as a ref for stale-closure-safe reads inside the CV interval. */
   const localeRef = useRef<Locale>(defaultLocale ?? "en");
@@ -186,6 +183,8 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
   const siteConfigRef = useRef<SiteConfig | null>(null);
   /** Inference backend (ONNX or HTTP — resolved at init). */
   const inferenceRef = useRef<InferenceBackend | null>(null);
+  /** Derived thresholds — recomputed when calibration becomes available. */
+  const thresholdsRef = useRef<ThresholdConfig>(computeThresholds(0.5));
 
   // ── Thermal monitoring ──
   // Track CV analysis duration to detect M1 MBA thermal throttling.
@@ -207,6 +206,20 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
   // Prevent SSR — this component requires browser APIs (camera, OffscreenCanvas)
   useEffect(() => setMounted(true), []);
 
+  // ── Subscribe to model loading status ──
+  useEffect(() => {
+    return subscribeSystemStatus((s: SystemStatus) => {
+      setOverallReady(s.overallReady);
+      if (s.yolo26m === "loading") {
+        setLoadingMessage("loading_model_1");
+      } else if (s.yolo26m === "ready" && s.yoloWorld === "loading") {
+        setLoadingMessage("loading_model_2");
+      } else if (s.overallReady) {
+        setLoadingMessage("loading_ready");
+      }
+    });
+  }, []);
+
   // ── Initialize inference backend + rules + site config (client-side) ──
   useEffect(() => {
     Promise.all([
@@ -222,6 +235,8 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
         .then((data: SiteConfig) => {
           siteConfigRef.current = data;
           if (data.streams) setSiteStreams(data.streams);
+          // Initialize thresholds from site sensitivity (calibration applied later)
+          thresholdsRef.current = computeThresholds(data.sensitivity ?? 0.5);
         })
         .catch(() => {}),
     ]);
@@ -280,14 +295,14 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
 
   // ── API call (with timeout + 429 retry) ──
   const classify = useCallback(
-    async (frame: string, meta: ClassifyMeta, yoloDetections?: YoloDetectionLog[]): Promise<ClassificationResponse & { requestId?: string }> => {
+    async (frame: string, meta: ClassifyMeta, yoloDetections?: YoloDetectionLog[], materialHint?: MaterialHint): Promise<ClassificationResponse & { requestId?: string }> => {
       const doFetch = async (): Promise<ClassificationResponse & { requestId?: string }> => {
         const fetchStartMs = Date.now();
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
 
         try {
-          const reqBody = { image: frame, meta, locale, yoloDetections };
+          const reqBody = { image: frame, meta, locale, yoloDetections, materialHint };
           const res = await fetch("/api/classify", {
             method: "POST",
             headers: { "Content-Type": "application/json", ...(sessionTokenRef.current ? { "x-session-token": sessionTokenRef.current } : {}) },
@@ -424,25 +439,37 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
 
       if (!analysis.isSettled) return;
 
+      // Recompute thresholds once when auto-calibration completes
+      if (!calibrationAppliedRef.current) {
+        const cal = analyzer.getCalibration();
+        if (cal) {
+          const sensitivity = siteConfigRef.current?.sensitivity ?? 0.5;
+          thresholdsRef.current = computeThresholds(sensitivity, cal);
+          calibrationAppliedRef.current = true;
+        }
+      }
+
+      const th = thresholdsRef.current;
+
       const elongated =
-        analysis.roiLargestBlobDiagonalRatio > ROI_BLOB_DIAGONAL_THRESHOLD &&
+        analysis.roiLargestBlobDiagonalRatio > th.ROI_BLOB_DIAGONAL_THRESHOLD &&
         analysis.roiLargestBlobRatio > ROI_BLOB_DIAGONAL_MIN_AREA;
       const roiHasFg =
-        (analysis.roiForegroundRatio >= ROI_FG_THRESHOLD &&
-         analysis.roiLargestBlobRatio >= ROI_BLOB_THRESHOLD) ||
+        (analysis.roiForegroundRatio >= th.ROI_FG_THRESHOLD &&
+         analysis.roiLargestBlobRatio >= th.ROI_BLOB_THRESHOLD) ||
         elongated;
       // Result-state exit uses lower thresholds: a small/distant item still
       // registers as "present" so the result stays on screen.
       const resultHasFg =
-        (analysis.roiForegroundRatio >= RESULT_FG_THRESHOLD &&
-         analysis.roiLargestBlobRatio >= RESULT_BLOB_THRESHOLD) ||
+        (analysis.roiForegroundRatio >= th.RESULT_FG_THRESHOLD &&
+         analysis.roiLargestBlobRatio >= th.RESULT_BLOB_THRESHOLD) ||
         elongated;
 
       // ── Pending-item queue ──
       if (state !== "idle") {
         if (roiHasFg) {
           fgPersistRef.current++;
-          if (fgPersistRef.current >= FG_PERSIST_FRAMES) {
+          if (fgPersistRef.current >= th.FG_PERSIST_FRAMES) {
             pendingItemRef.current = true;
             fgPersistRef.current = 0;
           }
@@ -480,7 +507,7 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
       if (state === "object_detected") {
         if (!roiHasFg) {
           goneCountRef.current++;
-          if (goneCountRef.current >= OBJECT_GONE_FRAMES) {
+          if (goneCountRef.current >= th.OBJECT_GONE_FRAMES) {
             objectDetectedFrameRef.current = 0;
             transition("idle");
           }
@@ -660,7 +687,8 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
 
       const apiController = new AbortController();
       let yoloDetectionLogs: YoloDetectionLog[] | undefined;
-      const apiPromise = () => classifyViaApiAsync(video, analysis, apiController.signal, yoloDetectionLogs);
+      let materialHintForApi: MaterialHint | undefined;
+      const apiPromise = () => classifyViaApiAsync(video, analysis, apiController.signal, yoloDetectionLogs, materialHintForApi);
 
       if (!yoloReady || !backend) {
         // No YOLO at all — straight to API
@@ -675,6 +703,7 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
 
       // ── Tier 1: On-demand YOLO detection ──
       const yoloStart = Date.now();
+      const blobs = analysis.blobs;
       backend.detect(video)
         .then((detections) => {
           const yoloMs = Date.now() - yoloStart;
@@ -684,49 +713,73 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
           }
 
           // Filter out not_waste classes (person, furniture, vehicles, etc.)
-          // Hands holding items are expected in a kiosk — they must not block waste detection.
           const wasteDetections = detections.filter(d => !isYoloClassNotWaste(d.className));
 
-          if (wasteDetections.length > 0) {
-            const best = wasteDetections[0];
+          // Compute material hint from best waste detection (or any detection)
+          const hintSource = wasteDetections[0] ?? detections[0];
+          if (hintSource) {
+            materialHintForApi = analyzeMaterial(video, hintSource.bbox);
+          }
 
-            // ── Multi-item: resolve up to 2 distinct high-confidence detections ──
-            if (best.confidence >= YOLO_FALLBACK_THRESHOLD) {
-              // Collect distinct class results (max 2)
-              const seen = new Set<string>();
-              const resolvedResults: ClassificationResponse[] = [];
-              for (const det of wasteDetections) {
-                if (det.confidence < YOLO_FALLBACK_THRESHOLD) break;
-                if (seen.has(det.className)) continue;
-                seen.add(det.className);
-                const r = resolveYoloDetection(det, siteConfigRef.current!);
-                if (r) resolvedResults.push(r);
-                if (resolvedResults.length >= 2) break;
-              }
+          // ── Blob-to-detection matching ──
+          // Match each YOLO detection to nearest blob by center-point distance.
+          // Then apply three-way routing for each blob.
+          const matchedBlobs = matchBlobsToDetections(blobs, wasteDetections);
 
-              if (resolvedResults.length > 0) {
-                console.log(`[tier1] YOLO HIT: ${resolvedResults.map((r) => r.itemName).join(" + ")} in ${yoloMs}ms`);
-                logYoloOnlyResult(video, resolvedResults[0], detections, yoloMs, analysis);
-                handleMultiClassificationResults(resolvedResults, resolvedResults.map(() => undefined));
-                return;
+          // Collect resolved results from matched + unmatched blobs
+          const resolvedResults: ClassificationResponse[] = [];
+          const unresolvedForApi: BlobInfo[] = [];
+
+          for (const { blob, detection } of matchedBlobs) {
+            if (detection) {
+              // Blob HAS a YOLO match
+              if (detection.confidence >= thresholdsRef.current.YOLO_FALLBACK_THRESHOLD) {
+                // Tier 1: high confidence → instant resolve via rules
+                const r = resolveYoloDetection(detection, siteConfigRef.current!);
+                if (r) {
+                  const detHint = analyzeMaterial(video, detection.bbox);
+                  r.itemName = refineClassName(r.itemName, detHint);
+                  resolvedResults.push(r);
+                  continue;
+                }
               }
+              // Lower confidence — try YOLO World or API
+              unresolvedForApi.push(blob);
+            } else {
+              // No YOLO match — check if it's a real object
+              if (blobIsObject(blob)) {
+                unresolvedForApi.push(blob);
+              }
+              // else: discard as noise (shadow, stain, hand fragment)
+            }
+            if (resolvedResults.length + unresolvedForApi.length >= 4) break;
+          }
+
+          // If we have high-confidence results and nothing unresolved, deliver instantly
+          if (resolvedResults.length > 0 && unresolvedForApi.length === 0) {
+            console.log(`[tier1] YOLO HIT: ${resolvedResults.map((r) => r.itemName).join(" + ")} in ${yoloMs}ms`);
+            logYoloOnlyResult(video, resolvedResults[0], detections, yoloMs, analysis);
+            handleMultiClassificationResults(resolvedResults, resolvedResults.map(() => undefined));
+            return;
+          }
+
+          // ── Some items need further resolution ──
+          const best = wasteDetections[0] ?? null;
+          if (best || unresolvedForApi.length > 0) {
+            // Show optimistic UI for already-resolved items
+            if (resolvedResults.length > 0) {
+              setStableResults(resolvedResults);
+              resultEnterTimeRef.current = Date.now();
             }
 
-            // ── Low-to-mid confidence or no rule: try YOLO World (Tier 2) ──
-            // Show optimistic UI immediately
-            console.log(`[tier1] YOLO conf=${(best.confidence * 100).toFixed(1)}% — escalating to YOLO World`);
-            const optimisticResult = buildOptimisticResult(best.className, best.confidence);
-            setStableResults([optimisticResult]);
-            resultEnterTimeRef.current = Date.now();
-
-            // If very low confidence, fire API in parallel with YOLO World
-            const fireApiInParallel = best.confidence < YOLO_API_PARALLEL_THRESHOLD;
+            const fireApiInParallel = !best || best.confidence < YOLO_API_PARALLEL_THRESHOLD;
+            console.log(`[tier1] ${resolvedResults.length} resolved, ${unresolvedForApi.length} unresolved — escalating`);
 
             escalateToYoloWorld(
               video, backend, best, apiPromise, apiController, fireApiInParallel, detections, yoloMs, analysis,
             );
           } else {
-            // ── Only non-waste (person, etc.) or no detections — escalate to YOLO World ──
+            // No waste detections and no qualified blobs — escalate
             if (detections.length > 0) {
               console.log(`[tier1] Only non-waste detections (${detections.map(d => d.className).join(", ")}) in ${yoloMs}ms — escalating to YOLO World`);
             } else {
@@ -746,6 +799,46 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
             })
             .catch(handleClassificationError);
         });
+    }
+
+    /** Match blobs to YOLO detections by center-point proximity. */
+    function matchBlobsToDetections(
+      blobs: BlobInfo[],
+      detections: YoloDetection[],
+    ): { blob: BlobInfo; detection: YoloDetection | null }[] {
+      const usedDetections = new Set<number>();
+      const result: { blob: BlobInfo; detection: YoloDetection | null }[] = [];
+
+      for (const blob of blobs) {
+        const [bcx, bcy] = blob.bboxNorm;
+        let bestDist = Infinity;
+        let bestIdx = -1;
+
+        for (let i = 0; i < detections.length; i++) {
+          if (usedDetections.has(i)) continue;
+          const d = detections[i];
+          // Detection bbox is [x, y, w, h] in pixel coords — normalize to 0-1
+          const dcx = (d.bbox[0] + d.bbox[2] / 2) / YOLO_MODEL_SIZE;
+          const dcy = (d.bbox[1] + d.bbox[3] / 2) / YOLO_MODEL_SIZE;
+          const dist = Math.sqrt((bcx - dcx) ** 2 + (bcy - dcy) ** 2);
+          if (dist < bestDist) {
+            bestDist = dist;
+            bestIdx = i;
+          }
+        }
+
+        // Match if distance is reasonable (< 0.3 normalized)
+        if (bestIdx >= 0 && bestDist < 0.3) {
+          usedDetections.add(bestIdx);
+          result.push({ blob, detection: detections[bestIdx] });
+        } else {
+          result.push({ blob, detection: null });
+        }
+
+        if (result.length >= 4) break;
+      }
+
+      return result;
     }
 
     /** Tier 2: YOLO World fallback (on-demand). */
@@ -794,7 +887,7 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
           if (worldDetections.length > 0) {
             const worldBest = worldDetections[0];
 
-            if (worldBest.confidence >= YOLO_WORLD_ACCEPT_THRESHOLD) {
+            if (worldBest.confidence >= thresholdsRef.current.YOLO_WORLD_ACCEPT_THRESHOLD) {
               const result = resolveYoloWorldDetection(worldBest, siteConfigRef.current!);
               if (result) {
                 console.log(`[tier2] YOLO World HIT: ${worldBest.className} (${(worldBest.confidence * 100).toFixed(1)}%) → ${result.wasteStream} in ${worldMs}ms`);
@@ -865,7 +958,7 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
               seen.add(det.className);
               const r = resolveYoloDetection(det, siteConfigRef.current!);
               if (r) resolvedResults.push(r);
-              if (resolvedResults.length >= 2) break;
+              if (resolvedResults.length >= 4) break;
             }
             if (resolvedResults.length > 0) {
               console.log(`[offline] YOLO HIT: ${resolvedResults.map((r) => r.itemName).join(" + ")}`);
@@ -1045,6 +1138,7 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
       analysis: FrameAnalysis,
       signal?: AbortSignal,
       yoloDetections?: YoloDetectionLog[],
+      materialHint?: MaterialHint,
     ): Promise<{ result: (ClassificationResponse & { requestId?: string }) | null; requestId?: string }> {
       // Send the same center short-side square that YOLO sees to the API.
       const procStart = Date.now();
@@ -1093,7 +1187,7 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
 
       if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
 
-      const result = await classify(frame, meta, yoloDetections);
+      const result = await classify(frame, meta, yoloDetections, materialHint);
       return { result, requestId: result.requestId };
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1102,6 +1196,26 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
 
   // ── Derive which full-screen UI to show ──
   if (!mounted) return null;
+
+  // Show loading screen until all models are warm
+  if (!overallReady) {
+    return (
+      <div className="h-screen w-screen bg-neutral-950 flex flex-col items-center justify-center select-none">
+        {/* Logo */}
+        <img
+          src="/logo.svg"
+          alt="Wayste"
+          className="w-28 h-28 mb-8 animate-pulse"
+        />
+        {/* Spinner */}
+        <div className="w-10 h-10 mb-6 border-3 border-neutral-700 border-t-emerald-400 rounded-full animate-spin" />
+        {/* Loading message */}
+        <p className="text-neutral-300 text-lg font-medium">
+          {T(loadingMessage)}
+        </p>
+      </div>
+    );
+  }
 
   const uiScreen: "idle" | "camera" | "result" =
     pipelineState === "result"
@@ -1113,7 +1227,7 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
 
   return (
     <div className="h-screen w-screen bg-neutral-950 relative overflow-hidden select-none">
-      {/* Camera feed — always mounted, hidden during idle for CV to keep running */}
+      {/* Camera feed — only mounted after models are ready */}
       <div
         className="absolute inset-0"
       >

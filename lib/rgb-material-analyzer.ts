@@ -8,7 +8,7 @@
  * Browser-safe — uses only Canvas/OffscreenCanvas APIs.
  */
 
-import type { MaterialHint } from "./types";
+import type { MaterialHint, TextureHint } from "./types";
 
 // ── Thresholds ──
 /** Fraction of pixels with brightness > 240 that suggests metallic/glass surface. */
@@ -45,13 +45,14 @@ function rgbToHsv(r: number, g: number, b: number): [number, number, number] {
  *
  * @param source - Video element or OffscreenCanvas containing the frame
  * @param bbox - YOLO bounding box [x, y, width, height] in source pixel coordinates
- * @returns MaterialHint with color/material analysis
+ * @returns MaterialHint with color/material analysis including bbox aspect ratio and texture
  */
 export function analyzeMaterial(
   source: HTMLVideoElement | OffscreenCanvas,
   bbox: [number, number, number, number],
 ): MaterialHint {
   const [bx, by, bw, bh] = bbox;
+  const bboxAspectRatio = bh > 0 ? bw / bh : 1;
 
   // Get source dimensions
   const srcW = source instanceof HTMLVideoElement ? source.videoWidth : source.width;
@@ -64,7 +65,7 @@ export function analyzeMaterial(
   const h = Math.min(Math.round(bh), srcH - y);
 
   if (w * h < MIN_ROI_PIXELS) {
-    return { dominantHue: 0, saturation: 0, isMetallic: false, isTransparent: false, suggestedMaterial: null };
+    return { dominantHue: 0, saturation: 0, isMetallic: false, isTransparent: false, suggestedMaterial: null, bboxAspectRatio };
   }
 
   // Draw ROI + surrounding margin to a small canvas for analysis
@@ -77,7 +78,7 @@ export function analyzeMaterial(
   const canvas = new OffscreenCanvas(outerW, outerH);
   const ctx = canvas.getContext("2d");
   if (!ctx) {
-    return { dominantHue: 0, saturation: 0, isMetallic: false, isTransparent: false, suggestedMaterial: null };
+    return { dominantHue: 0, saturation: 0, isMetallic: false, isTransparent: false, suggestedMaterial: null, bboxAspectRatio };
   }
 
   ctx.drawImage(source, outerX, outerY, outerW, outerH, 0, 0, outerW, outerH);
@@ -91,7 +92,7 @@ export function analyzeMaterial(
   const pixelCount = w * h;
 
   // Compute HSV statistics over the ROI
-  let hueSum = 0;
+  const hueSum = 0;
   let hueSinSum = 0;
   let hueCosSum = 0;
   let satSum = 0;
@@ -136,9 +137,12 @@ export function analyzeMaterial(
   // Transparency detection: compare ROI edge pixels with surrounding area
   const isTransparent = detectTransparency(ctx, roiX, roiY, w, h, outerW, outerH);
 
+  // Texture analysis (LBP-based)
+  const texture = analyzeTexture(source, bbox);
+
   const suggestedMaterial = null; // Refinement is applied externally
 
-  return { dominantHue, saturation: avgSaturation, isMetallic, isTransparent, suggestedMaterial };
+  return { dominantHue, saturation: avgSaturation, isMetallic, isTransparent, suggestedMaterial, bboxAspectRatio, texture };
 }
 
 /**
@@ -240,32 +244,195 @@ function avgBrightness(pixels: number[][]): number {
   return sum / pixels.length;
 }
 
+// ── Texture analysis (LBP-based) ──
+
+/** Size to downsample ROI before LBP computation. */
+const LBP_SAMPLE_SIZE = 64;
+
+/**
+ * Analyze texture of a detected region using a simplified Local Binary Pattern approach.
+ *
+ * @param source - Video element or OffscreenCanvas containing the frame
+ * @param bbox - YOLO bounding box [x, y, width, height] in source pixel coordinates
+ * @returns TextureHint with uniformity, edge density, and suggested surface type
+ */
+export function analyzeTexture(
+  source: HTMLVideoElement | OffscreenCanvas,
+  bbox: [number, number, number, number],
+): TextureHint {
+  const [bx, by, bw, bh] = bbox;
+  const srcW = source instanceof HTMLVideoElement ? source.videoWidth : source.width;
+  const srcH = source instanceof HTMLVideoElement ? source.videoHeight : source.height;
+
+  const x = Math.max(0, Math.round(bx));
+  const y = Math.max(0, Math.round(by));
+  const w = Math.min(Math.round(bw), srcW - x);
+  const h = Math.min(Math.round(bh), srcH - y);
+
+  if (w < 8 || h < 8) {
+    return { uniformity: 0.5, edgeDensity: 0.5, suggestedSurface: "unknown" };
+  }
+
+  const canvas = new OffscreenCanvas(LBP_SAMPLE_SIZE, LBP_SAMPLE_SIZE);
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    return { uniformity: 0.5, edgeDensity: 0.5, suggestedSurface: "unknown" };
+  }
+
+  ctx.drawImage(source, x, y, w, h, 0, 0, LBP_SAMPLE_SIZE, LBP_SAMPLE_SIZE);
+  const imageData = ctx.getImageData(0, 0, LBP_SAMPLE_SIZE, LBP_SAMPLE_SIZE);
+
+  return computeLbpTexture(imageData.data, LBP_SAMPLE_SIZE, LBP_SAMPLE_SIZE);
+}
+
+/**
+ * Compute texture metrics from raw pixel data using Local Binary Patterns.
+ *
+ * For each pixel, compares it to its 8 neighbors to produce a binary pattern.
+ * Builds a histogram and derives:
+ * - uniformity: fraction of "uniform" LBP patterns (≤2 bit transitions) —
+ *   paper has high uniformity (matte, even), metal has low (specular, edges)
+ * - edgeDensity: fraction of high-transition patterns (>4 transitions)
+ *
+ * Exported for testing — consumers should use analyzeTexture() instead.
+ */
+export function computeLbpTexture(
+  data: Uint8ClampedArray | Uint8Array,
+  width: number,
+  height: number,
+): TextureHint {
+  // Convert to grayscale
+  const gray = new Uint8Array(width * height);
+  for (let i = 0; i < gray.length; i++) {
+    const idx = i * 4;
+    gray[i] = Math.round(0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2]);
+  }
+
+  // Neighbor offsets (clockwise from top-left)
+  const dx = [-1, 0, 1, 1, 1, 0, -1, -1];
+  const dy = [-1, -1, -1, 0, 1, 1, 1, 0];
+
+  let totalPatterns = 0;
+  let uniformPatterns = 0;
+  let highEdgePatterns = 0;
+
+  for (let py = 1; py < height - 1; py++) {
+    for (let px = 1; px < width - 1; px++) {
+      const center = gray[py * width + px];
+      let pattern = 0;
+
+      for (let n = 0; n < 8; n++) {
+        if (gray[(py + dy[n]) * width + (px + dx[n])] >= center) {
+          pattern |= (1 << n);
+        }
+      }
+
+      // Count circular bit transitions
+      let transitions = 0;
+      for (let n = 0; n < 8; n++) {
+        if (((pattern >> n) & 1) !== ((pattern >> ((n + 1) % 8)) & 1)) {
+          transitions++;
+        }
+      }
+
+      totalPatterns++;
+      if (transitions <= 2) uniformPatterns++;
+      if (transitions > 4) highEdgePatterns++;
+    }
+  }
+
+  if (totalPatterns === 0) {
+    return { uniformity: 0.5, edgeDensity: 0.5, suggestedSurface: "unknown" };
+  }
+
+  const uniformity = uniformPatterns / totalPatterns;
+  const edgeDensity = highEdgePatterns / totalPatterns;
+
+  let suggestedSurface: TextureHint["suggestedSurface"];
+  if (uniformity > 0.7 && edgeDensity < 0.15) {
+    suggestedSurface = "paper";
+  } else if (uniformity < 0.5 && edgeDensity > 0.3) {
+    suggestedSurface = "metal";
+  } else if (uniformity >= 0.5 && uniformity <= 0.7) {
+    suggestedSurface = "plastic";
+  } else {
+    suggestedSurface = "unknown";
+  }
+
+  return { uniformity, edgeDensity, suggestedSurface };
+}
+
 /**
  * Refine a YOLO class name based on material analysis.
  *
  * Returns the original className when no refinement is applicable.
+ * Rules are ordered from most specific to least specific.
  */
 export function refineClassName(className: string, hint: MaterialHint): string {
   const lower = className.toLowerCase();
+  const ar = hint.bboxAspectRatio;
+  const texSurface = hint.texture?.suggestedSurface;
 
-  // "bottle" + metallic → keep as-is (likely aluminium can misdetection)
+  // ── metallic + roughly square/circular bbox → "aluminum can" ──
+  if (hint.isMetallic && ar >= 0.5 && ar <= 1.3) {
+    if (lower.includes("bottle") || lower.includes("can") || lower === "cup") {
+      return "aluminum can";
+    }
+  }
+
+  // ── "bottle" + metallic (non-circular shape) → keep as-is ──
   if (lower.includes("bottle") && hint.isMetallic) {
-    return className; // Don't refine — let downstream handle it
+    return className;
   }
 
-  // "bottle" + transparent + green hue → "glass bottle"
-  if (lower.includes("bottle") && hint.isTransparent && hint.dominantHue >= 80 && hint.dominantHue <= 160) {
-    return "glass bottle";
+  // ── green/brown hue + transparent → "glass bottle" ──
+  if (lower.includes("bottle") && hint.isTransparent) {
+    if ((hint.dominantHue >= 15 && hint.dominantHue <= 50) ||
+        (hint.dominantHue >= 80 && hint.dominantHue <= 160)) {
+      return "glass bottle";
+    }
   }
 
-  // "cup" (not "plastic cup") + opaque white + low saturation → "paper cup"
+  // ── transparent + low saturation (no dominant hue) → PET bottle or plastic cup ──
+  if (hint.isTransparent && hint.saturation < 0.15) {
+    if (lower.includes("bottle") || lower.includes("cup") || lower.includes("container")) {
+      return ar < 0.6 ? "PET bottle" : "plastic cup";
+    }
+  }
+
+  // ── "cup" (not "plastic cup") + opaque + low saturation → "paper cup" ──
+  // Texture confirmation: high uniformity reinforces paper
   if (lower.includes("cup") && !lower.includes("plastic") && !hint.isTransparent && hint.saturation < 0.2) {
+    if (texSurface === "metal" && hint.isMetallic) {
+      return "aluminum can";
+    }
     return "paper cup";
   }
 
-  // "plastic cup" + transparent → keep "plastic cup"
+  // ── "plastic cup" + transparent → keep "plastic cup" ──
   if (lower.includes("plastic cup") && hint.isTransparent) {
     return className;
+  }
+
+  // ── white/low-saturation + opaque + tall/rectangular → "paper carton" ──
+  if (!hint.isTransparent && hint.saturation < 0.15 && ar < 0.8) {
+    if (lower.includes("box") || lower.includes("carton") || lower.includes("container")) {
+      return "paper carton";
+    }
+  }
+
+  // ── brown hue (15-40) + low saturation + opaque → "cardboard" ──
+  if (hint.dominantHue >= 15 && hint.dominantHue <= 40 && hint.saturation < 0.3 && !hint.isTransparent) {
+    if (lower.includes("box") || lower.includes("cardboard") || lower.includes("package")) {
+      return "cardboard";
+    }
+  }
+
+  // ── shiny (metallic) + high saturation → "plastic wrapper" ──
+  if (hint.isMetallic && hint.saturation > 0.5) {
+    if (lower.includes("bag") || lower.includes("wrapper") || lower.includes("package") || lower.includes("snack")) {
+      return "plastic wrapper";
+    }
   }
 
   // No refinement

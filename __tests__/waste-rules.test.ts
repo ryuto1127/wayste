@@ -8,8 +8,9 @@ import {
   buildClassificationResult,
   loadSiteConfig,
   matchesPattern,
+  buildNanoPrompt,
 } from "@/lib/waste-rules";
-import type { SiteConfig } from "@/lib/types";
+import type { MaterialHint, SiteConfig } from "@/lib/types";
 
 // Load real configs for integration-style tests
 const defaultConfig = loadSiteConfig("default");
@@ -405,5 +406,31 @@ describe("conditional overrides", () => {
 
     const glass = applyOverrides("透明びん", "burnable", japanOfficeConfig);
     expect(glass.stream).toBe("recyclable");
+  });
+});
+
+describe("buildNanoPrompt — materialHint integration", () => {
+  it("includes material data in prompt when materialHint is provided", () => {
+    const hint: MaterialHint = {
+      dominantHue: 120,
+      saturation: 0.3,
+      isMetallic: false,
+      isTransparent: true,
+      suggestedMaterial: null,
+      bboxAspectRatio: 0.5,
+      texture: { uniformity: 0.6, edgeDensity: 0.2, suggestedSurface: "plastic" },
+    };
+    const prompt = buildNanoPrompt(defaultConfig, "en", { materialHint: hint });
+    expect(prompt).toContain("Dominant hue: 120");
+    expect(prompt).toContain("Transparency: likely");
+    expect(prompt).toContain("Bbox aspect ratio");
+    expect(prompt).toContain("Texture surface: plastic");
+    expect(prompt).toContain("physical properties");
+  });
+
+  it("does NOT include material section when materialHint is absent", () => {
+    const prompt = buildNanoPrompt(defaultConfig, "en");
+    expect(prompt).not.toContain("Local analysis of detected region");
+    expect(prompt).not.toContain("Dominant hue");
   });
 });

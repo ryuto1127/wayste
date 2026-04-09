@@ -69,10 +69,10 @@ export default function ResultScreen({
     [locale]
   );
 
-  // Cap at 3 items max — if more, show only top 3 by confidence
+  // Cap at 4 items max — if more, show only top 4 by confidence
   const displayResults =
-    results.length > 3
-      ? [...results].sort((a, b) => b.confidence - a.confidence).slice(0, 3)
+    results.length > 4
+      ? [...results].sort((a, b) => b.confidence - a.confidence).slice(0, 4)
       : results;
 
   const isMulti = displayResults.length > 1;
@@ -197,11 +197,16 @@ export default function ResultScreen({
       </div>
 
       {isMulti ? (
-        /* Multi-item: side-by-side split-screen */
+        /* Multi-item: responsive grid — 2 cols for 2 items, 3 cols for 3, 2×2 grid for 4 */
         <div
           className="flex-1 grid h-full pt-12"
           style={{
-            gridTemplateColumns: `repeat(${displayResults.length}, 1fr)`,
+            gridTemplateColumns: displayResults.length === 4
+              ? "repeat(2, 1fr)"
+              : `repeat(${displayResults.length}, 1fr)`,
+            gridTemplateRows: displayResults.length === 4
+              ? "repeat(2, 1fr)"
+              : "1fr",
           }}
         >
           {displayResults.map((result, idx) => (
@@ -210,7 +215,14 @@ export default function ResultScreen({
               result={result}
               locale={locale}
               streams={streams}
-              isLast={idx === displayResults.length - 1}
+              isLast={
+                displayResults.length === 4
+                  ? idx === 1 || idx === 3 // right column has no right border
+                  : idx === displayResults.length - 1
+              }
+              isBottomRow={displayResults.length === 4 && idx >= 2}
+              animationDelay={idx * 50}
+              fontScale={displayResults.length >= 3 ? 0.7 : displayResults.length === 2 ? 0.85 : 1}
             />
           ))}
         </div>
@@ -352,12 +364,21 @@ function SplitScreenCard({
   locale,
   streams = [],
   isLast,
+  isBottomRow = false,
+  animationDelay = 0,
+  fontScale = 1,
 }: {
   result: ClassificationResponse;
   locale: Locale;
   streams?: StreamDefinition[];
   /** Whether this is the last column (no right border). */
   isLast: boolean;
+  /** Whether this card is in the bottom row of a 2×2 grid. */
+  isBottomRow?: boolean;
+  /** Staggered fade-in delay in ms. */
+  animationDelay?: number;
+  /** Font size scale factor (1 = full, 0.85 = 2 items, 0.7 = 3-4 items). */
+  fontScale?: number;
 }) {
   const T = useCallback(
     (key: TranslationKey) => t(locale, key),
@@ -378,11 +399,17 @@ function SplitScreenCard({
         ? "bg-amber-600"
         : "bg-red-600";
 
+  // Dynamic font sizes based on scale
+  const itemNameSize = fontScale >= 1 ? "text-lg" : fontScale >= 0.85 ? "text-base" : "text-sm";
+  const binNameSize = fontScale >= 1 ? "text-3xl" : fontScale >= 0.85 ? "text-2xl" : "text-xl";
+  const iconSize = fontScale >= 1 ? "text-6xl" : fontScale >= 0.85 ? "text-5xl" : "text-4xl";
+
   return (
     <div
-      className={`relative flex flex-col h-full overflow-hidden${
+      className={`relative flex flex-col h-full overflow-hidden animate-[fadeIn_0.3s_ease-out_both]${
         isLast ? "" : " border-r-2 border-neutral-800/60"
-      }`}
+      }${isBottomRow ? " border-t-2 border-neutral-800/60" : ""}`}
+      style={{ animationDelay: `${animationDelay}ms` }}
     >
       {/* Screen reader summary */}
       <span className="sr-only">
@@ -401,7 +428,7 @@ function SplitScreenCard({
 
       {/* Item name bar (top) */}
       <div className="px-4 pt-3 pb-2 bg-neutral-950/80 shrink-0">
-        <div className="text-lg font-bold text-white leading-tight truncate pr-16">
+        <div className={`${itemNameSize} font-bold text-white leading-tight truncate pr-16`}>
           {result.itemName}
         </div>
       </div>
@@ -414,10 +441,10 @@ function SplitScreenCard({
         <div className="text-[10px] font-semibold uppercase tracking-widest text-white/70 mb-2">
           {T("putThisInBin")}
         </div>
-        <div className="text-6xl leading-none mb-2" aria-hidden="true">
+        <div className={`${iconSize} leading-none mb-2`} aria-hidden="true">
           {streamIcon(result.wasteStream)}
         </div>
-        <div className="text-3xl font-black text-white uppercase text-center">
+        <div className={`${binNameSize} font-black text-white uppercase text-center`}>
           {streamLabel(locale, result.wasteStream)}
         </div>
 

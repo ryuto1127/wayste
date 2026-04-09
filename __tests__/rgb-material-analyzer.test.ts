@@ -1,8 +1,8 @@
 /**
  * Tests for lib/rgb-material-analyzer.ts
  */
-import { refineClassName } from "@/lib/rgb-material-analyzer";
-import type { MaterialHint } from "@/lib/types";
+import { refineClassName, computeLbpTexture } from "@/lib/rgb-material-analyzer";
+import type { MaterialHint, TextureHint } from "@/lib/types";
 
 function makeHint(overrides: Partial<MaterialHint> = {}): MaterialHint {
   return {
@@ -11,23 +11,21 @@ function makeHint(overrides: Partial<MaterialHint> = {}): MaterialHint {
     isMetallic: false,
     isTransparent: false,
     suggestedMaterial: null,
+    bboxAspectRatio: 0.7,
     ...overrides,
   };
 }
 
 describe("refineClassName", () => {
-  it("keeps 'bottle' as-is when metallic (likely can misdetection)", () => {
-    const hint = makeHint({ isMetallic: true });
-    expect(refineClassName("bottle", hint)).toBe("bottle");
-  });
+  // ── Existing rules (preserved) ──
 
   it("refines 'bottle' + transparent + green hue → 'glass bottle'", () => {
     const hint = makeHint({ isTransparent: true, dominantHue: 120 });
     expect(refineClassName("bottle", hint)).toBe("glass bottle");
   });
 
-  it("does NOT refine 'bottle' + transparent + non-green hue", () => {
-    const hint = makeHint({ isTransparent: true, dominantHue: 30 });
+  it("does NOT refine 'bottle' + transparent + non-green/non-brown hue", () => {
+    const hint = makeHint({ isTransparent: true, dominantHue: 200 });
     expect(refineClassName("bottle", hint)).toBe("bottle");
   });
 
@@ -54,7 +52,6 @@ describe("refineClassName", () => {
   it("returns original class when no refinement rule matches", () => {
     const hint = makeHint();
     expect(refineClassName("banana peel", hint)).toBe("banana peel");
-    expect(refineClassName("cardboard", hint)).toBe("cardboard");
     expect(refineClassName("newspaper", hint)).toBe("newspaper");
   });
 
@@ -67,5 +64,230 @@ describe("refineClassName", () => {
   it("handles 'water bottle' with transparency + green hue", () => {
     const hint = makeHint({ isTransparent: true, dominantHue: 100 });
     expect(refineClassName("water bottle", hint)).toBe("glass bottle");
+  });
+
+  // ── New rule: metallic + circular bbox → aluminum can ──
+
+  it("refines 'bottle' + metallic + circular bbox → 'aluminum can'", () => {
+    const hint = makeHint({ isMetallic: true, bboxAspectRatio: 0.8 });
+    expect(refineClassName("bottle", hint)).toBe("aluminum can");
+  });
+
+  it("refines 'can' + metallic + circular bbox → 'aluminum can'", () => {
+    const hint = makeHint({ isMetallic: true, bboxAspectRatio: 1.0 });
+    expect(refineClassName("can", hint)).toBe("aluminum can");
+  });
+
+  it("refines 'cup' (exact) + metallic + circular bbox → 'aluminum can'", () => {
+    const hint = makeHint({ isMetallic: true, bboxAspectRatio: 0.9, saturation: 0.3 });
+    expect(refineClassName("cup", hint)).toBe("aluminum can");
+  });
+
+  it("keeps 'bottle' + metallic + elongated bbox as-is (not can-shaped)", () => {
+    const hint = makeHint({ isMetallic: true, bboxAspectRatio: 0.3 });
+    expect(refineClassName("bottle", hint)).toBe("bottle");
+  });
+
+  // ── New rule: white/opaque + rectangular → paper carton ──
+
+  it("refines 'box' + white/opaque + rectangular → 'paper carton'", () => {
+    const hint = makeHint({ saturation: 0.1, isTransparent: false, bboxAspectRatio: 0.6 });
+    expect(refineClassName("box", hint)).toBe("paper carton");
+  });
+
+  it("refines 'carton' + low-sat + opaque + tall → 'paper carton'", () => {
+    const hint = makeHint({ saturation: 0.1, isTransparent: false, bboxAspectRatio: 0.5 });
+    expect(refineClassName("carton", hint)).toBe("paper carton");
+  });
+
+  it("refines 'container' + white + opaque + rectangular → 'paper carton'", () => {
+    const hint = makeHint({ saturation: 0.1, isTransparent: false, bboxAspectRatio: 0.7 });
+    expect(refineClassName("container", hint)).toBe("paper carton");
+  });
+
+  it("does NOT refine 'box' to paper carton if not rectangular (wide bbox)", () => {
+    const hint = makeHint({ saturation: 0.1, isTransparent: false, bboxAspectRatio: 1.2 });
+    // Falls to cardboard rule if hue matches, otherwise no refinement
+    expect(refineClassName("box", hint)).not.toBe("paper carton");
+  });
+
+  // ── New rule: transparent + no dominant hue → PET bottle / plastic cup ──
+
+  it("refines 'bottle' + transparent + low sat → 'PET bottle' (tall bbox)", () => {
+    const hint = makeHint({ isTransparent: true, saturation: 0.05, bboxAspectRatio: 0.4 });
+    expect(refineClassName("bottle", hint)).toBe("PET bottle");
+  });
+
+  it("refines 'cup' + transparent + low sat → 'plastic cup' (short bbox)", () => {
+    const hint = makeHint({ isTransparent: true, saturation: 0.05, bboxAspectRatio: 0.8 });
+    expect(refineClassName("cup", hint)).toBe("plastic cup");
+  });
+
+  it("refines 'container' + transparent + low sat → 'plastic cup' (wide bbox)", () => {
+    const hint = makeHint({ isTransparent: true, saturation: 0.1, bboxAspectRatio: 1.0 });
+    expect(refineClassName("container", hint)).toBe("plastic cup");
+  });
+
+  // ── New rule: brown hue + low saturation + opaque → cardboard ──
+
+  it("refines 'box' + brown hue + low sat + opaque → 'cardboard'", () => {
+    const hint = makeHint({ dominantHue: 25, saturation: 0.2, isTransparent: false, bboxAspectRatio: 1.0 });
+    expect(refineClassName("box", hint)).toBe("cardboard");
+  });
+
+  it("refines 'cardboard' + brown hue → 'cardboard' (confirms)", () => {
+    const hint = makeHint({ dominantHue: 30, saturation: 0.15, isTransparent: false });
+    expect(refineClassName("cardboard", hint)).toBe("cardboard");
+  });
+
+  it("refines 'package' + brown hue + low sat → 'cardboard'", () => {
+    const hint = makeHint({ dominantHue: 35, saturation: 0.25, isTransparent: false });
+    expect(refineClassName("package", hint)).toBe("cardboard");
+  });
+
+  it("does NOT refine 'box' with brown hue if transparent", () => {
+    const hint = makeHint({ dominantHue: 25, saturation: 0.2, isTransparent: true, bboxAspectRatio: 1.0 });
+    expect(refineClassName("box", hint)).not.toBe("cardboard");
+  });
+
+  // ── New rule: green/brown + transparent → glass bottle ──
+
+  it("refines 'bottle' + transparent + brown hue (beer bottle) → 'glass bottle'", () => {
+    const hint = makeHint({ isTransparent: true, dominantHue: 30 });
+    expect(refineClassName("bottle", hint)).toBe("glass bottle");
+  });
+
+  it("refines 'bottle' + transparent + hue=15 (amber) → 'glass bottle'", () => {
+    const hint = makeHint({ isTransparent: true, dominantHue: 15 });
+    expect(refineClassName("bottle", hint)).toBe("glass bottle");
+  });
+
+  // ── New rule: shiny + high saturation → plastic wrapper ──
+
+  it("refines 'bag' + metallic + high saturation → 'plastic wrapper'", () => {
+    const hint = makeHint({ isMetallic: true, saturation: 0.6, bboxAspectRatio: 1.5 });
+    expect(refineClassName("bag", hint)).toBe("plastic wrapper");
+  });
+
+  it("refines 'wrapper' + metallic + high sat → 'plastic wrapper'", () => {
+    const hint = makeHint({ isMetallic: true, saturation: 0.7, bboxAspectRatio: 1.5 });
+    expect(refineClassName("wrapper", hint)).toBe("plastic wrapper");
+  });
+
+  it("refines 'snack' + metallic + high sat → 'plastic wrapper'", () => {
+    const hint = makeHint({ isMetallic: true, saturation: 0.55, bboxAspectRatio: 1.5 });
+    expect(refineClassName("snack", hint)).toBe("plastic wrapper");
+  });
+
+  it("does NOT refine 'bag' to wrapper if not metallic", () => {
+    const hint = makeHint({ isMetallic: false, saturation: 0.7 });
+    expect(refineClassName("bag", hint)).toBe("bag");
+  });
+
+  // ── Texture-enhanced disambiguation ──
+
+  it("refines 'cup' + opaque + metal texture + metallic → 'aluminum can'", () => {
+    const texture: TextureHint = { uniformity: 0.4, edgeDensity: 0.4, suggestedSurface: "metal" };
+    const hint = makeHint({ isTransparent: false, saturation: 0.1, isMetallic: true, bboxAspectRatio: 0.9, texture });
+    expect(refineClassName("cup", hint)).toBe("aluminum can");
+  });
+
+  it("refines 'cup' + opaque + paper texture → 'paper cup'", () => {
+    const texture: TextureHint = { uniformity: 0.8, edgeDensity: 0.1, suggestedSurface: "paper" };
+    const hint = makeHint({ isTransparent: false, saturation: 0.1, texture });
+    expect(refineClassName("cup", hint)).toBe("paper cup");
+  });
+});
+
+describe("computeLbpTexture", () => {
+  function makeUniformImage(width: number, height: number, value: number): Uint8ClampedArray {
+    // All pixels the same value → maximally uniform texture
+    const data = new Uint8ClampedArray(width * height * 4);
+    for (let i = 0; i < data.length; i += 4) {
+      data[i] = value;
+      data[i + 1] = value;
+      data[i + 2] = value;
+      data[i + 3] = 255;
+    }
+    return data;
+  }
+
+  function makeCheckerboard(width: number, height: number): Uint8ClampedArray {
+    // Alternating black/white pixels → high edge density
+    const data = new Uint8ClampedArray(width * height * 4);
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const idx = (y * width + x) * 4;
+        const val = (x + y) % 2 === 0 ? 255 : 0;
+        data[idx] = val;
+        data[idx + 1] = val;
+        data[idx + 2] = val;
+        data[idx + 3] = 255;
+      }
+    }
+    return data;
+  }
+
+  function makeGradient(width: number, height: number): Uint8ClampedArray {
+    // Smooth horizontal gradient → moderate uniformity
+    const data = new Uint8ClampedArray(width * height * 4);
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const idx = (y * width + x) * 4;
+        const val = Math.round((x / width) * 255);
+        data[idx] = val;
+        data[idx + 1] = val;
+        data[idx + 2] = val;
+        data[idx + 3] = 255;
+      }
+    }
+    return data;
+  }
+
+  it("returns high uniformity for a solid-color image", () => {
+    const data = makeUniformImage(16, 16, 128);
+    const result = computeLbpTexture(data, 16, 16);
+    // All interior pixels have the same LBP pattern (all neighbors equal)
+    expect(result.uniformity).toBeGreaterThan(0.9);
+    expect(result.edgeDensity).toBeLessThan(0.1);
+  });
+
+  it("returns low uniformity / high edge density for checkerboard", () => {
+    const data = makeCheckerboard(16, 16);
+    const result = computeLbpTexture(data, 16, 16);
+    // Checkerboard: half pixels are uniform (value=0, all neighbors >=), half are not
+    expect(result.uniformity).toBeLessThanOrEqual(0.5);
+    expect(result.edgeDensity).toBeGreaterThan(0.2);
+  });
+
+  it("returns moderate uniformity for gradient", () => {
+    const data = makeGradient(32, 32);
+    const result = computeLbpTexture(data, 32, 32);
+    // Gradient has consistent directional patterns
+    expect(result.uniformity).toBeGreaterThan(0.3);
+  });
+
+  it("suggests 'paper' surface for uniform/matte texture", () => {
+    const data = makeUniformImage(16, 16, 200);
+    const result = computeLbpTexture(data, 16, 16);
+    expect(result.suggestedSurface).toBe("paper");
+  });
+
+  it("returns valid TextureHint fields", () => {
+    const data = makeGradient(16, 16);
+    const result = computeLbpTexture(data, 16, 16);
+    expect(result.uniformity).toBeGreaterThanOrEqual(0);
+    expect(result.uniformity).toBeLessThanOrEqual(1);
+    expect(result.edgeDensity).toBeGreaterThanOrEqual(0);
+    expect(result.edgeDensity).toBeLessThanOrEqual(1);
+    expect(["paper", "plastic", "metal", "unknown"]).toContain(result.suggestedSurface);
+  });
+
+  it("handles tiny images gracefully", () => {
+    // 4x4 → interior is only 2x2 = 4 patterns
+    const data = new Uint8ClampedArray(4 * 4 * 4).fill(128);
+    const result = computeLbpTexture(data, 4, 4);
+    expect(result).toBeDefined();
+    expect(typeof result.uniformity).toBe("number");
   });
 });

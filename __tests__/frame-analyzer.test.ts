@@ -9,9 +9,11 @@
 import {
   FrameAnalyzer,
   imageQualityBand,
-  ROI_FG_THRESHOLD,
 } from "@/lib/frame-analyzer";
+import { computeThresholds } from "@/lib/threshold-config";
 import type { FrameAnalysis } from "@/lib/types";
+
+const { ROI_FG_THRESHOLD } = computeThresholds(0.5);
 
 // Helper to build a FrameAnalysis with defaults
 function makeAnalysis(overrides: Partial<FrameAnalysis> = {}): FrameAnalysis {
@@ -20,6 +22,7 @@ function makeAnalysis(overrides: Partial<FrameAnalysis> = {}): FrameAnalysis {
     roiLargestBlobRatio: 0,
     roiLargestBlobDiagonalRatio: 0,
     sharpnessScore: 2000,
+    blobs: [],
     isSettled: true,
     timestamp: Date.now(),
     ...overrides,

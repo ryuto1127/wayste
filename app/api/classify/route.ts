@@ -36,7 +36,6 @@ const MaterialHintSchema = z.object({
   dominantHue: z.number(),
   saturation: z.number(),
   isMetallic: z.boolean(),
-  isTransparent: z.boolean(),
   suggestedMaterial: z.string().nullable(),
   bboxAspectRatio: z.number(),
   texture: z.object({
@@ -392,7 +391,6 @@ export async function POST(request: Request) {
               dominantHue: (materialHint as MaterialHint).dominantHue,
               saturation: (materialHint as MaterialHint).saturation,
               isMetallic: (materialHint as MaterialHint).isMetallic,
-              isTransparent: (materialHint as MaterialHint).isTransparent,
               bboxAspectRatio: (materialHint as MaterialHint).bboxAspectRatio,
               ...(((materialHint as MaterialHint).texture?.suggestedSurface && (materialHint as MaterialHint).texture?.suggestedSurface !== "unknown") && {
                 textureSurface: (materialHint as MaterialHint).texture!.suggestedSurface,

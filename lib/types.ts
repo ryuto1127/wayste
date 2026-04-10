@@ -101,7 +101,6 @@ export interface PilotLogEntry {
     dominantHue: number;
     saturation: number;
     isMetallic: boolean;
-    isTransparent: boolean;
     bboxAspectRatio: number;
     refinedFrom?: string;
     refinedTo?: string;
@@ -269,7 +268,6 @@ export interface MaterialHint {
   dominantHue: number;
   saturation: number;
   isMetallic: boolean;
-  isTransparent: boolean;
   suggestedMaterial: string | null;
   bboxAspectRatio: number;
   texture?: TextureHint;

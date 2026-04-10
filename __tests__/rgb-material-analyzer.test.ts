@@ -9,7 +9,6 @@ function makeHint(overrides: Partial<MaterialHint> = {}): MaterialHint {
     dominantHue: 0,
     saturation: 0.3,
     isMetallic: false,
-    isTransparent: false,
     suggestedMaterial: null,
     bboxAspectRatio: 0.7,
     ...overrides,
@@ -17,56 +16,7 @@ function makeHint(overrides: Partial<MaterialHint> = {}): MaterialHint {
 }
 
 describe("refineClassName", () => {
-  // ── Existing rules (preserved) ──
-
-  it("refines 'bottle' + transparent + green hue → 'glass bottle'", () => {
-    const hint = makeHint({ isTransparent: true, dominantHue: 120 });
-    expect(refineClassName("bottle", hint)).toBe("glass bottle");
-  });
-
-  it("does NOT refine 'bottle' + transparent + non-green/non-brown hue", () => {
-    const hint = makeHint({ isTransparent: true, dominantHue: 200 });
-    expect(refineClassName("bottle", hint)).toBe("bottle");
-  });
-
-  it("refines 'cup' + opaque + low saturation → 'paper cup'", () => {
-    const hint = makeHint({ isTransparent: false, saturation: 0.1 });
-    expect(refineClassName("cup", hint)).toBe("paper cup");
-  });
-
-  it("refines 'coffee cup' + opaque + low saturation → 'paper cup'", () => {
-    const hint = makeHint({ isTransparent: false, saturation: 0.1 });
-    expect(refineClassName("coffee cup", hint)).toBe("paper cup");
-  });
-
-  it("does NOT refine 'plastic cup' to 'paper cup' even with low saturation", () => {
-    const hint = makeHint({ isTransparent: false, saturation: 0.1 });
-    expect(refineClassName("plastic cup", hint)).toBe("plastic cup");
-  });
-
-  it("keeps 'plastic cup' as-is when transparent", () => {
-    const hint = makeHint({ isTransparent: true });
-    expect(refineClassName("plastic cup", hint)).toBe("plastic cup");
-  });
-
-  it("returns original class when no refinement rule matches", () => {
-    const hint = makeHint();
-    expect(refineClassName("banana peel", hint)).toBe("banana peel");
-    expect(refineClassName("newspaper", hint)).toBe("newspaper");
-  });
-
-  it("handles case-insensitive matching", () => {
-    const hint = makeHint({ isTransparent: true, dominantHue: 120 });
-    expect(refineClassName("Bottle", hint)).toBe("glass bottle");
-    expect(refineClassName("BOTTLE", hint)).toBe("glass bottle");
-  });
-
-  it("handles 'water bottle' with transparency + green hue", () => {
-    const hint = makeHint({ isTransparent: true, dominantHue: 100 });
-    expect(refineClassName("water bottle", hint)).toBe("glass bottle");
-  });
-
-  // ── New rule: metallic + circular bbox → aluminum can ──
+  // ── Metallic + circular bbox → aluminum can ──
 
   it("refines 'bottle' + metallic + circular bbox → 'aluminum can'", () => {
     const hint = makeHint({ isMetallic: true, bboxAspectRatio: 0.8 });
@@ -88,81 +38,78 @@ describe("refineClassName", () => {
     expect(refineClassName("bottle", hint)).toBe("bottle");
   });
 
-  // ── New rule: white/opaque + rectangular → paper carton ──
+  // ── Cup + low saturation → paper cup ──
 
-  it("refines 'box' + white/opaque + rectangular → 'paper carton'", () => {
-    const hint = makeHint({ saturation: 0.1, isTransparent: false, bboxAspectRatio: 0.6 });
+  it("refines 'cup' + low saturation → 'paper cup'", () => {
+    const hint = makeHint({ saturation: 0.1 });
+    expect(refineClassName("cup", hint)).toBe("paper cup");
+  });
+
+  it("refines 'coffee cup' + low saturation → 'paper cup'", () => {
+    const hint = makeHint({ saturation: 0.1 });
+    expect(refineClassName("coffee cup", hint)).toBe("paper cup");
+  });
+
+  it("does NOT refine 'plastic cup' to 'paper cup' even with low saturation", () => {
+    const hint = makeHint({ saturation: 0.1 });
+    expect(refineClassName("plastic cup", hint)).toBe("plastic cup");
+  });
+
+  // ── No-match passthrough ──
+
+  it("returns original class when no refinement rule matches", () => {
+    const hint = makeHint();
+    expect(refineClassName("banana peel", hint)).toBe("banana peel");
+    expect(refineClassName("newspaper", hint)).toBe("newspaper");
+  });
+
+  it("handles case-insensitive matching", () => {
+    const hint = makeHint({ isMetallic: true, bboxAspectRatio: 0.8 });
+    expect(refineClassName("Bottle", hint)).toBe("aluminum can");
+    expect(refineClassName("BOTTLE", hint)).toBe("aluminum can");
+  });
+
+  // ── White/low-saturation + rectangular → paper carton ──
+
+  it("refines 'box' + low-sat + rectangular → 'paper carton'", () => {
+    const hint = makeHint({ saturation: 0.1, bboxAspectRatio: 0.6 });
     expect(refineClassName("box", hint)).toBe("paper carton");
   });
 
-  it("refines 'carton' + low-sat + opaque + tall → 'paper carton'", () => {
-    const hint = makeHint({ saturation: 0.1, isTransparent: false, bboxAspectRatio: 0.5 });
+  it("refines 'carton' + low-sat + tall → 'paper carton'", () => {
+    const hint = makeHint({ saturation: 0.1, bboxAspectRatio: 0.5 });
     expect(refineClassName("carton", hint)).toBe("paper carton");
   });
 
-  it("refines 'container' + white + opaque + rectangular → 'paper carton'", () => {
-    const hint = makeHint({ saturation: 0.1, isTransparent: false, bboxAspectRatio: 0.7 });
+  it("refines 'container' + low-sat + rectangular → 'paper carton'", () => {
+    const hint = makeHint({ saturation: 0.1, bboxAspectRatio: 0.7 });
     expect(refineClassName("container", hint)).toBe("paper carton");
   });
 
   it("does NOT refine 'box' to paper carton if not rectangular (wide bbox)", () => {
-    const hint = makeHint({ saturation: 0.1, isTransparent: false, bboxAspectRatio: 1.2 });
+    const hint = makeHint({ saturation: 0.1, bboxAspectRatio: 1.2 });
     // Falls to cardboard rule if hue matches, otherwise no refinement
     expect(refineClassName("box", hint)).not.toBe("paper carton");
   });
 
-  // ── New rule: transparent + no dominant hue → PET bottle ──
+  // ── Brown hue + low saturation → cardboard ──
 
-  it("refines 'bottle' + transparent + low sat → 'PET bottle' (tall bbox)", () => {
-    const hint = makeHint({ isTransparent: true, saturation: 0.05, bboxAspectRatio: 0.4 });
-    expect(refineClassName("bottle", hint)).toBe("PET bottle");
-  });
-
-  it("refines 'cup' + transparent + low sat → 'PET bottle'", () => {
-    const hint = makeHint({ isTransparent: true, saturation: 0.05, bboxAspectRatio: 0.8 });
-    expect(refineClassName("cup", hint)).toBe("PET bottle");
-  });
-
-  it("refines 'container' + transparent + low sat → 'PET bottle'", () => {
-    const hint = makeHint({ isTransparent: true, saturation: 0.1, bboxAspectRatio: 1.0 });
-    expect(refineClassName("container", hint)).toBe("PET bottle");
-  });
-
-  // ── New rule: brown hue + low saturation + opaque → cardboard ──
-
-  it("refines 'box' + brown hue + low sat + opaque → 'cardboard'", () => {
-    const hint = makeHint({ dominantHue: 25, saturation: 0.2, isTransparent: false, bboxAspectRatio: 1.0 });
+  it("refines 'box' + brown hue + low sat → 'cardboard'", () => {
+    const hint = makeHint({ dominantHue: 25, saturation: 0.2, bboxAspectRatio: 1.0 });
     expect(refineClassName("box", hint)).toBe("cardboard");
   });
 
   it("refines 'cardboard' + brown hue → 'cardboard' (confirms)", () => {
-    const hint = makeHint({ dominantHue: 30, saturation: 0.15, isTransparent: false });
+    const hint = makeHint({ dominantHue: 30, saturation: 0.15 });
     expect(refineClassName("cardboard", hint)).toBe("cardboard");
   });
 
   it("refines 'package' + brown hue + low sat → 'cardboard'", () => {
-    const hint = makeHint({ dominantHue: 35, saturation: 0.25, isTransparent: false });
+    const hint = makeHint({ dominantHue: 35, saturation: 0.25 });
     expect(refineClassName("package", hint)).toBe("cardboard");
   });
 
-  it("does NOT refine 'box' with brown hue if transparent", () => {
-    const hint = makeHint({ dominantHue: 25, saturation: 0.2, isTransparent: true, bboxAspectRatio: 1.0 });
-    expect(refineClassName("box", hint)).not.toBe("cardboard");
-  });
-
-  // ── New rule: green/brown + transparent → glass bottle ──
-
-  it("refines 'bottle' + transparent + brown hue (beer bottle) → 'glass bottle'", () => {
-    const hint = makeHint({ isTransparent: true, dominantHue: 30 });
-    expect(refineClassName("bottle", hint)).toBe("glass bottle");
-  });
-
-  it("refines 'bottle' + transparent + hue=15 (amber) → 'glass bottle'", () => {
-    const hint = makeHint({ isTransparent: true, dominantHue: 15 });
-    expect(refineClassName("bottle", hint)).toBe("glass bottle");
-  });
-
-  // ── New rule: shiny + high saturation → plastic wrapper ──
+  // ── Shiny + high saturation → plastic wrapper ──
 
   it("refines 'bag' + metallic + high saturation → 'plastic wrapper'", () => {
     const hint = makeHint({ isMetallic: true, saturation: 0.6, bboxAspectRatio: 1.5 });
@@ -186,15 +133,15 @@ describe("refineClassName", () => {
 
   // ── Texture-enhanced disambiguation ──
 
-  it("refines 'cup' + opaque + metal texture + metallic → 'aluminum can'", () => {
+  it("refines 'cup' + metal texture + metallic → 'aluminum can'", () => {
     const texture: TextureHint = { uniformity: 0.4, edgeDensity: 0.4, suggestedSurface: "metal" };
-    const hint = makeHint({ isTransparent: false, saturation: 0.1, isMetallic: true, bboxAspectRatio: 0.9, texture });
+    const hint = makeHint({ saturation: 0.1, isMetallic: true, bboxAspectRatio: 0.9, texture });
     expect(refineClassName("cup", hint)).toBe("aluminum can");
   });
 
-  it("refines 'cup' + opaque + paper texture → 'paper cup'", () => {
+  it("refines 'cup' + paper texture → 'paper cup'", () => {
     const texture: TextureHint = { uniformity: 0.8, edgeDensity: 0.1, suggestedSurface: "paper" };
-    const hint = makeHint({ isTransparent: false, saturation: 0.1, texture });
+    const hint = makeHint({ saturation: 0.1, texture });
     expect(refineClassName("cup", hint)).toBe("paper cup");
   });
 });

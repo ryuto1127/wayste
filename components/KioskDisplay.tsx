@@ -638,7 +638,6 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
                     dominantHue: hint.dominantHue,
                     saturation: hint.saturation,
                     isMetallic: hint.isMetallic,
-                    isTransparent: hint.isTransparent,
                     bboxAspectRatio: hint.bboxAspectRatio,
                     ...(refinedFrom && refinedFrom !== result.itemName && {
                       refinedFrom,

@@ -415,14 +415,13 @@ describe("buildClassificationPrompt — materialHint integration", () => {
       dominantHue: 120,
       saturation: 0.3,
       isMetallic: false,
-      isTransparent: true,
       suggestedMaterial: null,
       bboxAspectRatio: 0.5,
       texture: { uniformity: 0.6, edgeDensity: 0.2, suggestedSurface: "plastic" },
     };
     const prompt = buildClassificationPrompt(defaultConfig, "en", { materialHint: hint });
     expect(prompt).toContain("Dominant hue: 120");
-    expect(prompt).toContain("Transparency: likely");
+    expect(prompt).toContain("Metallic reflections: not detected");
     expect(prompt).toContain("Bbox aspect ratio");
     expect(prompt).toContain("Texture surface: plastic");
     expect(prompt).toContain("physical properties");

@@ -151,7 +151,6 @@ function formatMaterialHint(hint?: MaterialHint): string {
     `  - Dominant hue: ${hint.dominantHue}° (${closestHueName})`,
     `  - Saturation: ${hint.saturation.toFixed(2)} (${hint.saturation > 0.5 ? "high" : hint.saturation > 0.2 ? "medium" : "low"})`,
     `  - Metallic reflections: ${hint.isMetallic ? "detected" : "not detected"}`,
-    `  - Transparency: ${hint.isTransparent ? "likely" : "unlikely"}`,
     `  - Bbox aspect ratio (w/h): ${hint.bboxAspectRatio.toFixed(2)}`,
   ];
   if (hint.texture) {

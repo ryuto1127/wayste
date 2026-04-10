@@ -1,7 +1,7 @@
 /**
  * Tests for lib/rgb-material-analyzer.ts
  */
-import { refineClassName, computeLbpTexture } from "@/lib/rgb-material-analyzer";
+import { refineClassName, computeLbpTexture, detectMetallicFromLuminance } from "@/lib/rgb-material-analyzer";
 import type { MaterialHint, TextureHint } from "@/lib/types";
 
 function makeHint(overrides: Partial<MaterialHint> = {}): MaterialHint {
@@ -196,6 +196,49 @@ describe("refineClassName", () => {
     const texture: TextureHint = { uniformity: 0.8, edgeDensity: 0.1, suggestedSurface: "paper" };
     const hint = makeHint({ isTransparent: false, saturation: 0.1, texture });
     expect(refineClassName("cup", hint)).toBe("paper cup");
+  });
+});
+
+describe("detectMetallicFromLuminance", () => {
+  it("detects metallic surface: high stddev + sharp highlights", () => {
+    // Simulate aluminum can: body ~90, sharp highlights ~220
+    const luminances = [
+      ...Array(70).fill(90),   // dark body
+      ...Array(20).fill(140),  // mid tones
+      ...Array(10).fill(220),  // sharp specular highlights
+    ];
+    expect(detectMetallicFromLuminance(luminances)).toBe(true);
+  });
+
+  it("rejects plastic surface: low stddev + diffuse highlights", () => {
+    // Simulate plastic bottle: body ~110, soft highlights ~140
+    const luminances = [
+      ...Array(60).fill(110),
+      ...Array(25).fill(125),
+      ...Array(15).fill(140),
+    ];
+    expect(detectMetallicFromLuminance(luminances)).toBe(false);
+  });
+
+  it("rejects uniform bright background (white wall)", () => {
+    // Uniform ~220-240 — high brightness but no contrast
+    const luminances = Array.from({ length: 100 }, (_, i) => 220 + (i % 20));
+    expect(detectMetallicFromLuminance(luminances)).toBe(false);
+  });
+
+  it("detects colored metal (green Sprite can with highlights)", () => {
+    // Green body ~80, printed areas ~60-100, specular ~200
+    const luminances = [
+      ...Array(40).fill(80),
+      ...Array(30).fill(65),
+      ...Array(15).fill(100),
+      ...Array(15).fill(200),
+    ];
+    expect(detectMetallicFromLuminance(luminances)).toBe(true);
+  });
+
+  it("returns false for too-few pixels", () => {
+    expect(detectMetallicFromLuminance([100, 200])).toBe(false);
   });
 });
 

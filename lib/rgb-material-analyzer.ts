@@ -11,10 +11,12 @@
 import type { MaterialHint, TextureHint } from "./types";
 
 // ── Thresholds ──
-/** Fraction of pixels with brightness > 240 that suggests metallic/glass surface. */
-const SPECULAR_HIGHLIGHT_RATIO = 0.08;
-/** Fraction of low-saturation edge pixels matching the surrounding area to suggest transparency. */
-const TRANSPARENCY_EDGE_RATIO = 0.35;
+/** Luminance stddev above which a surface may be metallic (sharp highlight spread). */
+const METAL_LUMINANCE_STDDEV = 35;
+/** (p90 − median) / median — how concentrated the bright highlights are. */
+const METAL_HIGHLIGHT_CONTRAST = 0.4;
+/** Shrink factor for inner ROI to avoid background contamination at bbox edges. */
+const INNER_ROI_SHRINK = 0.15;
 /** Minimum ROI size in pixels to attempt analysis. */
 const MIN_ROI_PIXELS = 100;
 
@@ -91,26 +93,19 @@ export function analyzeMaterial(
   const roiData = ctx.getImageData(roiX, roiY, w, h).data;
   const pixelCount = w * h;
 
-  // Compute HSV statistics over the ROI
-  const hueSum = 0;
+  // ── HSV statistics (hue + saturation) ──
   let hueSinSum = 0;
   let hueCosSum = 0;
   let satSum = 0;
-  let specularCount = 0;
   let chromaPixels = 0;
 
   for (let i = 0; i < roiData.length; i += 4) {
     const r = roiData[i];
     const g = roiData[i + 1];
     const b = roiData[i + 2];
-    const [hue, sat, val] = rgbToHsv(r, g, b);
+    const [hue, sat] = rgbToHsv(r, g, b);
 
     satSum += sat;
-
-    // Specular highlight detection: very bright pixels
-    if (val > 0.94 && sat < 0.15) {
-      specularCount++;
-    }
 
     // Accumulate hue using circular mean (only for chromatic pixels)
     if (sat > 0.15) {
@@ -122,8 +117,6 @@ export function analyzeMaterial(
   }
 
   const avgSaturation = satSum / pixelCount;
-  const specularRatio = specularCount / pixelCount;
-  const isMetallic = specularRatio > SPECULAR_HIGHLIGHT_RATIO;
 
   // Circular mean hue (meaningful only if enough chromatic pixels exist)
   let dominantHue = 0;
@@ -134,6 +127,21 @@ export function analyzeMaterial(
     if (dominantHue < 0) dominantHue += 360;
   }
 
+  // ── Luminance histogram analysis (metallic detection) ──
+  // Sample from inner ROI (shrunk each side) to avoid background contamination.
+  const shrink = Math.round(Math.min(w, h) * INNER_ROI_SHRINK);
+  const innerX = roiX + shrink;
+  const innerY = roiY + shrink;
+  const innerW = Math.max(4, w - 2 * shrink);
+  const innerH = Math.max(4, h - 2 * shrink);
+  const innerData = ctx.getImageData(innerX, innerY, innerW, innerH).data;
+
+  const luminances: number[] = new Array(innerW * innerH);
+  for (let i = 0; i < innerData.length; i += 4) {
+    luminances[i >> 2] = 0.299 * innerData[i] + 0.587 * innerData[i + 1] + 0.114 * innerData[i + 2];
+  }
+  const isMetallic = detectMetallicFromLuminance(luminances);
+
   // Transparency detection: compare ROI edge pixels with surrounding area
   const isTransparent = detectTransparency(ctx, roiX, roiY, w, h, outerW, outerH);
 
@@ -143,6 +151,43 @@ export function analyzeMaterial(
   const suggestedMaterial = null; // Refinement is applied externally
 
   return { dominantHue, saturation: avgSaturation, isMetallic, isTransparent, suggestedMaterial, bboxAspectRatio, texture };
+}
+
+/**
+ * Detect metallic surface from luminance distribution.
+ *
+ * Metal creates sharp specular highlights → the luminance histogram becomes
+ * wide (high stddev) with a bright tail far from the median (high contrast).
+ * Plastic reflects light diffusely → narrower, more uniform distribution.
+ *
+ * Works on colored metals (green Sprite cans, painted aluminum) because it
+ * analyzes luminance spread, not absolute brightness or saturation.
+ *
+ * Exported for testing.
+ */
+export function detectMetallicFromLuminance(luminances: number[]): boolean {
+  if (luminances.length < 16) return false;
+
+  let sum = 0;
+  for (const l of luminances) sum += l;
+  const mean = sum / luminances.length;
+
+  let varianceSum = 0;
+  for (const l of luminances) varianceSum += (l - mean) ** 2;
+  const stddev = Math.sqrt(varianceSum / luminances.length);
+
+  // Sort for percentile computation
+  const sorted = luminances.slice().sort((a, b) => a - b);
+  const p50 = sorted[Math.floor(sorted.length * 0.5)];
+  const p90 = sorted[Math.floor(sorted.length * 0.9)];
+
+  // How much brighter are the highlights than the body?
+  // Metal: sharp highlights create large gap (contrast > 0.4)
+  // Plastic: diffuse reflection keeps gap small (contrast < 0.3)
+  // Uniform background: nearly zero contrast
+  const highlightContrast = p50 > 10 ? (p90 - p50) / p50 : 0;
+
+  return stddev > METAL_LUMINANCE_STDDEV && highlightContrast > METAL_HIGHLIGHT_CONTRAST;
 }
 
 /**

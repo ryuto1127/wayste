@@ -1265,8 +1265,10 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
         />
       )}
 
-      {/* System status badge — always visible in bottom-left */}
-      <SystemStatusBadge thermalWarning={thermalWarning} />
+      {/* System status badge — hidden during result screen to avoid overlap */}
+      {uiScreen !== "result" && (
+        <SystemStatusBadge thermalWarning={thermalWarning} />
+      )}
     </div>
   );
 }

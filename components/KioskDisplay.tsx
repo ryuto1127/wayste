@@ -870,7 +870,10 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
             if (worldBest.confidence >= thresholdsRef.current.YOLO_WORLD_ACCEPT_THRESHOLD) {
               const result = resolveYoloWorldDetection(worldBest, siteConfigRef.current!);
               if (result) {
-                console.log(`[tier2] YOLO World HIT: ${worldBest.className} (${(worldBest.confidence * 100).toFixed(1)}%) → ${result.wasteStream} in ${worldMs}ms`);
+                // Apply material refinement (same as Tier 1)
+                const worldHint = analyzeMaterial(video, worldBest.bbox);
+                result.itemName = refineClassName(result.itemName, worldHint);
+                console.log(`[tier2] YOLO World HIT: ${worldBest.className} (${(worldBest.confidence * 100).toFixed(1)}%) → ${result.itemName} [${result.wasteStream}] in ${worldMs}ms`);
                 apiController.abort();
                 logYoloOnlyResult(video, result, yoloDetections, yoloMs + worldMs, analysis, "yolo-world");
                 handleClassificationResult(result, undefined);
@@ -891,9 +894,14 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
               else handleClassificationError(new Error("API returned no result"));
             })
             .catch((err) => {
-              // Fallback: use whatever local detection we had
-              const fallbackName = yoloBest?.className ?? (worldDetections[0]?.className);
-              const fallbackConf = yoloBest?.confidence ?? (worldDetections[0]?.confidence ?? 0.1);
+              // Fallback: use whatever local detection we had, with material refinement
+              const fallbackDet = worldDetections[0];
+              let fallbackName = yoloBest?.className ?? fallbackDet?.className;
+              const fallbackConf = yoloBest?.confidence ?? (fallbackDet?.confidence ?? 0.1);
+              if (fallbackName && fallbackDet) {
+                const fbHint = analyzeMaterial(video, fallbackDet.bbox);
+                fallbackName = refineClassName(fallbackName, fbHint);
+              }
               if (fallbackName) {
                 handleClassificationResult(buildOfflineFallback(fallbackName, fallbackConf), undefined);
               } else {

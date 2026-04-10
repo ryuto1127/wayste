@@ -438,10 +438,10 @@ export function refineClassName(className: string, hint: MaterialHint): string {
     }
   }
 
-  // ── transparent + low saturation (no dominant hue) → PET bottle or plastic cup ──
+  // ── transparent + low saturation (no dominant hue) → PET bottle ──
   if (hint.isTransparent && hint.saturation < 0.15) {
     if (lower.includes("bottle") || lower.includes("cup") || lower.includes("container")) {
-      return ar < 0.6 ? "PET bottle" : "plastic cup";
+      return "PET bottle";
     }
   }
 

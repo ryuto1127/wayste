@@ -81,7 +81,7 @@ export interface YoloDetectionLog {
 // ── Pilot log entry (server-side) ──
 export interface PilotLogEntry {
   timestamp: string;
-  modelUsed: "nano" | "mini" | "yolo-local" | "yolo-world";
+  modelUsed: "mini" | "yolo-local" | "yolo-world";
   escalated: boolean;
   itemName: string;
   wasteStream: string;
@@ -96,6 +96,17 @@ export interface PilotLogEntry {
   yoloDetections?: YoloDetectionLog[];
   /** Whether an override was applied to change the model's original prediction. */
   overrideApplied?: boolean;
+  /** RGB material analysis results (when YOLO ran). */
+  rgbAnalysis?: {
+    dominantHue: number;
+    saturation: number;
+    isMetallic: boolean;
+    isTransparent: boolean;
+    bboxAspectRatio: number;
+    refinedFrom?: string;
+    refinedTo?: string;
+    textureSurface?: string;
+  };
 }
 
 /**
@@ -149,7 +160,7 @@ export interface ClassificationResponse {
   needsReview: boolean;
   isCompound: boolean;
   components?: ComponentPart[];
-  modelUsed?: "nano" | "mini" | "yolo-local" | "yolo-world";
+  modelUsed?: "mini" | "yolo-local" | "yolo-world";
   imageUrl?: string;  // Vercel Blob URL of the captured frame
 }
 

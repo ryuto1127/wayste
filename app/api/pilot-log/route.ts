@@ -78,6 +78,7 @@ export async function POST(request: Request) {
         requestId,
         meta: entry.meta,
         yoloDetections: entry.yoloDetections,
+        rgbAnalysis: entry.rgbAnalysis,
       });
 
       // Check for milestone notification (non-blocking, best-effort)

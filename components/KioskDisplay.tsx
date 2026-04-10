@@ -27,7 +27,7 @@ import {
   YOLO_API_PARALLEL_THRESHOLD,
 } from "@/lib/inference-backend";
 import { computeThresholds, type ThresholdConfig } from "@/lib/threshold-config";
-import { loadYoloRules, loadYoloWorldRules, resolveYoloDetection, resolveYoloWorldDetection, isYoloClassNotWaste } from "@/lib/yolo-rules";
+import { loadYoloRules, loadYoloWorldRules, resolveYoloDetection, resolveYoloWorldDetection, resolvePetBottleCompound, isYoloClassNotWaste } from "@/lib/yolo-rules";
 import { analyzeMaterial, refineClassName } from "@/lib/rgb-material-analyzer";
 import type { MaterialHint } from "@/lib/types";
 // kioskAuthHeaders replaced by session token (server-generated, HMAC-signed)
@@ -594,6 +594,8 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       latencyMs: number,
       analysis: FrameAnalysis,
       modelUsed: "yolo-local" | "yolo-world" = "yolo-local",
+      hint?: MaterialHint,
+      refinedFrom?: string,
     ) {
       // Capture the same center short-side square that YOLO sees (e.g. 720×720
       // from 1280×720). Log images preserve full resolution for fine-tuning.
@@ -631,6 +633,22 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
                   sharpnessScore: analysis.sharpnessScore,
                   imageQuality: imageQualityBand(analysis),
                 },
+                ...(hint && {
+                  rgbAnalysis: {
+                    dominantHue: hint.dominantHue,
+                    saturation: hint.saturation,
+                    isMetallic: hint.isMetallic,
+                    isTransparent: hint.isTransparent,
+                    bboxAspectRatio: hint.bboxAspectRatio,
+                    ...(refinedFrom && refinedFrom !== result.itemName && {
+                      refinedFrom,
+                      refinedTo: result.itemName,
+                    }),
+                    ...(hint.texture?.suggestedSurface && hint.texture.suggestedSurface !== "unknown" && {
+                      textureSurface: hint.texture.suggestedSurface,
+                    }),
+                  },
+                }),
               },
             }),
           }).catch(() => {}); // best-effort
@@ -709,6 +727,8 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           // Collect resolved results from matched + unmatched blobs
           const resolvedResults: ClassificationResponse[] = [];
           const unresolvedForApi: BlobInfo[] = [];
+          let firstResolvedHint: MaterialHint | undefined;
+          let firstResolvedOriginalName: string | undefined;
 
           for (const { blob, detection } of matchedBlobs) {
             if (detection) {
@@ -718,7 +738,12 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
                 const r = resolveYoloDetection(detection, siteConfigRef.current!, localeRef.current);
                 if (r) {
                   const detHint = analyzeMaterial(video, detection.bbox);
+                  const originalName = r.itemName;
                   r.itemName = refineClassName(r.itemName, detHint);
+                  if (resolvedResults.length === 0) {
+                    firstResolvedHint = detHint;
+                    firstResolvedOriginalName = originalName;
+                  }
                   resolvedResults.push(r);
                   continue;
                 }
@@ -738,7 +763,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           // If we have high-confidence results and nothing unresolved, deliver instantly
           if (resolvedResults.length > 0 && unresolvedForApi.length === 0) {
             console.log(`[tier1] YOLO HIT: ${resolvedResults.map((r) => r.itemName).join(" + ")} in ${yoloMs}ms`);
-            logYoloOnlyResult(video, resolvedResults[0], detections, yoloMs, analysis);
+            logYoloOnlyResult(video, resolvedResults[0], detections, yoloMs, analysis, "yolo-local", firstResolvedHint, firstResolvedOriginalName);
             handleMultiClassificationResults(resolvedResults, resolvedResults.map(() => undefined));
             return;
           }
@@ -865,6 +890,18 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           const worldMs = Date.now() - worldStart;
 
           if (worldDetections.length > 0) {
+            // PET bottle compound check: bottle + cap/label detected together
+            if (worldDetections.length >= 2) {
+              const compoundResult = resolvePetBottleCompound(worldDetections, siteConfigRef.current!, localeRef.current);
+              if (compoundResult) {
+                console.log(`[tier2] PET bottle compound: ${worldDetections.map(d => d.className).join(" + ")} in ${worldMs}ms`);
+                apiController.abort();
+                logYoloOnlyResult(video, compoundResult, [...yoloDetections, ...worldDetections], yoloMs + worldMs, analysis, "yolo-world");
+                handleClassificationResult(compoundResult, undefined);
+                return;
+              }
+            }
+
             const worldBest = worldDetections[0];
 
             if (worldBest.confidence >= thresholdsRef.current.YOLO_WORLD_ACCEPT_THRESHOLD) {
@@ -872,10 +909,11 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
               if (result) {
                 // Apply material refinement (same as Tier 1)
                 const worldHint = analyzeMaterial(video, worldBest.bbox);
+                const worldOriginalName = result.itemName;
                 result.itemName = refineClassName(result.itemName, worldHint);
                 console.log(`[tier2] YOLO World HIT: ${worldBest.className} (${(worldBest.confidence * 100).toFixed(1)}%) → ${result.itemName} [${result.wasteStream}] in ${worldMs}ms`);
                 apiController.abort();
-                logYoloOnlyResult(video, result, [...yoloDetections, ...worldDetections], yoloMs + worldMs, analysis, "yolo-world");
+                logYoloOnlyResult(video, result, [...yoloDetections, ...worldDetections], yoloMs + worldMs, analysis, "yolo-world", worldHint, worldOriginalName);
                 handleClassificationResult(result, undefined);
                 return;
               }

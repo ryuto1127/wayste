@@ -111,21 +111,21 @@ describe("refineClassName", () => {
     expect(refineClassName("box", hint)).not.toBe("paper carton");
   });
 
-  // ── New rule: transparent + no dominant hue → PET bottle / plastic cup ──
+  // ── New rule: transparent + no dominant hue → PET bottle ──
 
   it("refines 'bottle' + transparent + low sat → 'PET bottle' (tall bbox)", () => {
     const hint = makeHint({ isTransparent: true, saturation: 0.05, bboxAspectRatio: 0.4 });
     expect(refineClassName("bottle", hint)).toBe("PET bottle");
   });
 
-  it("refines 'cup' + transparent + low sat → 'plastic cup' (short bbox)", () => {
+  it("refines 'cup' + transparent + low sat → 'PET bottle'", () => {
     const hint = makeHint({ isTransparent: true, saturation: 0.05, bboxAspectRatio: 0.8 });
-    expect(refineClassName("cup", hint)).toBe("plastic cup");
+    expect(refineClassName("cup", hint)).toBe("PET bottle");
   });
 
-  it("refines 'container' + transparent + low sat → 'plastic cup' (wide bbox)", () => {
+  it("refines 'container' + transparent + low sat → 'PET bottle'", () => {
     const hint = makeHint({ isTransparent: true, saturation: 0.1, bboxAspectRatio: 1.0 });
-    expect(refineClassName("container", hint)).toBe("plastic cup");
+    expect(refineClassName("container", hint)).toBe("PET bottle");
   });
 
   // ── New rule: brown hue + low saturation + opaque → cardboard ──

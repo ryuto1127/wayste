@@ -6,7 +6,7 @@ import { runInBackground } from "@/lib/background-task";
 import { generateRequestId } from "@/lib/request-id";
 import { del as deleteBlob } from "@vercel/blob";
 import type { PilotLogEntry } from "@/lib/types";
-import { validateSessionToken } from "@/lib/session-token";
+
 import { checkAndSendMilestoneNotification } from "@/lib/milestone-check";
 
 export async function GET(request: Request) {
@@ -37,23 +37,6 @@ export async function GET(request: Request) {
  * Called by the client when YOLO wins the race and the API is aborted.
  */
 export async function POST(request: Request) {
-  // ── Session token validation ──
-  const sessionToken = request.headers.get("x-session-token");
-  if (sessionToken) {
-    const result = validateSessionToken(sessionToken);
-    if (!result.valid) {
-      return NextResponse.json(
-        { error: "Invalid or expired session.", reason: result.reason },
-        { status: 401 }
-      );
-    }
-  } else if (process.env.NODE_ENV === "production") {
-    return NextResponse.json(
-      { error: "Session token required." },
-      { status: 401 }
-    );
-  }
-
   let body: unknown;
   try {
     body = await request.json();

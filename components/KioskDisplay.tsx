@@ -98,18 +98,11 @@ function toDetectionLogs(detections: YoloDetection[]): YoloDetectionLog[] {
 
 interface KioskDisplayProps {
   defaultLocale?: Locale;
-  /** Server-generated session token for API authentication. */
-  sessionToken?: string;
 }
 
-/** How often to refresh the session token (3 hours — token TTL is 4 hours). */
-const TOKEN_REFRESH_MS = 3 * 60 * 60 * 1000;
-
-export default function KioskDisplay({ defaultLocale, sessionToken: initialToken }: KioskDisplayProps) {
+export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
   const cameraRef = useRef<CameraFeedHandle>(null);
   const analyzerRef = useRef<FrameAnalyzer | null>(null);
-  /** Current session token — refreshed periodically. */
-  const sessionTokenRef = useRef<string>(initialToken ?? "");
 
   // ── Model loading state ──
   const [overallReady, setOverallReady] = useState(false);
@@ -144,20 +137,6 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
       return next;
     });
   }, []);
-
-  // ── Session token refresh (runs every 3 hours) ──
-  useEffect(() => {
-    if (!initialToken) return; // dev mode — no token
-    const id = setInterval(() => {
-      fetch("/api/session")
-        .then((r) => r.json())
-        .then((data: { token?: string }) => {
-          if (data.token) sessionTokenRef.current = data.token;
-        })
-        .catch(() => {});
-    }, TOKEN_REFRESH_MS);
-    return () => clearInterval(id);
-  }, [initialToken]);
 
   // ── CV counters (refs to avoid re-renders) ──
   const goneCountRef = useRef(0);
@@ -305,12 +284,13 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
           const reqBody = { image: frame, meta, locale, yoloDetections, materialHint };
           const res = await fetch("/api/classify", {
             method: "POST",
-            headers: { "Content-Type": "application/json", ...(sessionTokenRef.current ? { "x-session-token": sessionTokenRef.current } : {}) },
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify(reqBody),
             signal: controller.signal,
           });
           const fetchDoneMs = Date.now() - fetchStartMs;
 
+          // ── 429: rate limit retry ──
           if (res.status === 429) {
             console.warn(`[classify] Got 429, retrying after ${RATE_LIMIT_RETRY_MS}ms`);
             await new Promise((r) => setTimeout(r, RATE_LIMIT_RETRY_MS));
@@ -319,7 +299,7 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
             const retryTimeout = setTimeout(() => retryController.abort(), API_TIMEOUT_MS);
             const retryRes = await fetch("/api/classify", {
               method: "POST",
-              headers: { "Content-Type": "application/json", ...(sessionTokenRef.current ? { "x-session-token": sessionTokenRef.current } : {}) },
+              headers: { "Content-Type": "application/json" },
               body: JSON.stringify(reqBody),
               signal: retryController.signal,
             });
@@ -635,7 +615,7 @@ export default function KioskDisplay({ defaultLocale, sessionToken: initialToken
           if (!frame) return;
           fetch("/api/pilot-log", {
             method: "POST",
-            headers: { "Content-Type": "application/json", ...(sessionTokenRef.current ? { "x-session-token": sessionTokenRef.current } : {}) },
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               image: frame,
               entry: {

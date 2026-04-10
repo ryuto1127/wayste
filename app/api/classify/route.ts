@@ -14,7 +14,7 @@ import { runInBackground } from "@/lib/background-task";
 import { uploadFrameToBlob } from "@/lib/blob-store";
 import { redis } from "@/lib/redis";
 import { generateRequestId } from "@/lib/request-id";
-import { validateSessionToken } from "@/lib/session-token";
+
 import { recordCalibrationPrediction } from "@/lib/calibration";
 
 // ── Shared sub-schemas ──
@@ -219,25 +219,6 @@ function shouldEscalate(
 }
 
 export async function POST(request: Request) {
-  // ── Session token validation ──
-  // In production, session tokens are mandatory. In dev mode (NODE_ENV !== "production"),
-  // requests without tokens fall through to rate limiting only.
-  const sessionToken = request.headers.get("x-session-token");
-  if (sessionToken) {
-    const result = validateSessionToken(sessionToken);
-    if (!result.valid) {
-      return NextResponse.json(
-        { error: "Invalid or expired session. Please reload the page.", reason: result.reason },
-        { status: 401 }
-      );
-    }
-  } else if (process.env.NODE_ENV === "production") {
-    return NextResponse.json(
-      { error: "Session token required. Please reload the page." },
-      { status: 401 }
-    );
-  }
-
   // ── Redis-based rate limiting ──
   const clientId =
     request.headers.get("x-real-ip")

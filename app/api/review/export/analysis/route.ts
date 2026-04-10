@@ -20,7 +20,6 @@
 
 import { NextResponse } from "next/server";
 import { redis, KEYS } from "@/lib/redis";
-import { requireApiKey } from "@/lib/auth";
 import type { PilotLogEntry } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -43,9 +42,7 @@ interface AnalysisEntry {
 }
 
 export async function GET(request: Request) {
-  const denied = requireApiKey(request);
-  if (denied) return denied;
-
+  // Auth is handled by middleware (session cookie / Basic Auth / x-api-key)
   const { searchParams } = new URL(request.url);
 
   // ── Parse filters ──

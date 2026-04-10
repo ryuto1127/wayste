@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { redis, KEYS, MAX_ENTRIES } from "@/lib/redis";
+import { redis, KEYS } from "@/lib/redis";
 import { logPilotEntry } from "@/lib/pilot-log";
 import { uploadFrameToBlob } from "@/lib/blob-store";
 import { runInBackground } from "@/lib/background-task";
@@ -9,7 +9,7 @@ import type { PilotLogEntry } from "@/lib/types";
 
 import { checkAndSendMilestoneNotification } from "@/lib/milestone-check";
 
-export async function GET(request: Request) {
+export async function GET(_request: Request) {
   // GET is read-only (review page) — no auth required.
 
   try {

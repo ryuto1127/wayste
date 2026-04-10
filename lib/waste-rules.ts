@@ -2,8 +2,6 @@ import { readFileSync } from "fs";
 import { join } from "path";
 import type {
   SiteConfig,
-  ClassificationResponse,
-  ComponentPart,
   LocalModelCandidate,
   MaterialHint,
 } from "./types";

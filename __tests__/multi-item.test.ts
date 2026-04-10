@@ -201,8 +201,8 @@ describe("Blob-to-detection matching", () => {
 describe("Unmatched blob routing", () => {
   it("high-quality unmatched blob should be sent to API (blobIsObject=true)", () => {
     const blob = makeBlob({
-      sharpness: 500,
-      contrastScore: 40,
+      sharpness: BLOB_MIN_SHARPNESS + 100,
+      contrastScore: BLOB_MIN_CONTRAST + 20,
       skinRatio: 0.1,
     });
     // No YOLO match, but blobIsObject → should go to API

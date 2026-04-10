@@ -12,7 +12,6 @@ import type {
   StreamDefinition,
   ClassificationResponse,
   ComponentPart,
-  CompoundConfig,
 } from "./types";
 
 /**

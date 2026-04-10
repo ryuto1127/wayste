@@ -1040,29 +1040,6 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
         });
     }
 
-    /** Build a provisional result shown instantly while the API processes. */
-    function buildOptimisticResult(
-      className: string,
-      confidence: number,
-    ): ClassificationResponse {
-      const streams = siteConfigRef.current?.streams ?? [];
-      const defaultStream = siteConfigRef.current?.defaultStream ?? "landfill";
-      const sd = streams.find((s) => s.id === defaultStream);
-      return {
-        itemName: className,
-        wasteStream: defaultStream,
-        confidence: Math.min(confidence, 0.4),
-        reasoning: localeRef.current === "ja"
-          ? "AI が詳細を分析中です..."
-          : "AI is refining the classification...",
-        binColor: sd?.color ?? "#525252",
-        binLabel: sd?.label ?? defaultStream,
-        needsReview: false,
-        isCompound: false,
-        modelUsed: "yolo-local",
-      };
-    }
-
     /** Build a minimal classification result for offline/fallback scenarios. */
     function buildOfflineFallback(
       className: string,
@@ -1127,7 +1104,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       nothingDetectedCountRef.current = 0;
       setStableResults(valid);
       setResultRequestIds(
-        valid.map((r, i) => requestIds[results.indexOf(r)] ?? r.requestId)
+        valid.map((r) => requestIds[results.indexOf(r)] ?? r.requestId)
       );
       setError(null);
       goneCountRef.current = 0;
@@ -1215,7 +1192,6 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       const result = await classify(frame, meta, yoloDetections, materialHint);
       return { result, requestId: result.requestId };
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [classify, transition, T]);
 
 

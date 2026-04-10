@@ -270,7 +270,7 @@ export async function POST(request: Request) {
       ? prompt + "\nNo local model could identify this item. Classify from the image alone."
       : prompt;
     const raw = await callModel(openai, "gpt-5.4-mini", image, promptFinal);
-    const modelUsed: "mini" = "mini";
+    const modelUsed = "mini" as const;
 
     // Build result + conditional overrides
     const result = buildClassificationResult(raw, siteConfig, locale);

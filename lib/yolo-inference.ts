@@ -123,7 +123,7 @@ export async function warmUpYolo(): Promise<void> {
  */
 export async function runYoloInference(
   video: HTMLVideoElement,
-  roiMargin = 0.15,
+  _roiMargin = 0.15,
   minBoxArea = 1500,
   confidenceThreshold = 0.65,
 ): Promise<YoloDetection[]> {

@@ -147,7 +147,7 @@ export async function runYoloWorldInference(
   video: HTMLVideoElement,
   roiMargin = 0.15,
   minBoxArea = 1500,
-  confidenceThreshold = 0.45,
+  confidenceThreshold = 0.75,
 ): Promise<YoloDetection[]> {
   if (!session || !ort) return [];
 

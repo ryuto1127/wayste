@@ -57,6 +57,7 @@ RECYCLING_CLASSES = [
     "battery",
     "cigarette butt",
     "pen",
+    "plastic bottle label",
 ]
 
 OUTPUT_DIR = Path(__file__).parent.parent / "public" / "models"

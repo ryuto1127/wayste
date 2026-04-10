@@ -4,7 +4,7 @@
  * Exports images for entries that need retraining:
  *   - All "wrong" verdicts (model misidentified the object)
  *   - "correct" verdicts with confidence ≤ 0.80 (model was right but unsure)
- *   - "correct" verdicts from non-YOLO models (yolo-world/nano/mini) at any
+ *   - "correct" verdicts from non-YOLO models (yolo-world/mini) at any
  *     confidence — YOLO couldn't classify alone, so these fill training gaps
  *
  * Images are named by timestamp (e.g. 2026-04-04T10-23-15.jpg) and delivered

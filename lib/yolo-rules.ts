@@ -174,3 +174,74 @@ export function resolveYoloWorldDetection(
   result.modelUsed = "yolo-world";
   return result;
 }
+
+/** Class names that indicate PET bottle components. */
+const PET_BOTTLE_CLASSES = new Set(["plastic bottle"]);
+const PET_ACCESSORY_CLASSES = new Set(["plastic bottle cap", "plastic bottle label"]);
+
+/**
+ * Check if YOLO World detections contain a PET bottle with cap/label still
+ * attached. If so, build a compound ClassificationResponse with per-component
+ * separation instructions.
+ *
+ * Returns `null` when the detections don't match the PET-compound pattern —
+ * caller should proceed with normal resolution.
+ */
+export function resolvePetBottleCompound(
+  detections: YoloDetection[],
+  siteConfig: SiteConfig,
+  locale: string = "en",
+): ClassificationResponse | null {
+  const bottle = detections.find((d) => PET_BOTTLE_CLASSES.has(d.className));
+  if (!bottle) return null;
+
+  const accessories = detections.filter((d) => PET_ACCESSORY_CLASSES.has(d.className));
+  if (accessories.length === 0) return null;
+
+  // We have bottle + at least one accessory → compound result
+  const ja = locale === "ja";
+
+  const components: { partName: string; wasteStream: string; instruction: string }[] = [
+    {
+      partName: ja ? "ペットボトル本体" : "PET bottle",
+      wasteStream: "recycling",
+      instruction: ja ? "中を空にして洗い、資源ゴミへ" : "Empty, rinse, and recycle",
+    },
+  ];
+
+  for (const acc of accessories) {
+    if (acc.className === "plastic bottle cap") {
+      components.push({
+        partName: ja ? "キャップ" : "Bottle cap",
+        wasteStream: siteConfig.streams.find((s) => s.id === "plastic") ? "plastic" : "recycling",
+        instruction: ja ? "キャップを外してプラスチックへ" : "Remove cap and place in plastic waste",
+      });
+    } else if (acc.className === "plastic bottle label") {
+      components.push({
+        partName: ja ? "ラベル" : "Bottle label",
+        wasteStream: siteConfig.streams.find((s) => s.id === "plastic") ? "plastic" : "recycling",
+        instruction: ja ? "ラベルを剥がしてプラスチックへ" : "Peel off label and place in plastic waste",
+      });
+    }
+  }
+
+  const bottleStream = siteConfig.streams.find((s) => s.id === "recycling");
+
+  return {
+    itemName: ja ? "ペットボトル" : "PET Bottle",
+    wasteStream: "recycling",
+    confidence: bottle.confidence,
+    reasoning: ja
+      ? "キャップやラベルを外してから分別してください"
+      : "Remove cap and label before recycling the bottle",
+    preAction: ja
+      ? "キャップとラベルを外してください"
+      : "Remove the cap and label",
+    binColor: bottleStream?.color ?? "#3B82F6",
+    binLabel: bottleStream?.label ?? "Recycling",
+    needsReview: false,
+    isCompound: true,
+    components,
+    modelUsed: "yolo-world",
+  };
+}

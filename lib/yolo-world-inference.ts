@@ -3,7 +3,7 @@
  *
  * Used as a fallback when YOLO26m (COCO-80) has low confidence or the
  * detected class is not waste-relevant. The model is exported with pre-baked
- * recycling-specific class embeddings (35 classes) — no CLIP encoder needed
+ * recycling-specific class embeddings (36 classes) — no CLIP encoder needed
  * at runtime.
  *
  * Heavier than YOLO26m (~50 MB vs 39 MB), so loaded on-demand and not run
@@ -64,6 +64,7 @@ export const YOLO_WORLD_CLASSES = [
   "battery",
   "cigarette butt",
   "pen",
+  "plastic bottle label",
 ];
 
 /**

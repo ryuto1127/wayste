@@ -32,11 +32,11 @@ describe("computeThresholds", () => {
     });
 
     it("derives strict YOLO_FALLBACK_THRESHOLD", () => {
-      expect(th.YOLO_FALLBACK_THRESHOLD).toBeCloseTo(0.75, 4);
+      expect(th.YOLO_FALLBACK_THRESHOLD).toBeCloseTo(0.85, 4);
     });
 
     it("derives strict YOLO_WORLD_ACCEPT_THRESHOLD", () => {
-      expect(th.YOLO_WORLD_ACCEPT_THRESHOLD).toBeCloseTo(0.55, 4);
+      expect(th.YOLO_WORLD_ACCEPT_THRESHOLD).toBeCloseTo(0.85, 4);
     });
 
     it("uses 3 FG_PERSIST_FRAMES for strict sensitivity", () => {
@@ -59,12 +59,12 @@ describe("computeThresholds", () => {
       expect(th.ROI_BLOB_DIAGONAL_THRESHOLD).toBeCloseTo(0.375, 4);
     });
 
-    it("derives default YOLO_FALLBACK_THRESHOLD (0.65)", () => {
-      expect(th.YOLO_FALLBACK_THRESHOLD).toBeCloseTo(0.65, 4);
+    it("derives default YOLO_FALLBACK_THRESHOLD (0.75)", () => {
+      expect(th.YOLO_FALLBACK_THRESHOLD).toBeCloseTo(0.75, 4);
     });
 
-    it("derives default YOLO_WORLD_ACCEPT_THRESHOLD (0.45)", () => {
-      expect(th.YOLO_WORLD_ACCEPT_THRESHOLD).toBeCloseTo(0.45, 4);
+    it("derives default YOLO_WORLD_ACCEPT_THRESHOLD (0.75)", () => {
+      expect(th.YOLO_WORLD_ACCEPT_THRESHOLD).toBeCloseTo(0.75, 4);
     });
 
     it("uses 3 FG_PERSIST_FRAMES at default sensitivity", () => {
@@ -88,11 +88,11 @@ describe("computeThresholds", () => {
     });
 
     it("derives sensitive YOLO_FALLBACK_THRESHOLD", () => {
-      expect(th.YOLO_FALLBACK_THRESHOLD).toBeCloseTo(0.55, 4);
+      expect(th.YOLO_FALLBACK_THRESHOLD).toBeCloseTo(0.65, 4);
     });
 
     it("derives sensitive YOLO_WORLD_ACCEPT_THRESHOLD", () => {
-      expect(th.YOLO_WORLD_ACCEPT_THRESHOLD).toBeCloseTo(0.35, 4);
+      expect(th.YOLO_WORLD_ACCEPT_THRESHOLD).toBeCloseTo(0.65, 4);
     });
 
     it("uses 2 FG_PERSIST_FRAMES for high sensitivity", () => {
@@ -126,7 +126,7 @@ describe("computeThresholds", () => {
     it("does not affect non-ROI thresholds", () => {
       const th = computeThresholds(0.5, calibration);
       // YOLO thresholds still depend on sensitivity, not calibration
-      expect(th.YOLO_FALLBACK_THRESHOLD).toBeCloseTo(0.65, 4);
+      expect(th.YOLO_FALLBACK_THRESHOLD).toBeCloseTo(0.75, 4);
       expect(th.ROI_BLOB_DIAGONAL_THRESHOLD).toBeCloseTo(0.375, 4);
     });
 
@@ -164,10 +164,10 @@ describe("computeThresholds", () => {
       expect(th.ROI_FG_THRESHOLD).toBeCloseTo(th05.ROI_FG_THRESHOLD, 6);
     });
 
-    it("maintains tier ordering: YOLO_WORLD_ACCEPT < YOLO_FALLBACK", () => {
+    it("maintains tier ordering: YOLO_WORLD_ACCEPT <= YOLO_FALLBACK", () => {
       for (const s of [0.0, 0.25, 0.5, 0.75, 1.0]) {
         const th = computeThresholds(s);
-        expect(th.YOLO_WORLD_ACCEPT_THRESHOLD).toBeLessThan(th.YOLO_FALLBACK_THRESHOLD);
+        expect(th.YOLO_WORLD_ACCEPT_THRESHOLD).toBeLessThanOrEqual(th.YOLO_FALLBACK_THRESHOLD);
       }
     });
   });

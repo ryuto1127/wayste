@@ -57,57 +57,7 @@ export function loadSiteConfig(siteId: string = "default"): SiteConfig {
 }
 
 /**
- * Concise prompt for GPT-5.4 nano — focused on fast, structured classification.
- * No compound-item handling; that escalates to mini.
- */
-export function buildNanoPrompt(
-  siteConfig: SiteConfig,
-  locale = "en",
-  options?: { localCandidates?: LocalModelCandidate[]; materialHint?: MaterialHint },
-): string {
-  const streamIds = siteConfig.streams.map((s) => s.id);
-  const streams = siteConfig.streams
-    .map((s) => `"${s.id}" (${s.label})`)
-    .join(", ");
-
-  const overridesSection =
-    siteConfig.overrides && siteConfig.overrides.length > 0
-      ? `\nItem rules — these override your general knowledge:\n${siteConfig.overrides.map((o) => `- ${o.pattern} → ${o.stream}`).join("\n")}\n`
-      : "";
-
-  const canonicalSection =
-    siteConfig.canonicalNames && siteConfig.canonicalNames.length > 0
-      ? `\nPreferred item names (use one of these when the item matches; only use a different name if none fit):\n${siteConfig.canonicalNames.join(", ")}\n`
-      : "";
-
-  const langNote =
-    locale === "ja"
-      ? "\nIMPORTANT: Write itemName and reasoning in Japanese (日本語). wasteStream must remain the English stream_id."
-      : "";
-
-  const candidatesSection = formatLocalCandidates(options?.localCandidates);
-  const materialSection = formatMaterialHint(options?.materialHint);
-
-  return `You are a waste sorting camera at "${siteConfig.siteName}".
-Identify the item being held in front of the camera and classify it.
-
-Streams: ${streams}
-${overridesSection}${canonicalSection}
-wasteStream must be exactly one of: ${streamIds.join(", ")}
-If the item does not clearly fit any stream, use "needs_review".
-
-If the item appears transparent or translucent, identify the specific material (clear PET, clear glass, clear PP, etc.).
-${candidatesSection}${materialSection}
-Respond with ONLY this JSON:
-{"itemName":"short name","wasteStream":"stream_id","confidence":0.0-1.0,"reasoning":"one sentence","preAction":""}
-
-If the user should do something before disposing (empty contents, remove lid, rinse, disassemble), put a short instruction in preAction. Otherwise leave it as an empty string.
-If the image is unclear, blurry, or shows no item, set confidence to 0 and itemName to "nothing detected".
-Be honest about confidence — do not inflate it when uncertain.${langNote}`;
-}
-
-/**
- * Detailed prompt for GPT-5.4 mini — handles compound items, detailed reasoning.
+ * Classification prompt for GPT-5.4 mini — handles compound items, detailed reasoning.
  */
 export function buildClassificationPrompt(
   siteConfig: SiteConfig,

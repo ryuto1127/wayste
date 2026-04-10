@@ -187,6 +187,12 @@
       "itemName": "Pen",
       "wasteStream": "landfill",
       "reasoning": "Pens contain mixed materials and ink, making them generally non-recyclable."
+    },
+    "plastic bottle label": {
+      "itemName": "Plastic Bottle Label",
+      "wasteStream": "plastic",
+      "reasoning": "Shrink-wrap labels on bottles are typically PP or PVC film — remove and dispose as plastic waste.",
+      "preAction": "Peel off the label from the bottle"
     }
   }
 }

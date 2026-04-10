@@ -492,7 +492,7 @@ function EntryCard({
 // ── Analysis Export Panel ──
 
 type AnalysisVerdict = "correct" | "wrong" | "false_detection" | "unreviewed";
-type AnalysisModel = "yolo-local" | "yolo-world" | "nano" | "mini";
+type AnalysisModel = "yolo-local" | "yolo-world" | "mini";
 
 function AnalysisExportPanel({ locale }: { locale: Locale }) {
   const [open, setOpen] = useState(false);
@@ -574,7 +574,6 @@ function AnalysisExportPanel({ locale }: { locale: Locale }) {
   const modelOptions: { value: AnalysisModel; label: string }[] = [
     { value: "yolo-local", label: "YOLO (Tier 1)" },
     { value: "yolo-world", label: "YOLO World (Tier 2)" },
-    { value: "nano", label: "GPT nano" },
     { value: "mini", label: "GPT mini" },
   ];
 

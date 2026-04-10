@@ -8,7 +8,7 @@ import {
   buildClassificationResult,
   loadSiteConfig,
   matchesPattern,
-  buildNanoPrompt,
+  buildClassificationPrompt,
 } from "@/lib/waste-rules";
 import type { MaterialHint, SiteConfig } from "@/lib/types";
 
@@ -409,7 +409,7 @@ describe("conditional overrides", () => {
   });
 });
 
-describe("buildNanoPrompt — materialHint integration", () => {
+describe("buildClassificationPrompt — materialHint integration", () => {
   it("includes material data in prompt when materialHint is provided", () => {
     const hint: MaterialHint = {
       dominantHue: 120,
@@ -420,7 +420,7 @@ describe("buildNanoPrompt — materialHint integration", () => {
       bboxAspectRatio: 0.5,
       texture: { uniformity: 0.6, edgeDensity: 0.2, suggestedSurface: "plastic" },
     };
-    const prompt = buildNanoPrompt(defaultConfig, "en", { materialHint: hint });
+    const prompt = buildClassificationPrompt(defaultConfig, "en", { materialHint: hint });
     expect(prompt).toContain("Dominant hue: 120");
     expect(prompt).toContain("Transparency: likely");
     expect(prompt).toContain("Bbox aspect ratio");
@@ -429,7 +429,7 @@ describe("buildNanoPrompt — materialHint integration", () => {
   });
 
   it("does NOT include material section when materialHint is absent", () => {
-    const prompt = buildNanoPrompt(defaultConfig, "en");
+    const prompt = buildClassificationPrompt(defaultConfig, "en");
     expect(prompt).not.toContain("Local analysis of detected region");
     expect(prompt).not.toContain("Dominant hue");
   });

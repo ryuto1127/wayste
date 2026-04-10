@@ -12,6 +12,7 @@
 import {
   resolveYoloDetection,
   resolveYoloWorldDetection,
+  resolvePetBottleCompound,
   _setRulesCache,
   _setWorldRulesCache,
 } from "@/lib/yolo-rules";
@@ -264,6 +265,20 @@ describe("Tier 2: YOLO World detection → waste stream", () => {
     });
   });
 
+  it("plastic bottle label → plastic", () => {
+    const configWithPlastic = makeSiteConfig({
+      streams: [
+        { id: "recycling", label: "Recycling", color: "#2563EB", description: "" },
+        { id: "plastic", label: "Plastic", color: "#F59E0B", description: "" },
+        { id: "landfill", label: "Landfill", color: "#525252", description: "" },
+      ],
+    });
+    const result = resolveYoloWorldDetection(makeDetection("plastic bottle label"), configWithPlastic);
+    expect(result).not.toBeNull();
+    expect(result!.wasteStream).toBe("plastic");
+    expect(result!.modelUsed).toBe("yolo-world");
+  });
+
   it("returns null for unknown class names", () => {
     const result = resolveYoloWorldDetection(makeDetection("spaceship"), config);
     expect(result).toBeNull();
@@ -317,8 +332,8 @@ describe("Rules JSON integrity", () => {
     expect(Object.keys(yoloRules.rules)).toHaveLength(80);
   });
 
-  it("YOLO World rules has all 35 recycling classes", () => {
-    expect(Object.keys(worldRules.rules)).toHaveLength(35);
+  it("YOLO World rules has all 36 recycling classes", () => {
+    expect(Object.keys(worldRules.rules)).toHaveLength(36);
   });
 
   it("every YOLO rule has required fields", () => {
@@ -345,13 +360,109 @@ describe("Rules JSON integrity", () => {
   });
 
   it("all waste streams in rules are valid", () => {
-    const validStreams = new Set(["recycling", "compost", "landfill", "special", "needs_review", "not_waste"]);
+    const validStreams = new Set(["recycling", "compost", "landfill", "special", "plastic", "needs_review", "not_waste"]);
     for (const rule of Object.values(yoloRules.rules)) {
       expect(validStreams.has(rule.wasteStream)).toBe(true);
     }
     for (const rule of Object.values(worldRules.rules)) {
       expect(validStreams.has(rule.wasteStream)).toBe(true);
     }
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// PET bottle compound detection
+// ═══════════════════════════════════════════════════════════════════
+
+describe("PET bottle compound detection", () => {
+  const configWithPlastic = makeSiteConfig({
+    streams: [
+      { id: "recycling", label: "Recycling", color: "#2563EB", description: "" },
+      { id: "plastic", label: "Plastic", color: "#F59E0B", description: "" },
+      { id: "landfill", label: "Landfill", color: "#525252", description: "" },
+    ],
+  });
+
+  it("bottle + cap → compound result with separation instructions", () => {
+    const detections = [
+      makeDetection("plastic bottle", 0.9),
+      makeDetection("plastic bottle cap", 0.8),
+    ];
+    const result = resolvePetBottleCompound(detections, configWithPlastic);
+    expect(result).not.toBeNull();
+    expect(result!.isCompound).toBe(true);
+    expect(result!.components).toHaveLength(2);
+    expect(result!.components![0].partName).toBe("PET bottle");
+    expect(result!.components![1].partName).toBe("Bottle cap");
+    expect(result!.modelUsed).toBe("yolo-world");
+  });
+
+  it("bottle + label → compound result", () => {
+    const detections = [
+      makeDetection("plastic bottle", 0.9),
+      makeDetection("plastic bottle label", 0.75),
+    ];
+    const result = resolvePetBottleCompound(detections, configWithPlastic);
+    expect(result).not.toBeNull();
+    expect(result!.isCompound).toBe(true);
+    expect(result!.components).toHaveLength(2);
+    expect(result!.components![1].partName).toBe("Bottle label");
+  });
+
+  it("bottle + cap + label → compound result with 3 components", () => {
+    const detections = [
+      makeDetection("plastic bottle", 0.9),
+      makeDetection("plastic bottle cap", 0.8),
+      makeDetection("plastic bottle label", 0.7),
+    ];
+    const result = resolvePetBottleCompound(detections, configWithPlastic);
+    expect(result).not.toBeNull();
+    expect(result!.isCompound).toBe(true);
+    expect(result!.components).toHaveLength(3);
+  });
+
+  it("bottle alone → null (no compound)", () => {
+    const detections = [makeDetection("plastic bottle", 0.9)];
+    const result = resolvePetBottleCompound(detections, configWithPlastic);
+    expect(result).toBeNull();
+  });
+
+  it("cap alone → null (no bottle)", () => {
+    const detections = [makeDetection("plastic bottle cap", 0.8)];
+    const result = resolvePetBottleCompound(detections, configWithPlastic);
+    expect(result).toBeNull();
+  });
+
+  it("non-bottle items → null", () => {
+    const detections = [
+      makeDetection("aluminium beverage can", 0.9),
+      makeDetection("plastic bag", 0.8),
+    ];
+    const result = resolvePetBottleCompound(detections, configWithPlastic);
+    expect(result).toBeNull();
+  });
+
+  it("uses Japanese labels when locale is ja", () => {
+    const detections = [
+      makeDetection("plastic bottle", 0.9),
+      makeDetection("plastic bottle cap", 0.8),
+    ];
+    const result = resolvePetBottleCompound(detections, configWithPlastic, "ja");
+    expect(result).not.toBeNull();
+    expect(result!.itemName).toBe("ペットボトル");
+    expect(result!.components![0].partName).toBe("ペットボトル本体");
+    expect(result!.components![1].partName).toBe("キャップ");
+  });
+
+  it("cap stream falls back to recycling when no plastic stream exists", () => {
+    const configNoPlastic = makeSiteConfig();
+    const detections = [
+      makeDetection("plastic bottle", 0.9),
+      makeDetection("plastic bottle cap", 0.8),
+    ];
+    const result = resolvePetBottleCompound(detections, configNoPlastic);
+    expect(result).not.toBeNull();
+    expect(result!.components![1].wasteStream).toBe("recycling");
   });
 });
 
@@ -369,13 +480,13 @@ describe("Tiered fallback thresholds", () => {
     } = require("@/lib/inference-backend");
     /* eslint-enable @typescript-eslint/no-require-imports */
 
-    // Default sensitivity (0.5) yields these values
-    expect(YOLO_FALLBACK_THRESHOLD).toBeCloseTo(0.65, 4);
+    // Default sensitivity (0.5) yields these values: lerp(0.85, 0.65, 0.5) = 0.75
+    expect(YOLO_FALLBACK_THRESHOLD).toBeCloseTo(0.75, 4);
     expect(YOLO_API_PARALLEL_THRESHOLD).toBe(0.3);
-    expect(YOLO_WORLD_ACCEPT_THRESHOLD).toBeCloseTo(0.45, 4);
+    expect(YOLO_WORLD_ACCEPT_THRESHOLD).toBeCloseTo(0.75, 4);
 
-    // Tier ordering: API parallel < World accept < YOLO fallback
+    // Tier ordering: API parallel < World accept <= YOLO fallback
     expect(YOLO_API_PARALLEL_THRESHOLD).toBeLessThan(YOLO_WORLD_ACCEPT_THRESHOLD);
-    expect(YOLO_WORLD_ACCEPT_THRESHOLD).toBeLessThan(YOLO_FALLBACK_THRESHOLD);
+    expect(YOLO_WORLD_ACCEPT_THRESHOLD).toBeLessThanOrEqual(YOLO_FALLBACK_THRESHOLD);
   });
 });

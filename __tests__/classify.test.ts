@@ -42,9 +42,7 @@ process.env.KV_REST_API_TOKEN = "fake-token";
 process.env.OPENAI_API_KEY = "fake-key";
 process.env.BLOB_READ_WRITE_TOKEN = "fake-blob-token";
 
-// Import the shouldEscalate function by reading the module
-// Since shouldEscalate is not exported, we test it via the route behavior
-import type { ClassifyMeta, ComponentPart } from "@/lib/types";
+import type { ComponentPart } from "@/lib/types";
 
 interface RawClassification {
   itemName: string;
@@ -55,62 +53,6 @@ interface RawClassification {
   isCompound?: boolean;
   components?: ComponentPart[];
 }
-
-// Replicate shouldEscalate logic for unit testing
-function shouldEscalate(raw: RawClassification, meta?: ClassifyMeta): boolean {
-  const name = raw.itemName.toLowerCase();
-  if (name === "nothing detected" || name === "unknown") return false;
-  if (raw.confidence < 0.5) return true;
-  if (raw.wasteStream === "needs_review") return true;
-  if (meta?.imageQuality === "poor") return true;
-  return false;
-}
-
-describe("shouldEscalate", () => {
-  it("returns false when itemName is 'nothing detected'", () => {
-    expect(
-      shouldEscalate({
-        itemName: "nothing detected",
-        wasteStream: "landfill",
-        confidence: 0.1,
-        reasoning: "",
-      })
-    ).toBe(false);
-  });
-
-  it("returns true when confidence < 0.5", () => {
-    expect(
-      shouldEscalate({
-        itemName: "plastic bottle",
-        wasteStream: "recycling",
-        confidence: 0.3,
-        reasoning: "",
-      })
-    ).toBe(true);
-  });
-
-  it("returns true when wasteStream === 'needs_review'", () => {
-    expect(
-      shouldEscalate({
-        itemName: "mystery item",
-        wasteStream: "needs_review",
-        confidence: 0.8,
-        reasoning: "",
-      })
-    ).toBe(true);
-  });
-
-  it("returns false for high-confidence normal classification", () => {
-    expect(
-      shouldEscalate({
-        itemName: "aluminum can",
-        wasteStream: "recycling",
-        confidence: 0.9,
-        reasoning: "clean aluminum",
-      })
-    ).toBe(false);
-  });
-});
 
 describe("POST /api/classify", () => {
   beforeEach(() => {
@@ -137,16 +79,17 @@ describe("POST /api/classify", () => {
     });
   }
 
-  it("nano result used directly when high confidence", async () => {
-    const nanoResponse = makeOpenAIResponse({
+  it("uses mini directly for classification", async () => {
+    const miniResponse = makeOpenAIResponse({
       itemName: "plastic bottle",
       wasteStream: "recycling",
       confidence: 0.95,
       reasoning: "clear PET bottle",
+      isCompound: false,
+      components: [],
     });
-    mockCreate.mockResolvedValueOnce(nanoResponse);
+    mockCreate.mockResolvedValueOnce(miniResponse);
 
-    // Dynamically import to get fresh module state
     const { POST } = await import("@/app/api/classify/route");
     const req = makeRequest({
       image: "a".repeat(200),
@@ -154,30 +97,30 @@ describe("POST /api/classify", () => {
     });
 
     const res = await POST(req);
-    // May be 429 due to rate limiting in some runs; the logic test is on shouldEscalate above
     if (res.status === 200) {
       const data = await res.json();
       expect(data.itemName).toBe("plastic bottle");
       expect(data.wasteStream).toBe("recycling");
-      // Only nano called (no escalation)
+      // Only one model call (mini, no escalation)
       expect(mockCreate).toHaveBeenCalledTimes(1);
+      // Verify mini was called (not nano)
+      expect(mockCreate.mock.calls[0][0].model).toBe("gpt-5.4-mini");
     }
   });
 
-  it("escalates to mini when shouldEscalate returns true", async () => {
-    const nanoResponse = makeOpenAIResponse({
-      itemName: "mystery item",
-      wasteStream: "needs_review",
-      confidence: 0.3,
-      reasoning: "unclear",
-    });
+  it("handles compound items from mini", async () => {
     const miniResponse = makeOpenAIResponse({
-      itemName: "coffee cup sleeve",
-      wasteStream: "recycling",
-      confidence: 0.85,
-      reasoning: "cardboard sleeve is recyclable",
+      itemName: "coffee cup",
+      wasteStream: "landfill",
+      confidence: 0.88,
+      reasoning: "lined paper cup with plastic lid",
+      isCompound: true,
+      components: [
+        { partName: "plastic lid", wasteStream: "recycling", instruction: "Remove lid and recycle" },
+        { partName: "paper cup", wasteStream: "landfill", instruction: "Lined cup goes to landfill" },
+      ],
     });
-    mockCreate.mockResolvedValueOnce(nanoResponse).mockResolvedValueOnce(miniResponse);
+    mockCreate.mockResolvedValueOnce(miniResponse);
 
     const { POST } = await import("@/app/api/classify/route");
     const req = makeRequest({
@@ -188,20 +131,23 @@ describe("POST /api/classify", () => {
     const res = await POST(req);
     if (res.status === 200) {
       const data = await res.json();
-      // Mini result should be used (higher confidence)
-      expect(mockCreate).toHaveBeenCalledTimes(2);
+      expect(data.isCompound).toBe(true);
+      expect(data.components).toHaveLength(2);
+      expect(mockCreate).toHaveBeenCalledTimes(1);
     }
   });
 
   it("includes preAction field in response when model provides it", async () => {
-    const nanoResponse = makeOpenAIResponse({
+    const miniResponse = makeOpenAIResponse({
       itemName: "pet bottle",
       wasteStream: "recycling",
       confidence: 0.92,
       reasoning: "PET plastic bottle",
       preAction: "Empty contents and remove cap",
+      isCompound: false,
+      components: [],
     });
-    mockCreate.mockResolvedValueOnce(nanoResponse);
+    mockCreate.mockResolvedValueOnce(miniResponse);
 
     const { POST } = await import("@/app/api/classify/route");
     const req = makeRequest({

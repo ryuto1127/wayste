@@ -4,7 +4,6 @@ import { z } from "zod/v4";
 import type { ClassifyMeta, ComponentPart, YoloDetectionLog, LocalModelCandidate, MaterialHint } from "@/lib/types";
 import {
   loadSiteConfig,
-  buildNanoPrompt,
   buildClassificationPrompt,
   buildClassificationResult,
   applyOverrides,
@@ -121,7 +120,7 @@ async function callModel(
 ): Promise<RawClassification> {
   const response = await openai.chat.completions.create({
     model,
-    max_completion_tokens: model.includes("nano") ? 200 : 400,
+    max_completion_tokens: 4096,
     response_format: {
       type: "json_schema",
       json_schema: {
@@ -196,26 +195,6 @@ async function callModel(
   return validated.data as RawClassification;
 }
 
-// ── Escalation policy: should we re-query with mini? ──
-// Keep this list short — every escalation adds ~2s latency.
-// Trust nano when it is confident; only escalate on genuine uncertainty.
-function shouldEscalate(
-  raw: RawClassification,
-  meta?: ClassifyMeta
-): boolean {
-  const name = raw.itemName.toLowerCase();
-
-  // No point re-asking for these
-  if (name === "nothing detected" || name === "unknown") return false;
-
-  // Model is genuinely unsure
-  if (raw.confidence < 0.5) return true;
-
-  // Model explicitly flagged it for review
-  if (raw.wasteStream === "needs_review") return true;
-
-  return false;
-}
 
 export async function POST(request: Request) {
   // ── Redis-based rate limiting ──
@@ -269,7 +248,7 @@ export async function POST(request: Request) {
   const startMs = Date.now();
   const requestId = generateRequestId();
 
-  /** Classify a single image through the nano→mini pipeline. */
+  /** Classify a single image using GPT-5.4 mini. */
   async function classifySingleImage(
     image: string,
     yoloHint: string | null | undefined,
@@ -287,34 +266,14 @@ export async function POST(request: Request) {
       materialHint: itemMaterialHint,
     };
 
-    // Step 1: Nano
-    const nanoPrompt = buildNanoPrompt(siteConfig, locale, promptOptions);
-    const nanoPromptFinal = noLocalHint
-      ? nanoPrompt + "\nNo local model could identify this item. Classify from the image alone."
-      : nanoPrompt;
-    let raw = await callModel(openai, "gpt-5.4-nano", image, nanoPromptFinal);
-    let modelUsed: "nano" | "mini" = "nano";
-    let escalated = false;
+    const prompt = buildClassificationPrompt(siteConfig, locale, promptOptions);
+    const promptFinal = noLocalHint
+      ? prompt + "\nNo local model could identify this item. Classify from the image alone."
+      : prompt;
+    const raw = await callModel(openai, "gpt-5.4-mini", image, promptFinal);
+    const modelUsed: "mini" = "mini";
 
-    // Step 2: Escalate to mini if needed
-    if (shouldEscalate(raw, meta as ClassifyMeta | undefined)) {
-      escalated = true;
-      try {
-        const miniPrompt = buildClassificationPrompt(siteConfig, locale, promptOptions);
-        const miniPromptFinal = noLocalHint
-          ? miniPrompt + "\nNo local model could identify this item. Classify from the image alone."
-          : miniPrompt;
-        const miniRaw = await callModel(openai, "gpt-5.4-mini", image, miniPromptFinal);
-        if (miniRaw.confidence > raw.confidence || miniRaw.isCompound || raw.wasteStream === "needs_review") {
-          raw = miniRaw;
-          modelUsed = "mini";
-        }
-      } catch (miniErr) {
-        console.warn("[classify] Mini escalation failed, using nano result:", miniErr);
-      }
-    }
-
-    // Step 3: Build result + conditional overrides
+    // Build result + conditional overrides
     const result = buildClassificationResult(raw, siteConfig, locale);
     result.modelUsed = modelUsed;
 
@@ -333,7 +292,7 @@ export async function POST(request: Request) {
       }
     }
 
-    return { result, raw, modelUsed, escalated };
+    return { result, raw, modelUsed };
   }
 
   try {
@@ -365,7 +324,7 @@ export async function POST(request: Request) {
             logPilotEntry({
               timestamp: logTimestamp,
               modelUsed: first.modelUsed,
-              escalated: first.escalated,
+              escalated: false,
               itemName: first.result.itemName,
               wasteStream: first.result.wasteStream,
               confidence: first.result.confidence,
@@ -390,7 +349,7 @@ export async function POST(request: Request) {
     // ── Single-item mode (backward compatible) ──
     const { image, yoloDetections, materialHint } = data as z.infer<typeof SingleRequestSchema>;
 
-    const { result, raw, modelUsed, escalated } = await classifySingleImage(
+    const { result, raw, modelUsed } = await classifySingleImage(
       image,
       undefined,
       materialHint as MaterialHint | undefined,
@@ -401,7 +360,7 @@ export async function POST(request: Request) {
     const logTimestamp = new Date().toISOString();
 
     console.log(`[${requestId}] classified`, {
-      modelUsed, escalated,
+      modelUsed,
       itemName: result.itemName,
       confidence: result.confidence,
       wasteStream: result.wasteStream,
@@ -416,7 +375,7 @@ export async function POST(request: Request) {
         logPilotEntry({
           timestamp: logTimestamp,
           modelUsed,
-          escalated,
+          escalated: false,
           itemName: result.itemName,
           wasteStream: result.wasteStream,
           confidence: result.confidence,
@@ -428,6 +387,18 @@ export async function POST(request: Request) {
           meta: meta as ClassifyMeta | undefined,
           yoloDetections: yoloDetections as YoloDetectionLog[] | undefined,
           overrideApplied: result.wasteStream !== raw.wasteStream,
+          ...(materialHint && {
+            rgbAnalysis: {
+              dominantHue: (materialHint as MaterialHint).dominantHue,
+              saturation: (materialHint as MaterialHint).saturation,
+              isMetallic: (materialHint as MaterialHint).isMetallic,
+              isTransparent: (materialHint as MaterialHint).isTransparent,
+              bboxAspectRatio: (materialHint as MaterialHint).bboxAspectRatio,
+              ...(((materialHint as MaterialHint).texture?.suggestedSurface && (materialHint as MaterialHint).texture?.suggestedSurface !== "unknown") && {
+                textureSurface: (materialHint as MaterialHint).texture!.suggestedSurface,
+              }),
+            },
+          }),
         })
       )
     );

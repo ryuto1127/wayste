@@ -26,7 +26,10 @@ function ImageReviewPage() {
   const [entries, setEntries] = useState<ReviewEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [locale, setLocale] = useState<Locale>("en");
-  const [filter, setFilter] = useState<"all" | "pending" | "reviewed">("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "correct" | "wrong" | "false_detection">("all");
+  const [streamFilter, setStreamFilter] = useState("");
+  const [modelFilter, setModelFilter] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
   const [saving, setSaving] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
 
@@ -131,10 +134,19 @@ function ImageReviewPage() {
   const pending = entries.length - reviewed;
 
   const filtered = entries.filter((e) => {
-    if (filter === "pending") return e.verdict === null;
-    if (filter === "reviewed") return e.verdict !== null;
+    if (statusFilter === "pending" && e.verdict !== null) return false;
+    if (statusFilter === "correct" && e.verdict !== "correct") return false;
+    if (statusFilter === "wrong" && e.verdict !== "wrong") return false;
+    if (statusFilter === "false_detection" && e.verdict !== "false_detection") return false;
+    if (streamFilter && e.wasteStream !== streamFilter) return false;
+    if (modelFilter && e.modelUsed !== modelFilter) return false;
+    if (searchQuery && !e.itemName.toLowerCase().includes(searchQuery.toLowerCase())) return false;
     return true;
   });
+
+  const uniqueStreams = [...new Set(entries.map((e) => e.wasteStream))].sort();
+  const uniqueModels = [...new Set(entries.map((e) => e.modelUsed))].sort();
+  const hasActiveFilters = statusFilter !== "all" || streamFilter !== "" || modelFilter !== "" || searchQuery !== "";
 
   // Accuracy = correct / (correct + wrong), excluding false detections
   const correctCount = entries.filter((e) => e.verdict === "correct").length;
@@ -215,28 +227,86 @@ function ImageReviewPage() {
         {/* Bulk delete */}
         <BulkDeletePanel onDelete={bulkDelete} locale={locale} />
 
-        {/* Filter tabs */}
-        <div className="flex gap-2 mb-6">
-          {(["all", "pending", "reviewed"] as const).map((f) => (
-            <button
-              key={f}
-              onClick={() => setFilter(f)}
-              className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                filter === f
-                  ? "bg-neutral-700 text-white"
-                  : "bg-neutral-900 text-neutral-400 hover:bg-neutral-800"
-              }`}
+        {/* Filters */}
+        <div className="flex flex-col gap-3 mb-6">
+          {/* Status pills */}
+          <div className="flex gap-2 flex-wrap">
+            {([
+              { value: "all" as const, label: T("allEntries") },
+              { value: "pending" as const, label: T("pendingReview") },
+              { value: "correct" as const, label: T("verdictCorrect"), dot: "bg-emerald-400" },
+              { value: "wrong" as const, label: T("verdictWrong"), dot: "bg-red-400" },
+              { value: "false_detection" as const, label: T("verdictFalse"), dot: "bg-neutral-400" },
+            ]).map((f) => (
+              <button
+                key={f.value}
+                onClick={() => setStatusFilter(f.value)}
+                className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 ${
+                  statusFilter === f.value
+                    ? "bg-neutral-700 text-white"
+                    : "bg-neutral-900 text-neutral-400 hover:bg-neutral-800"
+                }`}
+              >
+                {"dot" in f && <span className={`w-2 h-2 rounded-full ${f.dot}`} />}
+                {f.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Additional filters */}
+          <div className="flex items-center gap-3 flex-wrap">
+            <select
+              value={streamFilter}
+              onChange={(e) => setStreamFilter(e.target.value)}
+              className="bg-neutral-900 text-sm text-neutral-300 rounded-lg px-3 py-1.5 border border-neutral-800 focus:outline-none focus:border-neutral-600"
             >
-              {f === "all" ? T("allEntries") : f === "pending" ? T("pendingReview") : T("reviewed")}
-            </button>
-          ))}
+              <option value="">{locale === "ja" ? "種類: すべて" : "Stream: All"}</option>
+              {uniqueStreams.map((s) => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
+
+            <select
+              value={modelFilter}
+              onChange={(e) => setModelFilter(e.target.value)}
+              className="bg-neutral-900 text-sm text-neutral-300 rounded-lg px-3 py-1.5 border border-neutral-800 focus:outline-none focus:border-neutral-600"
+            >
+              <option value="">{locale === "ja" ? "モデル: すべて" : "Model: All"}</option>
+              {uniqueModels.map((m) => (
+                <option key={m} value={m}>{m}</option>
+              ))}
+            </select>
+
+            <input
+              type="text"
+              placeholder={locale === "ja" ? "アイテム名で検索..." : "Search items..."}
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="bg-neutral-900 text-sm text-neutral-300 rounded-lg px-3 py-1.5 border border-neutral-800 focus:outline-none focus:border-neutral-600 w-48"
+            />
+
+            {hasActiveFilters && (
+              <button
+                onClick={() => { setStatusFilter("all"); setStreamFilter(""); setModelFilter(""); setSearchQuery(""); }}
+                className="text-xs text-neutral-500 hover:text-neutral-300 transition-colors"
+              >
+                {locale === "ja" ? "クリア" : "Clear filters"}
+              </button>
+            )}
+
+            <span className="text-xs text-neutral-500 ml-auto">
+              {filtered.length}/{entries.length}
+            </span>
+          </div>
         </div>
 
         {/* Entries grid */}
         {filtered.length === 0 ? (
           <div className="bg-neutral-900 rounded-2xl p-12 text-center">
             <p className="text-neutral-400 text-lg">
-              {filter === "pending" ? "All entries have been reviewed!" : "No entries found."}
+              {statusFilter === "pending"
+                ? (locale === "ja" ? "すべてのエントリーがレビュー済みです！" : "All entries have been reviewed!")
+                : (locale === "ja" ? "該当するエントリーがありません。" : "No entries match the filters.")}
             </p>
           </div>
         ) : (

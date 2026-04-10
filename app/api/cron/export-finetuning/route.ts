@@ -4,6 +4,8 @@
  * Collects all entries that qualify for model retraining:
  *   - "wrong" verdict (model misidentified the object)
  *   - "correct" verdict with confidence ≤ 0.80 (right but uncertain)
+ *   - "correct" verdict from non-YOLO models (yolo-world/nano/mini) at any
+ *     confidence — YOLO couldn't classify alone, valuable for fine-tuning
  *
  * Downloads their images from Vercel Blob, packages them as a ZIP,
  * and saves the ZIP to archives/finetuning/YYYY-MM-DD.zip in Vercel Blob.
@@ -73,9 +75,13 @@ export async function GET(request: Request) {
       const verdict = verdicts[entry.requestId];
       if (!verdict) continue;
 
+      // Same criteria as /api/review/export:
+      //   wrong (all) | correct + low confidence | correct + non-YOLO model
       const shouldExport =
         verdict === "wrong" ||
-        (verdict === "correct" && entry.confidence <= CORRECT_CONFIDENCE_THRESHOLD);
+        (verdict === "correct" &&
+          (entry.confidence <= CORRECT_CONFIDENCE_THRESHOLD ||
+            entry.modelUsed !== "yolo-local"));
 
       if (!shouldExport) continue;
 

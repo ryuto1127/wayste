@@ -4,6 +4,8 @@
  * Exports images for entries that need retraining:
  *   - All "wrong" verdicts (model misidentified the object)
  *   - "correct" verdicts with confidence ≤ 0.80 (model was right but unsure)
+ *   - "correct" verdicts from non-YOLO models (yolo-world/nano/mini) at any
+ *     confidence — YOLO couldn't classify alone, so these fill training gaps
  *
  * Images are named by timestamp (e.g. 2026-04-04T10-23-15.jpg) and delivered
  * as a ZIP file compatible with CVAT, Roboflow, and Label Studio.
@@ -62,10 +64,16 @@ export async function GET(request: Request) {
       const verdict = verdicts[entry.requestId];
       if (!verdict) continue;
 
-      // Export criteria: wrong (all) or correct with low confidence
+      // Export criteria:
+      //   - All "wrong" verdicts
+      //   - "correct" with low confidence (model was right but unsure)
+      //   - "correct" from non-YOLO models (yolo-world/nano/mini) at any confidence
+      //     → YOLO couldn't handle it alone, valuable for fine-tuning
       const shouldExport =
         verdict === "wrong" ||
-        (verdict === "correct" && entry.confidence <= CORRECT_CONFIDENCE_THRESHOLD);
+        (verdict === "correct" &&
+          (entry.confidence <= CORRECT_CONFIDENCE_THRESHOLD ||
+            entry.modelUsed !== "yolo-local"));
 
       if (!shouldExport) continue;
 
@@ -76,7 +84,7 @@ export async function GET(request: Request) {
 
     if (toExport.length === 0) {
       return NextResponse.json(
-        { error: "No exportable images found (need wrong verdicts or low-confidence correct verdicts)." },
+        { error: "No exportable images found (need wrong verdicts, low-confidence correct, or non-YOLO correct verdicts)." },
         { status: 404 },
       );
     }

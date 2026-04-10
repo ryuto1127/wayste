@@ -875,7 +875,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
                 result.itemName = refineClassName(result.itemName, worldHint);
                 console.log(`[tier2] YOLO World HIT: ${worldBest.className} (${(worldBest.confidence * 100).toFixed(1)}%) → ${result.itemName} [${result.wasteStream}] in ${worldMs}ms`);
                 apiController.abort();
-                logYoloOnlyResult(video, result, yoloDetections, yoloMs + worldMs, analysis, "yolo-world");
+                logYoloOnlyResult(video, result, [...yoloDetections, ...worldDetections], yoloMs + worldMs, analysis, "yolo-world");
                 handleClassificationResult(result, undefined);
                 return;
               }

@@ -11,7 +11,7 @@ import type { Calibration } from "./threshold-config";
 
 // ── Multi-blob quality thresholds (exported for tuning + tests) ──
 /** Minimum Laplacian variance for a blob to be considered a real object. */
-export const BLOB_MIN_SHARPNESS = 300;
+export const BLOB_MIN_SHARPNESS = 1000;
 /** Minimum mean |gray - bg| contrast for a blob to be considered a real object. */
 export const BLOB_MIN_CONTRAST = 20;
 /** Maximum skin-tone pixel ratio — above this the blob is likely a hand/arm. */

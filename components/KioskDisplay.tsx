@@ -715,7 +715,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
               // Blob HAS a YOLO match
               if (detection.confidence >= thresholdsRef.current.YOLO_FALLBACK_THRESHOLD) {
                 // Tier 1: high confidence → instant resolve via rules
-                const r = resolveYoloDetection(detection, siteConfigRef.current!);
+                const r = resolveYoloDetection(detection, siteConfigRef.current!, localeRef.current);
                 if (r) {
                   const detHint = analyzeMaterial(video, detection.bbox);
                   r.itemName = refineClassName(r.itemName, detHint);
@@ -868,7 +868,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
             const worldBest = worldDetections[0];
 
             if (worldBest.confidence >= thresholdsRef.current.YOLO_WORLD_ACCEPT_THRESHOLD) {
-              const result = resolveYoloWorldDetection(worldBest, siteConfigRef.current!);
+              const result = resolveYoloWorldDetection(worldBest, siteConfigRef.current!, localeRef.current);
               if (result) {
                 // Apply material refinement (same as Tier 1)
                 const worldHint = analyzeMaterial(video, worldBest.bbox);
@@ -944,7 +944,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
             for (const det of wasteDetections) {
               if (seen.has(det.className)) continue;
               seen.add(det.className);
-              const r = resolveYoloDetection(det, siteConfigRef.current!);
+              const r = resolveYoloDetection(det, siteConfigRef.current!, localeRef.current);
               if (r) resolvedResults.push(r);
               if (resolvedResults.length >= 4) break;
             }
@@ -959,7 +959,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
               backend.detectWorld(video)
                 .then((worldDets) => {
                   if (worldDets.length > 0) {
-                    const worldResult = resolveYoloWorldDetection(worldDets[0], siteConfigRef.current!);
+                    const worldResult = resolveYoloWorldDetection(worldDets[0], siteConfigRef.current!, localeRef.current);
                     if (worldResult) {
                       console.log(`[offline] YOLO World HIT: ${worldDets[0].className} → ${worldResult.wasteStream}`);
                       handleClassificationResult(worldResult, undefined);
@@ -981,7 +981,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
               backend.detectWorld(video)
                 .then((worldDets) => {
                   if (worldDets.length > 0) {
-                    const worldResult = resolveYoloWorldDetection(worldDets[0], siteConfigRef.current!);
+                    const worldResult = resolveYoloWorldDetection(worldDets[0], siteConfigRef.current!, localeRef.current);
                     if (worldResult) {
                       console.log(`[offline] YOLO World HIT: ${worldDets[0].className} → ${worldResult.wasteStream}`);
                       handleClassificationResult(worldResult, undefined);

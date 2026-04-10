@@ -69,7 +69,8 @@ export interface OverrideResult {
 export function applyOverrides(
   itemName: string,
   claudeStream: WasteStream,
-  siteConfig: SiteConfig
+  siteConfig: SiteConfig,
+  locale: string = "en",
 ): OverrideResult {
   // Check staffHandlingItems first — these always force needs_review
   if (siteConfig.staffHandlingItems) {
@@ -93,10 +94,11 @@ export function applyOverrides(
     if (matchesPattern(itemName, override.pattern)) {
       const requiresStaff = override.requiresStaff ?? false;
       const stream = requiresStaff || !override.stream ? "needs_review" : override.stream;
+      const note = (locale === "ja" && override.note_ja) ? override.note_ja : override.note;
       return {
         stream,
         overrideApplied: true,
-        note: override.note,
+        note,
         requiresStaff,
         conditionalStream: override.conditionalStream,
         condition: override.condition,
@@ -152,7 +154,8 @@ export function buildClassificationResult(
     isCompound?: boolean;
     components?: ComponentPart[];
   },
-  siteConfig: SiteConfig
+  siteConfig: SiteConfig,
+  locale: string = "en",
 ): ClassificationResponse {
   const threshold = siteConfig.reviewThreshold ?? REVIEW_THRESHOLD_DEFAULT;
   const confidence = Math.max(0, Math.min(1, raw.confidence));
@@ -168,7 +171,8 @@ export function buildClassificationResult(
   const { stream: overriddenStream, note: overrideNote, requiresStaff } = applyOverrides(
     raw.itemName,
     raw.wasteStream,
-    siteConfig
+    siteConfig,
+    locale,
   );
 
   const isNothingDetected =

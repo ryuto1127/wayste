@@ -105,6 +105,7 @@ export function loadYoloWorldRules(): Promise<YoloRulesConfig | null> {
 export function resolveYoloDetection(
   detection: YoloDetection,
   siteConfig: SiteConfig,
+  locale: string = "en",
 ): ClassificationResponse | null {
   if (!rulesCache) return null;
 
@@ -137,6 +138,7 @@ export function resolveYoloDetection(
       preAction: rule.preAction,
     },
     siteConfig,
+    locale,
   );
 
   result.modelUsed = "yolo-local";
@@ -150,6 +152,7 @@ export function resolveYoloDetection(
 export function resolveYoloWorldDetection(
   detection: YoloDetection,
   siteConfig: SiteConfig,
+  locale: string = "en",
 ): ClassificationResponse | null {
   if (!worldRulesCache) return null;
 
@@ -165,6 +168,7 @@ export function resolveYoloWorldDetection(
       preAction: rule.preAction,
     },
     siteConfig,
+    locale,
   );
 
   result.modelUsed = "yolo-world";

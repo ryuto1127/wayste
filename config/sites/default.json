@@ -44,92 +44,110 @@
     {
       "pattern": "coffee cup",
       "stream": "landfill",
-      "note": "Most paper coffee cups have a plastic lining and cannot be recycled. Remove the lid and sleeve first."
+      "note": "Most paper coffee cups have a plastic lining and cannot be recycled. Remove the lid and sleeve first.",
+      "note_ja": "紙コップは内側にプラスチックコーティングがあるためリサイクル不可。フタとスリーブは外してください。"
     },
     {
       "pattern": "paper cup",
       "stream": "landfill",
-      "note": "Lined paper cups are not recyclable in most facilities."
+      "note": "Lined paper cups are not recyclable in most facilities.",
+      "note_ja": "コーティングされた紙コップはほとんどの施設でリサイクルできません。"
     },
     {
       "pattern": "pizza box",
       "stream": "landfill",
-      "note": "Grease-soiled cardboard is not recyclable or compostable in most facilities."
+      "note": "Grease-soiled cardboard is not recyclable or compostable in most facilities.",
+      "note_ja": "油汚れのある段ボールはリサイクル・コンポストできません。"
     },
     {
       "pattern": "plastic bag",
       "stream": "landfill",
-      "note": "Plastic bags jam sorting machinery. Some grocery stores accept them for separate recycling."
+      "note": "Plastic bags jam sorting machinery. Some grocery stores accept them for separate recycling.",
+      "note_ja": "ビニール袋は分別機を詰まらせます。スーパーの回収ボックスを利用してください。"
     },
     {
       "pattern": "styrofoam",
       "stream": "landfill",
-      "note": "Expanded polystyrene is not accepted in most curbside recycling programs."
+      "note": "Expanded polystyrene is not accepted in most curbside recycling programs.",
+      "note_ja": "発泡スチロールはほとんどのリサイクルプログラムで回収対象外です。"
     },
     {
       "pattern": "battery",
       "stream": "special",
-      "note": "Batteries require special disposal. Look for a battery collection bin or take to a hazardous waste facility."
+      "note": "Batteries require special disposal. Look for a battery collection bin or take to a hazardous waste facility.",
+      "note_ja": "電池は特別処理が必要です。専用回収ボックスに入れてください。"
     },
     {
       "pattern": "light bulb",
       "stream": "special",
-      "note": "Fluorescent and CFL bulbs contain mercury. LED and incandescent bulbs can go in landfill if no special collection is available."
+      "note": "Fluorescent and CFL bulbs contain mercury. LED and incandescent bulbs can go in landfill if no special collection is available.",
+      "note_ja": "蛍光灯・電球型蛍光灯は水銀を含みます。LED・白熱電球は専用回収がなければ埋立へ。"
     },
     {
       "pattern": "napkin",
       "stream": "compost",
-      "note": "Used paper napkins and tissues are compostable."
+      "note": "Used paper napkins and tissues are compostable.",
+      "note_ja": "使用済みのナプキンやティッシュはコンポスト可能です。"
     },
     {
       "pattern": "aluminum can",
       "stream": "recycling",
-      "note": "Rinse before recycling. Crushing is optional."
+      "note": "Rinse before recycling. Crushing is optional.",
+      "note_ja": "中を洗ってからリサイクルへ。潰すかどうかは任意です。"
     },
     {
       "pattern": "glass bottle",
       "stream": "recycling",
-      "note": "Rinse before recycling. Remove caps if they are a different material."
+      "note": "Rinse before recycling. Remove caps if they are a different material.",
+      "note_ja": "中を洗ってからリサイクルへ。素材の異なるキャップは外してください。"
     },
     {
       "pattern": "plastic wrap",
       "stream": "landfill",
-      "note": "Cling wrap and plastic film are not recyclable in most curbside programs."
+      "note": "Cling wrap and plastic film are not recyclable in most curbside programs.",
+      "note_ja": "ラップやフィルムはほとんどのリサイクルプログラムで回収できません。"
     },
     {
       "pattern": "takeout container",
       "stream": "landfill",
-      "note": "Most takeout containers are mixed materials or food-soiled. Check if the container is marked compostable."
+      "note": "Most takeout containers are mixed materials or food-soiled. Check if the container is marked compostable.",
+      "note_ja": "テイクアウト容器は複合素材や食品汚れが多いです。コンポスト対応マークを確認してください。"
     },
     {
       "pattern": "cardboard",
       "stream": "recycling",
-      "note": "Flatten cardboard boxes. Remove tape and labels if possible."
+      "note": "Flatten cardboard boxes. Remove tape and labels if possible.",
+      "note_ja": "段ボールは潰してください。テープやラベルはできるだけ剥がしてください。"
     },
     {
       "pattern": "banana peel",
       "stream": "compost",
-      "note": "All fruit and vegetable scraps are compostable."
+      "note": "All fruit and vegetable scraps are compostable.",
+      "note_ja": "果物や野菜くずはすべてコンポスト可能です。"
     },
     {
       "pattern": "apple core",
       "stream": "compost",
-      "note": "All fruit and vegetable scraps are compostable."
+      "note": "All fruit and vegetable scraps are compostable.",
+      "note_ja": "果物や野菜くずはすべてコンポスト可能です。"
     },
     {
       "pattern": "chip bag",
       "stream": "landfill",
-      "note": "Chip bags are made of mixed materials (plastic and metal foil) and are not recyclable."
+      "note": "Chip bags are made of mixed materials (plastic and metal foil) and are not recyclable.",
+      "note_ja": "スナック袋はプラスチックとアルミの複合素材のためリサイクルできません。"
     },
     {
       "pattern": "straw",
       "stream": "landfill",
-      "note": "Plastic straws are too small and light for recycling machinery."
+      "note": "Plastic straws are too small and light for recycling machinery.",
+      "note_ja": "プラスチックストローは小さすぎてリサイクル機械で処理できません。"
     },
     {
       "pattern": "utensil",
       "stream": "landfill",
-      "note": "Plastic utensils are not recyclable. If marked compostable (BPI-certified), they go in compost."
+      "note": "Plastic utensils are not recyclable. If marked compostable (BPI-certified), they go in compost.",
+      "note_ja": "プラスチック製カトラリーはリサイクル不可。BPI認証のコンポスト対応品はコンポストへ。"
     }
   ],
   "staffHandlingItems": [],

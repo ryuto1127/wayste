@@ -231,6 +231,7 @@ export interface ItemOverride {
   /** Target stream. Omit (or set requiresStaff) to force needs_review. */
   stream?: WasteStream;
   note?: string;
+  note_ja?: string;
   /** When true, forces needs_review regardless of stream. */
   requiresStaff?: boolean;
   /** Alternative stream to use when the condition is met (GPT tier only). */

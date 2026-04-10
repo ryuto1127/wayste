@@ -33,22 +33,26 @@
     {
       "pattern": "water bottle",
       "stream": "recycling",
-      "note": "Empty the bottle first. Pour liquids into the Liquids bin."
+      "note": "Empty the bottle first. Pour liquids into the Liquids bin.",
+      "note_ja": "先に中身を空にしてください。液体はLiquidsビンへ。"
     },
     {
       "pattern": "coffee cup",
       "stream": "landfill",
-      "note": "Paper coffee cups have a plastic lining and go in garbage. Lids go in garbage too."
+      "note": "Paper coffee cups have a plastic lining and go in garbage. Lids go in garbage too.",
+      "note_ja": "紙コップはプラスチックコーティングがあるためゴミ箱へ。フタもゴミ箱へ。"
     },
     {
       "pattern": "newspaper",
       "stream": "recycling",
-      "note": "Newspapers and magazines are recyclable."
+      "note": "Newspapers and magazines are recyclable.",
+      "note_ja": "新聞や雑誌はリサイクル可能です。"
     },
     {
       "pattern": "food container",
       "stream": "landfill",
-      "note": "Most airport food containers are mixed materials. If marked compostable, use Compost."
+      "note": "Most airport food containers are mixed materials. If marked compostable, use Compost.",
+      "note_ja": "空港のフードコンテナは複合素材が多いです。コンポスト対応マークがあればコンポストへ。"
     }
   ],
   "canonicalNames": [

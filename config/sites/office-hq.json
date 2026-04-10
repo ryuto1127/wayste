@@ -46,91 +46,108 @@
     {
       "pattern": "coffee cup",
       "stream": "compost",
-      "note": "This office uses BPI-certified compostable cups. Check for the green compostable logo on the bottom."
+      "note": "This office uses BPI-certified compostable cups. Check for the green compostable logo on the bottom.",
+      "note_ja": "このオフィスのカップはBPI認証コンポスト対応です。底面の緑色のロゴを確認してください。"
     },
     {
       "pattern": "k-cup",
       "stream": "landfill",
-      "note": "K-Cup pods are mixed materials. This office does not have a pod recycling program."
+      "note": "K-Cup pods are mixed materials. This office does not have a pod recycling program.",
+      "note_ja": "Kカップは複合素材です。このオフィスにはポッド回収プログラムがありません。"
     },
     {
       "pattern": "plastic bag",
       "stream": "landfill",
-      "note": "Plastic bags jam sorting machinery. Use the bag collection box by reception instead."
+      "note": "Plastic bags jam sorting machinery. Use the bag collection box by reception instead.",
+      "note_ja": "ビニール袋は分別機を詰まらせます。受付横の回収ボックスをご利用ください。"
     },
     {
       "pattern": "cardboard",
       "stream": "recycling",
-      "note": "Flatten cardboard and place next to the recycling bin if it doesn't fit inside."
+      "note": "Flatten cardboard and place next to the recycling bin if it doesn't fit inside.",
+      "note_ja": "段ボールは潰してください。入りきらない場合はリサイクルビンの横に置いてください。"
     },
     {
       "pattern": "battery",
       "stream": "ewaste",
-      "note": "Drop batteries in the purple e-waste bin by the elevator. Never put batteries in regular bins."
+      "note": "Drop batteries in the purple e-waste bin by the elevator. Never put batteries in regular bins.",
+      "note_ja": "電池はエレベーター横の紫のE-Wasteビンへ。普通のゴミ箱には入れないでください。"
     },
     {
       "pattern": "cable",
       "stream": "ewaste",
-      "note": "Old cables and chargers go in the purple e-waste bin by the elevator."
+      "note": "Old cables and chargers go in the purple e-waste bin by the elevator.",
+      "note_ja": "古いケーブルや充電器はエレベーター横の紫のE-Wasteビンへ。"
     },
     {
       "pattern": "charger",
       "stream": "ewaste",
-      "note": "Old chargers go in the purple e-waste bin by the elevator."
+      "note": "Old chargers go in the purple e-waste bin by the elevator.",
+      "note_ja": "古い充電器はエレベーター横の紫のE-Wasteビンへ。"
     },
     {
       "pattern": "usb",
       "stream": "ewaste",
-      "note": "USB devices and cables go in the purple e-waste bin."
+      "note": "USB devices and cables go in the purple e-waste bin.",
+      "note_ja": "USB機器やケーブルは紫のE-Wasteビンへ。"
     },
     {
       "pattern": "headphone",
       "stream": "ewaste",
-      "note": "Old headphones go in the purple e-waste bin by the elevator."
+      "note": "Old headphones go in the purple e-waste bin by the elevator.",
+      "note_ja": "古いヘッドホンはエレベーター横の紫のE-Wasteビンへ。"
     },
     {
       "pattern": "napkin",
       "stream": "compost",
-      "note": "Used paper napkins and tissues are compostable."
+      "note": "Used paper napkins and tissues are compostable.",
+      "note_ja": "使用済みのナプキンやティッシュはコンポスト可能です。"
     },
     {
       "pattern": "utensil",
       "stream": "compost",
-      "note": "This office uses compostable utensils. Check for the BPI logo."
+      "note": "This office uses compostable utensils. Check for the BPI logo.",
+      "note_ja": "このオフィスのカトラリーはコンポスト対応です。BPIロゴを確認してください。"
     },
     {
       "pattern": "toner",
       "stream": "special",
       "note": "Toner cartridges are collected by facilities. Leave on the shelf by the copy room, do not put in any bin.",
+      "note_ja": "トナーカートリッジは総務が回収します。コピー室横の棚に置いてください。ゴミ箱には入れないでください。",
       "requiresStaff": true
     },
     {
       "pattern": "printer cartridge",
       "stream": "special",
       "note": "Printer cartridges are collected by facilities. Leave on the shelf by the copy room.",
+      "note_ja": "プリンターカートリッジは総務が回収します。コピー室横の棚に置いてください。",
       "requiresStaff": true
     },
     {
       "pattern": "monitor",
       "stream": "special",
       "note": "Monitors and large electronics require a facilities pickup. Email facilities@company.com.",
+      "note_ja": "モニターや大型電子機器は総務の回収が必要です。facilities@company.comへ連絡してください。",
       "requiresStaff": true
     },
     {
       "pattern": "laptop",
       "stream": "special",
       "note": "Laptops must go through IT asset disposal. Contact IT, do not place in any waste bin.",
+      "note_ja": "ノートPCはIT資産処分の対象です。IT部門に連絡し、ゴミ箱には入れないでください。",
       "requiresStaff": true
     },
     {
       "pattern": "plastic #5",
       "stream": "landfill",
-      "note": "Plastic #5 (PP) is not accepted in recycling at this office. Place in landfill."
+      "note": "Plastic #5 (PP) is not accepted in recycling at this office. Place in landfill.",
+      "note_ja": "プラスチック#5（PP）はこのオフィスではリサイクル対象外です。埋立へ。"
     },
     {
       "pattern": "polypropylene",
       "stream": "landfill",
-      "note": "Polypropylene containers are not recyclable at this location. Place in landfill."
+      "note": "Polypropylene containers are not recyclable at this location. Place in landfill.",
+      "note_ja": "ポリプロピレン容器はこの施設ではリサイクルできません。埋立へ。"
     }
   ],
   "staffHandlingItems": [

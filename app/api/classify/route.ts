@@ -315,10 +315,10 @@ export async function POST(request: Request) {
     }
 
     // Step 3: Build result + conditional overrides
-    const result = buildClassificationResult(raw, siteConfig);
+    const result = buildClassificationResult(raw, siteConfig, locale);
     result.modelUsed = modelUsed;
 
-    const overrideCheck = applyOverrides(raw.itemName, raw.wasteStream, siteConfig);
+    const overrideCheck = applyOverrides(raw.itemName, raw.wasteStream, siteConfig, locale);
     if (overrideCheck.conditionalStream && overrideCheck.condition && !overrideCheck.requiresStaff) {
       const conditionLower = overrideCheck.condition.toLowerCase();
       const reasoningLower = (raw.reasoning ?? "").toLowerCase();

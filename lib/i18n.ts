@@ -127,11 +127,11 @@ const translations = {
     binPositionCenter: "Center",
     binPositionRight: "Right",
     binPositionFarRight: "Far Right",
-    binPositionArrowFarLeft: "\u2190\u2190",
-    binPositionArrowLeft: "\u2190",
-    binPositionArrowCenter: "\u25CF",
-    binPositionArrowRight: "\u2192",
-    binPositionArrowFarRight: "\u2192\u2192",
+    binPositionArrowFarLeft: "\u2190",
+    binPositionArrowLeft: "\u2199",
+    binPositionArrowCenter: "\u2193",
+    binPositionArrowRight: "\u2198",
+    binPositionArrowFarRight: "\u2192",
 
     // Compound item separation (split-screen)
     separateInto: "Separate into:",
@@ -274,11 +274,11 @@ const translations = {
     binPositionCenter: "\u4E2D\u592E",
     binPositionRight: "\u53F3",
     binPositionFarRight: "\u53F3\u7AEF",
-    binPositionArrowFarLeft: "\u2190\u2190",
-    binPositionArrowLeft: "\u2190",
-    binPositionArrowCenter: "\u25CF",
-    binPositionArrowRight: "\u2192",
-    binPositionArrowFarRight: "\u2192\u2192",
+    binPositionArrowFarLeft: "\u2190",
+    binPositionArrowLeft: "\u2199",
+    binPositionArrowCenter: "\u2193",
+    binPositionArrowRight: "\u2198",
+    binPositionArrowFarRight: "\u2192",
 
     // Compound item separation (split-screen)
     separateInto: "分解してください：",

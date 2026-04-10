@@ -10,7 +10,7 @@
     { "id": "recyclable", "label": "資源ゴミ", "color": "#3B82F6", "description": "ペットボトル（洗浄済み）、アルミ缶、スチール缶、びん、新聞紙、段ボール、雑誌", "position": "left" },
     { "id": "plastic", "label": "プラスチック", "color": "#F59E0B", "description": "プラマーク付きの容器包装（食品トレイ、ボトルキャップ、レジ袋、ペットボトルのラベル）", "position": "center" },
     { "id": "non-burnable", "label": "不燃ゴミ", "color": "#6B7280", "description": "金属製品、ガラス製品、陶磁器、ゴム製品、革製品、傘", "position": "right" },
-    { "id": "special", "label": "特別収集", "color": "#DC2626", "description": "電池、蛍光灯、スプレー缶、薬品、電子機器。スタッフにお渡しください", "position": "far-right" },
+    { "id": "special", "label": "特別収集", "color": "#7C3AED", "description": "電池、蛍光灯、スプレー缶、薬品、電子機器。スタッフにお渡しください", "position": "far-right" },
     { "id": "needs_review", "label": "確認が必要", "color": "#D97706", "description": "分類の確信度が低いため、ゴミ箱の表示を確認するかスタッフにお尋ねください" }
   ],
   "overrides": [

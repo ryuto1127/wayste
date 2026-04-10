@@ -29,7 +29,7 @@
     {
       "id": "special",
       "label": "Special Disposal",
-      "color": "#DC2626",
+      "color": "#7C3AED",
       "description": "Batteries, electronics, light bulbs, medications, paint, motor oil, hazardous chemicals. Do not place in regular bins.",
       "position": "right"
     },

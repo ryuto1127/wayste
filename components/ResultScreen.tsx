@@ -23,23 +23,6 @@ function streamLabel(locale: Locale, streamId: string): string {
   return key ? t(locale, key) : streamId;
 }
 
-/** Map a waste stream ID to its emoji icon for triple-encoding (color + icon + text). */
-function streamIcon(streamId: string): string {
-  const map: Record<string, string> = {
-    recycling: "\u267B\uFE0F",
-    compost: "\uD83C\uDF42",
-    landfill: "\uD83D\uDDD1\uFE0F",
-    special: "\u26A0\uFE0F",
-    ewaste: "\uD83D\uDD0C",
-    needs_review: "\u2753",
-    burnable: "\uD83D\uDD25",
-    "non-burnable": "\uD83E\uDDCA",
-    recyclable: "\u267B\uFE0F",
-    plastic: "\uD83E\uDED9",
-  };
-  return map[streamId] ?? "\uD83D\uDCE6";
-}
-
 type TrustLevel = "high" | "medium" | "low";
 
 function getTrustLevel(confidence: number, needsReview: boolean): TrustLevel {
@@ -228,7 +211,7 @@ export default function ResultScreen({
         </div>
       ) : (
         /* Single item: fullscreen hero */
-        <FullscreenResult result={firstResult} locale={locale} streams={streams} onToggleLocale={onToggleLocale} />
+        <FullscreenResult result={firstResult} locale={locale} streams={streams} />
       )}
     </div>
   );
@@ -240,12 +223,10 @@ function FullscreenResult({
   result,
   locale,
   streams = [],
-  onToggleLocale,
 }: {
   result: ClassificationResponse;
   locale: Locale;
   streams?: StreamDefinition[];
-  onToggleLocale: () => void;
 }) {
   const T = useCallback(
     (key: TranslationKey) => t(locale, key),
@@ -266,41 +247,27 @@ function FullscreenResult({
         ? "bg-amber-600"
         : "bg-red-600";
 
-  return (
-    <div className="flex-1 flex flex-col">
-      {/* Language toggle */}
-      <div className="absolute top-6 right-6 z-30 flex items-center bg-neutral-800/60 rounded-lg overflow-hidden">
-        <button
-          onClick={locale === "ja" ? onToggleLocale : undefined}
-          className={`px-3.5 py-1.5 text-xs font-bold transition-colors ${
-            locale === "en"
-              ? "bg-teal-600/30 text-teal-300"
-              : "text-neutral-500 hover:text-neutral-300"
-          }`}
-          aria-pressed={locale === "en"}
-        >
-          EN
-        </button>
-        <button
-          onClick={locale === "en" ? onToggleLocale : undefined}
-          className={`px-3.5 py-1.5 text-xs font-bold transition-colors ${
-            locale === "ja"
-              ? "bg-teal-600/30 text-teal-300"
-              : "text-neutral-500 hover:text-neutral-300"
-          }`}
-          aria-pressed={locale === "ja"}
-        >
-          日本語
-        </button>
-      </div>
+  // Resolve the direction arrow from stream position
+  const streamDef = streams.find((s) => s.id === result.wasteStream);
+  const position = streamDef?.position;
+  const directionArrow = position ? T(positionArrowKey[position]) : null;
 
+  // Collect notes to display
+  const noteText = result.preAction || result.specialInstructions;
+  const secondaryNote = result.preAction && result.specialInstructions ? result.specialInstructions : null;
+
+  return (
+    <div
+      className="flex-1 flex flex-col transition-colors duration-300"
+      style={{ backgroundColor: result.binColor }}
+    >
       {/* Screen reader summary */}
       <span className="sr-only">
         {result.itemName}: {streamLabel(locale, result.wasteStream)}.
         {result.preAction && ` ${result.preAction}.`}
       </span>
 
-      {/* Item name bar */}
+      {/* Top area — item name + confidence on colored background */}
       <div className="px-6 pt-14 pb-3 flex items-center gap-3">
         <div className="text-2xl font-bold text-white leading-tight flex-1 truncate">
           {result.itemName}
@@ -312,44 +279,42 @@ function FullscreenResult({
         </span>
       </div>
 
-      {/* Hero bin — fills remaining space */}
-      <div
-        className="flex-1 flex flex-col items-center justify-center px-6 transition-colors duration-300"
-        style={{ backgroundColor: result.binColor }}
-      >
-        <div className="text-sm font-semibold uppercase tracking-widest text-white/70 mb-4">
-          {T("putThisInBin")}
-        </div>
-        <div className="text-[8rem] leading-none mb-4" aria-hidden="true">
-          {streamIcon(result.wasteStream)}
-        </div>
-        <div className="text-6xl font-black text-white uppercase text-center">
+      {/* Center hero — giant arrow + stream name */}
+      <div className="flex-1 flex flex-col items-center justify-center px-6">
+        {directionArrow && (
+          <div className="text-[12rem] leading-none font-bold text-white mb-4" aria-hidden="true">
+            {directionArrow}
+          </div>
+        )}
+        <div className="text-4xl font-black text-white uppercase text-center">
           {streamLabel(locale, result.wasteStream)}
         </div>
-        {/* Physical bin position indicator */}
+        {/* Physical bin position dots (no direction label) */}
         <BinPositionIndicator
           wasteStream={result.wasteStream}
           streams={streams}
           locale={locale}
           size="large"
         />
-        {/* Key action tip — shown inline below bin name for instant readability */}
-        {(result.preAction || result.specialInstructions) && (
-          <p className="mt-4 text-xl font-semibold text-white/90 text-center max-w-sm">
-            {result.preAction || result.specialInstructions}
-          </p>
-        )}
       </div>
 
-      {/* Bottom info strip — secondary notes & compound breakdown */}
-      {((result.preAction && result.specialInstructions) || (result.isCompound && result.components?.length)) && (
-        <div className="px-6 py-4 space-y-2 bg-neutral-950/80">
-          {/* Show specialInstructions here only when preAction already took the hero slot */}
-          {result.preAction && result.specialInstructions && (
-            <p className="text-blue-300 text-sm">{result.specialInstructions}</p>
+      {/* Notes banner — semi-transparent, only when content exists */}
+      {(noteText || secondaryNote || (result.isCompound && result.components?.length)) && (
+        <div className="px-6 pb-6 space-y-2">
+          {noteText && (
+            <div className="bg-black/20 rounded-xl px-5 py-3">
+              <p className="text-xl font-semibold text-white/90 text-center">{noteText}</p>
+            </div>
+          )}
+          {secondaryNote && (
+            <div className="bg-white/10 rounded-xl px-5 py-3">
+              <p className="text-base text-white/80 text-center">{secondaryNote}</p>
+            </div>
           )}
           {result.isCompound && result.components && result.components.length > 0 && (
-            <CompoundBreakdown components={result.components} locale={locale} />
+            <div className="bg-black/20 rounded-xl px-5 py-3">
+              <CompoundBreakdown components={result.components} locale={locale} />
+            </div>
           )}
         </div>
       )}
@@ -402,7 +367,12 @@ function SplitScreenCard({
   // Dynamic font sizes based on scale
   const itemNameSize = fontScale >= 1 ? "text-lg" : fontScale >= 0.85 ? "text-base" : "text-sm";
   const binNameSize = fontScale >= 1 ? "text-3xl" : fontScale >= 0.85 ? "text-2xl" : "text-xl";
-  const iconSize = fontScale >= 1 ? "text-6xl" : fontScale >= 0.85 ? "text-5xl" : "text-4xl";
+  const arrowSize = fontScale >= 1 ? "text-6xl" : fontScale >= 0.85 ? "text-5xl" : "text-4xl";
+
+  // Resolve direction arrow from stream position
+  const streamDef = streams.find((s) => s.id === result.wasteStream);
+  const position = streamDef?.position;
+  const directionArrow = position ? T(positionArrowKey[position]) : null;
 
   return (
     <div
@@ -426,57 +396,61 @@ function SplitScreenCard({
         </span>
       </div>
 
-      {/* Item name bar (top) */}
-      <div className="px-4 pt-3 pb-2 bg-neutral-950/80 shrink-0">
-        <div className={`${itemNameSize} font-bold text-white leading-tight truncate pr-16`}>
-          {result.itemName}
-        </div>
-      </div>
-
-      {/* Hero bin — fills most of the column space */}
+      {/* Entire card on colored background */}
       <div
-        className="flex-1 flex flex-col items-center justify-center px-4 transition-colors duration-300"
+        className="flex-1 flex flex-col overflow-hidden transition-colors duration-300"
         style={{ backgroundColor: result.binColor }}
       >
-        <div className="text-[10px] font-semibold uppercase tracking-widest text-white/70 mb-2">
-          {T("putThisInBin")}
-        </div>
-        <div className={`${iconSize} leading-none mb-2`} aria-hidden="true">
-          {streamIcon(result.wasteStream)}
-        </div>
-        <div className={`${binNameSize} font-black text-white uppercase text-center`}>
-          {streamLabel(locale, result.wasteStream)}
+        {/* Item name (top) */}
+        <div className="px-4 pt-3 pb-2 shrink-0">
+          <div className={`${itemNameSize} font-bold text-white leading-tight truncate pr-16`}>
+            {result.itemName}
+          </div>
         </div>
 
-        {/* Physical bin position indicator */}
-        <BinPositionIndicator
-          wasteStream={result.wasteStream}
-          streams={streams}
-          locale={locale}
-          size="small"
-        />
+        {/* Hero — direction arrow + stream name */}
+        <div className="flex-1 flex flex-col items-center justify-center px-4">
+          {directionArrow && (
+            <div className={`${arrowSize} leading-none font-bold text-white mb-2`} aria-hidden="true">
+              {directionArrow}
+            </div>
+          )}
+          <div className={`${binNameSize} font-black text-white uppercase text-center`}>
+            {streamLabel(locale, result.wasteStream)}
+          </div>
 
-        {/* Pre-action or special instructions */}
-        {(result.preAction || result.specialInstructions) && (
-          <p className="mt-3 text-sm font-semibold text-white/90 text-center max-w-xs">
-            {result.preAction || result.specialInstructions}
-          </p>
+          {/* Physical bin position dots */}
+          <BinPositionIndicator
+            wasteStream={result.wasteStream}
+            streams={streams}
+            locale={locale}
+            size="small"
+          />
+        </div>
+
+        {/* Notes banner — semi-transparent, only when content exists */}
+        {(result.preAction || result.specialInstructions || (result.isCompound && result.components?.length)) && (
+          <div className="px-3 pb-3 space-y-1.5 shrink-0">
+            {(result.preAction || result.specialInstructions) && (
+              <div className="bg-black/20 rounded-lg px-3 py-2">
+                <p className="text-sm font-semibold text-white/90 text-center">
+                  {result.preAction || result.specialInstructions}
+                </p>
+              </div>
+            )}
+            {result.preAction && result.specialInstructions && (
+              <div className="bg-white/10 rounded-lg px-3 py-2">
+                <p className="text-xs text-white/80 text-center">{result.specialInstructions}</p>
+              </div>
+            )}
+            {result.isCompound && result.components && result.components.length > 0 && (
+              <div className="bg-black/20 rounded-lg px-3 py-2">
+                <SplitScreenCompoundBreakdown components={result.components} locale={locale} />
+              </div>
+            )}
+          </div>
         )}
       </div>
-
-      {/* Compound item separation guide */}
-      {result.isCompound && result.components && result.components.length > 0 && (
-        <div className="px-3 py-3 bg-neutral-950/80 shrink-0">
-          <SplitScreenCompoundBreakdown components={result.components} locale={locale} />
-        </div>
-      )}
-
-      {/* Secondary info strip */}
-      {result.preAction && result.specialInstructions && (
-        <div className="px-3 py-2 space-y-1 bg-neutral-950/80 shrink-0">
-          <p className="text-blue-300 text-xs">{result.specialInstructions}</p>
-        </div>
-      )}
     </div>
   );
 }
@@ -622,15 +596,6 @@ function BinPositionIndicator({
           );
         })}
       </div>
-      {/* Direction label */}
-      <div
-        className={`font-bold text-white/90 ${
-          isLarge ? "mt-2 text-xl" : "mt-1 text-xs"
-        }`}
-      >
-        <span aria-hidden="true">{T(positionArrowKey[position])} </span>
-        {T(positionLabelKey[position])}
-      </div>
     </div>
   );
 }
@@ -696,7 +661,6 @@ function StreamBadge({ stream }: { stream: string }) {
     <span
       className={`${bg} text-white text-[10px] font-bold uppercase px-2 py-0.5 rounded-md whitespace-nowrap mt-0.5`}
     >
-      <span aria-hidden="true">{streamIcon(stream)} </span>
       {stream}
     </span>
   );

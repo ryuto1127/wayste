@@ -19,7 +19,6 @@ import { recordCalibrationPrediction } from "@/lib/calibration";
 
 // ── Shared sub-schemas ──
 const MetaSchema = z.object({
-  skinRatio: z.number(),
   sharpnessScore: z.number(),
   imageQuality: z.enum(["good", "fair", "poor"]),
 }).optional();

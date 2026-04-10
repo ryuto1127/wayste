@@ -209,6 +209,9 @@ function ImageReviewPage() {
           )}
         </div>
 
+        {/* Analysis export */}
+        <AnalysisExportPanel locale={locale} />
+
         {/* Bulk delete */}
         <BulkDeletePanel onDelete={bulkDelete} locale={locale} />
 
@@ -415,6 +418,255 @@ function EntryCard({
     </div>
   );
 }
+
+// ── Analysis Export Panel ──
+
+type AnalysisVerdict = "correct" | "wrong" | "false_detection" | "unreviewed";
+type AnalysisModel = "yolo-local" | "yolo-world" | "nano" | "mini";
+
+function AnalysisExportPanel({ locale }: { locale: Locale }) {
+  const [open, setOpen] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const ja = locale === "ja";
+
+  // Filters
+  const [verdicts, setVerdicts] = useState<Set<AnalysisVerdict>>(new Set());
+  const [models, setModels] = useState<Set<AnalysisModel>>(new Set());
+  const [confidenceMin, setConfidenceMin] = useState("");
+  const [confidenceMax, setConfidenceMax] = useState("");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+  const [item, setItem] = useState("");
+  const [stream, setStream] = useState("");
+  const [format, setFormat] = useState<"json" | "csv">("json");
+
+  const toggleSet = <T,>(set: Set<T>, value: T): Set<T> => {
+    const next = new Set(set);
+    if (next.has(value)) next.delete(value); else next.add(value);
+    return next;
+  };
+
+  const buildUrl = (): string => {
+    const params = new URLSearchParams();
+    if (verdicts.size > 0) params.set("verdict", [...verdicts].join(","));
+    if (models.size > 0) params.set("model", [...models].join(","));
+    if (confidenceMin) params.set("confidence_min", confidenceMin);
+    if (confidenceMax) params.set("confidence_max", confidenceMax);
+    if (fromDate) params.set("from", fromDate);
+    if (toDate) params.set("to", toDate);
+    if (item.trim()) params.set("item", item.trim());
+    if (stream) params.set("stream", stream);
+    params.set("format", format);
+    return `/api/review/export/analysis?${params.toString()}`;
+  };
+
+  const handleDownload = async () => {
+    setDownloading(true);
+    try {
+      const res = await fetch(buildUrl());
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert((err as { error?: string }).error ?? `Export failed: ${res.status}`);
+        return;
+      }
+
+      if (format === "csv") {
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `analysis-${new Date().toISOString().slice(0, 10)}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+      } else {
+        const blob = new Blob([JSON.stringify(await res.json(), null, 2)], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `analysis-${new Date().toISOString().slice(0, 10)}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+    } catch {
+      alert(ja ? "エクスポートに失敗しました" : "Export failed");
+    } finally {
+      setDownloading(false);
+    }
+  };
+
+  const verdictOptions: { value: AnalysisVerdict; label: string; color: string }[] = [
+    { value: "correct", label: ja ? "正解" : "Correct", color: "bg-emerald-800 text-emerald-200" },
+    { value: "wrong", label: ja ? "不正解" : "Wrong", color: "bg-red-800 text-red-200" },
+    { value: "false_detection", label: ja ? "誤検出" : "False", color: "bg-neutral-700 text-neutral-300" },
+    { value: "unreviewed", label: ja ? "未レビュー" : "Unreviewed", color: "bg-amber-800 text-amber-200" },
+  ];
+
+  const modelOptions: { value: AnalysisModel; label: string }[] = [
+    { value: "yolo-local", label: "YOLO (Tier 1)" },
+    { value: "yolo-world", label: "YOLO World (Tier 2)" },
+    { value: "nano", label: "GPT nano" },
+    { value: "mini", label: "GPT mini" },
+  ];
+
+  const streamOptions = ["recycling", "compost", "landfill", "special", "needs_review"];
+
+  return (
+    <div className="mb-6">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="text-xs text-neutral-500 hover:text-cyan-400 transition-colors"
+      >
+        {open
+          ? (ja ? "▲ 分析エクスポートを閉じる" : "▲ Close analysis export")
+          : (ja ? "▼ 分析データエクスポート..." : "▼ Analysis export...")}
+      </button>
+
+      {open && (
+        <div className="mt-3 bg-neutral-900 border border-neutral-800 rounded-xl p-4 flex flex-col gap-4 max-w-2xl">
+          {/* Verdict filter */}
+          <div>
+            <label className="text-xs text-neutral-400 block mb-1.5">{ja ? "判定結果" : "Verdict"}</label>
+            <div className="flex flex-wrap gap-1.5">
+              {verdictOptions.map((v) => (
+                <button
+                  key={v.value}
+                  onClick={() => setVerdicts(toggleSet(verdicts, v.value))}
+                  className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all ${
+                    verdicts.has(v.value)
+                      ? `${v.color} ring-1 ring-white/30`
+                      : "bg-neutral-800 text-neutral-500 hover:bg-neutral-700"
+                  }`}
+                >
+                  {v.label}
+                </button>
+              ))}
+              {verdicts.size > 0 && (
+                <button onClick={() => setVerdicts(new Set())} className="text-[10px] text-neutral-600 hover:text-neutral-400 ml-1">
+                  {ja ? "クリア" : "clear"}
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Model filter */}
+          <div>
+            <label className="text-xs text-neutral-400 block mb-1.5">{ja ? "モデル" : "Model"}</label>
+            <div className="flex flex-wrap gap-1.5">
+              {modelOptions.map((m) => (
+                <button
+                  key={m.value}
+                  onClick={() => setModels(toggleSet(models, m.value))}
+                  className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all ${
+                    models.has(m.value)
+                      ? "bg-blue-800 text-blue-200 ring-1 ring-white/30"
+                      : "bg-neutral-800 text-neutral-500 hover:bg-neutral-700"
+                  }`}
+                >
+                  {m.label}
+                </button>
+              ))}
+              {models.size > 0 && (
+                <button onClick={() => setModels(new Set())} className="text-[10px] text-neutral-600 hover:text-neutral-400 ml-1">
+                  {ja ? "クリア" : "clear"}
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Confidence range + date range row */}
+          <div className="flex flex-wrap gap-4">
+            <div>
+              <label className="text-xs text-neutral-400 block mb-1.5">{ja ? "確信度の範囲" : "Confidence range"}</label>
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="number" step="0.05" min="0" max="1" placeholder="0"
+                  value={confidenceMin} onChange={(e) => setConfidenceMin(e.target.value)}
+                  className="w-16 bg-neutral-800 text-white text-xs rounded-lg px-2 py-1.5 border border-neutral-700 focus:outline-none focus:border-neutral-500"
+                />
+                <span className="text-neutral-600 text-xs">–</span>
+                <input
+                  type="number" step="0.05" min="0" max="1" placeholder="1"
+                  value={confidenceMax} onChange={(e) => setConfidenceMax(e.target.value)}
+                  className="w-16 bg-neutral-800 text-white text-xs rounded-lg px-2 py-1.5 border border-neutral-700 focus:outline-none focus:border-neutral-500"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="text-xs text-neutral-400 block mb-1.5">{ja ? "期間" : "Date range"}</label>
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)}
+                  className="bg-neutral-800 text-white text-xs rounded-lg px-2 py-1.5 border border-neutral-700 focus:outline-none focus:border-neutral-500"
+                />
+                <span className="text-neutral-600 text-xs">–</span>
+                <input
+                  type="date" value={toDate} onChange={(e) => setToDate(e.target.value)}
+                  className="bg-neutral-800 text-white text-xs rounded-lg px-2 py-1.5 border border-neutral-700 focus:outline-none focus:border-neutral-500"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Item + stream row */}
+          <div className="flex flex-wrap gap-4">
+            <div>
+              <label className="text-xs text-neutral-400 block mb-1.5">{ja ? "アイテム名" : "Item name"}</label>
+              <input
+                type="text" placeholder={ja ? "部分一致..." : "substring..."}
+                value={item} onChange={(e) => setItem(e.target.value)}
+                className="w-40 bg-neutral-800 text-white text-xs rounded-lg px-2 py-1.5 border border-neutral-700 focus:outline-none focus:border-neutral-500"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-neutral-400 block mb-1.5">{ja ? "ゴミの種類" : "Waste stream"}</label>
+              <select
+                value={stream} onChange={(e) => setStream(e.target.value)}
+                className="bg-neutral-800 text-white text-xs rounded-lg px-2 py-1.5 border border-neutral-700 focus:outline-none focus:border-neutral-500"
+              >
+                <option value="">{ja ? "すべて" : "All"}</option>
+                {streamOptions.map((s) => (
+                  <option key={s} value={s}>{s}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Format + download */}
+          <div className="flex items-end gap-3 flex-wrap">
+            <div>
+              <label className="text-xs text-neutral-400 block mb-1.5">{ja ? "形式" : "Format"}</label>
+              <div className="flex gap-1.5">
+                {(["json", "csv"] as const).map((f) => (
+                  <button
+                    key={f}
+                    onClick={() => setFormat(f)}
+                    className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
+                      format === f ? "bg-cyan-800 text-cyan-200" : "bg-neutral-800 text-neutral-500 hover:bg-neutral-700"
+                    }`}
+                  >
+                    {f.toUpperCase()}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <button
+              onClick={handleDownload}
+              disabled={downloading}
+              className="px-5 py-1.5 rounded-lg text-xs font-medium bg-cyan-700 hover:bg-cyan-600 text-white transition-colors disabled:opacity-50"
+            >
+              {downloading
+                ? (ja ? "ダウンロード中..." : "Downloading...")
+                : (ja ? "ダウンロード" : "Download")}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Bulk Delete Panel ──
 
 type BulkMode = "before" | "between" | "all";
 

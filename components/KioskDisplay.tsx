@@ -30,6 +30,7 @@ import { computeThresholds, type ThresholdConfig, type Calibration } from "@/lib
 import { perfMonitor } from "@/lib/perf-monitor";
 import { loadYoloRules, loadYoloWorldRules, resolveYoloDetection, resolveYoloWorldDetection, resolvePetBottleCompound, resolveYoloWorldWithPooling, isYoloClassNotWaste } from "@/lib/yolo-rules";
 import { MATERIAL_VOCABULARY } from "@/lib/material-vocabulary";
+import { iou } from "@/lib/yolo-world-inference";
 import { analyzeMaterial, refineClassName } from "@/lib/rgb-material-analyzer";
 import type { MaterialHint } from "@/lib/types";
 // kioskAuthHeaders replaced by session token (server-generated, HMAC-signed)
@@ -1114,6 +1115,8 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           const tier2Results: (ClassificationResponse & { _bboxX?: number })[] = [];
           /** Tier 2 results collected from sub-classification path (for tier1Context). */
           const subclassTier2Hints: { className: string; confidence: number }[] = [];
+          /** Track which worldDetections indices were consumed by subclass/unresolved loops. */
+          const consumedWorldIndices = new Set<number>();
 
           if (worldDetections.length > 0) {
             // PET bottle compound check: bottle + cap/label detected together
@@ -1125,7 +1128,10 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
                 const t1Waste = yoloDetections.filter(d => !isYoloClassNotWaste(d.className));
                 logYoloOnlyResult(video, compoundResult, [...yoloDetections, ...worldDetections], yoloMs + worldMs, analysis, "yolo-world",
                   undefined, undefined,
-                  t1Waste.length > 0 ? { tier1: t1Waste.map(d => ({ itemName: d.className, confidence: d.confidence })) } : undefined);
+                  {
+                    ...(t1Waste.length > 0 && { tier1: t1Waste.map(d => ({ itemName: d.className, confidence: d.confidence })) }),
+                    tier2: worldDetections.map(d => ({ itemName: d.className, confidence: d.confidence })),
+                  });
                 mergeAndDeliver([compoundResult], [], []);
                 return;
               }
@@ -1139,7 +1145,13 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
             for (const det of subclassDetections) {
               const vocabSet = new Set(MATERIAL_VOCABULARY[det.subclassContext.className] ?? []);
               // Filter YOLO World detections to material vocabulary for this class
-              const materialDetections = worldDetections.filter((wd) => vocabSet.has(wd.className));
+              const materialDetections: YoloDetection[] = [];
+              for (let wi = 0; wi < worldDetections.length; wi++) {
+                if (vocabSet.has(worldDetections[wi].className)) {
+                  materialDetections.push(worldDetections[wi]);
+                  consumedWorldIndices.add(wi);
+                }
+              }
               if (materialDetections.length > 0) {
                 // Apply confidence pooling (e.g., aluminium + steel → combined confidence)
                 const { pooledDetections, bestResult, bestDetection } = resolveYoloWorldWithPooling(
@@ -1168,13 +1180,15 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
               // Find best YOLO World match near this detection's bbox
               const detCx = (det.bbox[0] + det.bbox[2] / 2) / YOLO_MODEL_SIZE;
               const detCy = (det.bbox[1] + det.bbox[3] / 2) / YOLO_MODEL_SIZE;
-              let bestWorld = worldDetections[0];
+              let bestWorld: YoloDetection | undefined;
               let bestDist = Infinity;
-              for (const wd of worldDetections) {
+              let bestWorldIdx = -1;
+              for (let wi = 0; wi < worldDetections.length; wi++) {
+                const wd = worldDetections[wi];
                 const wcx = (wd.bbox[0] + wd.bbox[2] / 2) / YOLO_MODEL_SIZE;
                 const wcy = (wd.bbox[1] + wd.bbox[3] / 2) / YOLO_MODEL_SIZE;
                 const dist = Math.sqrt((detCx - wcx) ** 2 + (detCy - wcy) ** 2);
-                if (dist < bestDist) { bestDist = dist; bestWorld = wd; }
+                if (dist < bestDist) { bestDist = dist; bestWorld = wd; bestWorldIdx = wi; }
               }
               if (bestWorld && bestWorld.confidence >= thresholdsRef.current.YOLO_WORLD_ACCEPT_THRESHOLD) {
                 const r = resolveYoloWorldDetection(bestWorld, siteConfigRef.current!, localeRef.current);
@@ -1183,14 +1197,56 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
                   r.itemName = refineClassName(r.itemName, worldHint);
                   (r as ClassificationResponse & { _bboxX?: number })._bboxX = det._bboxX;
                   tier2Results.push(r as ClassificationResponse & { _bboxX?: number });
+                  consumedWorldIndices.add(bestWorldIdx);
                   continue;
                 }
               }
               stillUnresolved.push(det);
             }
 
-            // If no unresolved detections came in, resolve ALL qualifying YOLO World detections
-            if (unresolvedDetections.length === 0 && subclassDetections.length === 0 && worldDetections.length > 0) {
+            // ── Collect orphan YOLO World detections (items T1 missed) ──
+            // Detections not consumed by material-vocab filter or unresolved bbox matching
+            // represent genuinely new items that only YOLO World detected.
+            const IOU_DEDUP_THRESHOLD = 0.3;
+            const orphanWorldDetections: (YoloDetection & { _bboxX: number })[] = [];
+            for (let wi = 0; wi < worldDetections.length; wi++) {
+              if (consumedWorldIndices.has(wi)) continue;
+              const wd = worldDetections[wi];
+              if (wd.confidence < thresholdsRef.current.YOLO_WORLD_ACCEPT_THRESHOLD) continue;
+              // Check IoU overlap with T1 subclass bboxes
+              let isDuplicate = false;
+              for (const sd of subclassDetections) {
+                if (iou(wd.bbox, sd.subclassContext.bbox) > IOU_DEDUP_THRESHOLD) { isDuplicate = true; break; }
+              }
+              if (!isDuplicate) {
+                // Check against unresolved T1 bboxes
+                for (const ud of unresolvedDetections) {
+                  if (iou(wd.bbox, ud.bbox) > IOU_DEDUP_THRESHOLD) { isDuplicate = true; break; }
+                }
+              }
+              if (isDuplicate) continue;
+              orphanWorldDetections.push(Object.assign({}, wd, { _bboxX: wd.bbox[0] + wd.bbox[2] / 2 }));
+            }
+
+            // Resolve orphans via YOLO World rules or route to Tier 3 API
+            if (orphanWorldDetections.length > 0) {
+              console.log(`[tier2] ${orphanWorldDetections.length} orphan YOLO World detection(s): ${orphanWorldDetections.map(d => d.className).join(", ")}`);
+              for (const orphan of orphanWorldDetections) {
+                const result = resolveYoloWorldDetection(orphan, siteConfigRef.current!, localeRef.current);
+                if (result) {
+                  const worldHint = analyzeMaterial(video, orphan.bbox);
+                  result.itemName = refineClassName(result.itemName, worldHint);
+                  (result as ClassificationResponse & { _bboxX?: number })._bboxX = orphan._bboxX;
+                  tier2Results.push(result as ClassificationResponse & { _bboxX?: number });
+                } else {
+                  stillUnresolved.push(orphan);
+                }
+              }
+            }
+
+            // If no T1 detections came in at all, resolve ALL qualifying YOLO World detections
+            if (unresolvedDetections.length === 0 && subclassDetections.length === 0
+                && orphanWorldDetections.length === 0 && worldDetections.length > 0) {
               for (const wd of worldDetections) {
                 if (wd.confidence < thresholdsRef.current.YOLO_WORLD_ACCEPT_THRESHOLD) continue;
                 const result = resolveYoloWorldDetection(wd, siteConfigRef.current!, localeRef.current);
@@ -1206,7 +1262,10 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
                 const primary = tier2Results[0];
                 const t1Waste2 = yoloDetections.filter(d => !isYoloClassNotWaste(d.className));
                 logYoloOnlyResult(video, primary, [...yoloDetections, ...worldDetections], yoloMs + worldMs, analysis, "yolo-world", undefined, undefined,
-                  t1Waste2.length > 0 ? { tier1: t1Waste2.map(d => ({ itemName: d.className, confidence: d.confidence })) } : undefined);
+                  {
+                    ...(t1Waste2.length > 0 && { tier1: t1Waste2.map(d => ({ itemName: d.className, confidence: d.confidence })) }),
+                    tier2: worldDetections.map(d => ({ itemName: d.className, confidence: d.confidence })),
+                  });
                 mergeAndDeliver(tier2Results, [], []);
                 return;
               }
@@ -1233,7 +1292,10 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
                   video, primary, [...yoloDetections, ...worldDetections], yoloMs + worldMs, analysis,
                   primaryIsT2 ? "yolo-world" : "yolo-local",
                   undefined, undefined,
-                  wasteT1All.length > 0 ? { tier1: wasteT1All.map(d => ({ itemName: d.className, confidence: d.confidence })) } : undefined,
+                  {
+                    ...(wasteT1All.length > 0 && { tier1: wasteT1All.map(d => ({ itemName: d.className, confidence: d.confidence })) }),
+                    tier2: worldDetections.map(d => ({ itemName: d.className, confidence: d.confidence })),
+                  },
                 );
               }
               mergeAndDeliver(tier2Results, [], []);

@@ -284,7 +284,7 @@ export async function runYoloWorldInference(
 }
 
 /** Compute Intersection-over-Union for two [x, y, w, h] boxes. */
-function iou(a: [number, number, number, number], b: [number, number, number, number]): number {
+export function iou(a: [number, number, number, number], b: [number, number, number, number]): number {
   const ax2 = a[0] + a[2], ay2 = a[1] + a[3];
   const bx2 = b[0] + b[2], by2 = b[1] + b[3];
   const ix1 = Math.max(a[0], b[0]);

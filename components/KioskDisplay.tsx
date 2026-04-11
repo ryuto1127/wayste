@@ -1184,25 +1184,28 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
               stillUnresolved.push(det);
             }
 
-            // If no unresolved detections came in, use YOLO World's best as a single result
+            // If no unresolved detections came in, resolve ALL qualifying YOLO World detections
             if (unresolvedDetections.length === 0 && subclassDetections.length === 0 && worldDetections.length > 0) {
-              const worldBest = worldDetections[0];
-              if (worldBest.confidence >= thresholdsRef.current.YOLO_WORLD_ACCEPT_THRESHOLD) {
-                const result = resolveYoloWorldDetection(worldBest, siteConfigRef.current!, localeRef.current);
-                if (result) {
-                  const worldHint = analyzeMaterial(video, worldBest.bbox);
-                  const worldOriginalName = result.itemName;
-                  result.itemName = refineClassName(result.itemName, worldHint);
-                  console.log(`[tier2] YOLO World HIT: ${worldBest.className} (${(worldBest.confidence * 100).toFixed(1)}%) → ${result.itemName} [${result.wasteStream}] in ${worldMs}ms`);
-                  apiController.abort();
-                  const t1Waste2 = yoloDetections.filter(d => !isYoloClassNotWaste(d.className));
-                  logYoloOnlyResult(video, result, [...yoloDetections, ...worldDetections], yoloMs + worldMs, analysis, "yolo-world", worldHint, worldOriginalName,
-                    t1Waste2.length > 0 ? { tier1: t1Waste2.map(d => ({ itemName: d.className, confidence: d.confidence })) } : undefined);
-                  mergeAndDeliver([result as ClassificationResponse & { _bboxX?: number }], [], []);
-                  return;
-                }
+              for (const wd of worldDetections) {
+                if (wd.confidence < thresholdsRef.current.YOLO_WORLD_ACCEPT_THRESHOLD) continue;
+                const result = resolveYoloWorldDetection(wd, siteConfigRef.current!, localeRef.current);
+                if (!result) continue;
+                const worldHint = analyzeMaterial(video, wd.bbox);
+                result.itemName = refineClassName(result.itemName, worldHint);
+                (result as ClassificationResponse & { _bboxX?: number })._bboxX = wd.bbox[0];
+                tier2Results.push(result as ClassificationResponse & { _bboxX?: number });
               }
-              console.log(`[tier2] YOLO World conf=${(worldBest.confidence * 100).toFixed(1)}% — falling through to API (${worldMs}ms)`);
+              if (tier2Results.length > 0) {
+                console.log(`[tier2] YOLO World HIT: ${tier2Results.map(r => `${r.itemName} [${r.wasteStream}]`).join(" + ")} in ${worldMs}ms`);
+                apiController.abort();
+                const primary = tier2Results[0];
+                const t1Waste2 = yoloDetections.filter(d => !isYoloClassNotWaste(d.className));
+                logYoloOnlyResult(video, primary, [...yoloDetections, ...worldDetections], yoloMs + worldMs, analysis, "yolo-world", undefined, undefined,
+                  t1Waste2.length > 0 ? { tier1: t1Waste2.map(d => ({ itemName: d.className, confidence: d.confidence })) } : undefined);
+                mergeAndDeliver(tier2Results, [], []);
+                return;
+              }
+              console.log(`[tier2] YOLO World best conf=${(worldDetections[0].confidence * 100).toFixed(1)}% — falling through to API (${worldMs}ms)`);
             }
 
             // All resolved via Tier 1 + Tier 2 — deliver

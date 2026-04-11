@@ -553,6 +553,10 @@ export async function POST(request: Request) {
               requestId,
               meta: meta as ClassifyMeta | undefined,
               overrideApplied: first.result.wasteStream !== first.raw.wasteStream,
+              tierResults: (() => {
+                const yd = (data as z.infer<typeof SingleRequestSchema>).yoloDetections as YoloDetectionLog[] | undefined;
+                return yd?.length ? { tier1: yd.map(d => ({ itemName: d.className, confidence: d.confidence })) } : undefined;
+              })(),
             })
           )
         );

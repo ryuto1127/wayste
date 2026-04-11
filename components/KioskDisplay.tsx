@@ -1201,6 +1201,21 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
               !zeroBboxFallback
             ) {
               console.log(`[tier2] All resolved: ${tier2Results.length} via YOLO World in ${worldMs}ms`);
+              apiController.abort();
+              // Log the primary result (first by bbox x)
+              const allResolved = [...tier1Results, ...tier2Results];
+              allResolved.sort((a, b) => (a._bboxX ?? Infinity) - (b._bboxX ?? Infinity));
+              const primary = allResolved[0];
+              if (primary) {
+                const primaryIsT2 = tier2Results.includes(primary);
+                const wasteT1All = yoloDetections.filter(d => !isYoloClassNotWaste(d.className));
+                logYoloOnlyResult(
+                  video, primary, [...yoloDetections, ...worldDetections], yoloMs + worldMs, analysis,
+                  primaryIsT2 ? "yolo-world" : "yolo-local",
+                  undefined, undefined,
+                  wasteT1All.length > 0 ? { tier1: wasteT1All.map(d => ({ itemName: d.className, confidence: d.confidence })) } : undefined,
+                );
+              }
               mergeAndDeliver(tier2Results, [], []);
               return;
             }

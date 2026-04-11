@@ -79,6 +79,7 @@ export async function POST(request: Request) {
         meta: entry.meta,
         yoloDetections: entry.yoloDetections,
         rgbAnalysis: entry.rgbAnalysis,
+        tierResults: entry.tierResults,
       });
 
       // Check for milestone notification (non-blocking, best-effort)

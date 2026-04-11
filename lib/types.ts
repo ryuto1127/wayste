@@ -106,6 +106,12 @@ export interface PilotLogEntry {
     refinedTo?: string;
     textureSurface?: string;
   };
+  /** Intermediate classification results from earlier pipeline tiers.
+   *  Present when final classification came from a later tier (T2 or T3). */
+  tierResults?: {
+    tier1?: { itemName: string; confidence: number }[];
+    tier2?: { itemName: string; confidence: number }[];
+  };
 }
 
 /**

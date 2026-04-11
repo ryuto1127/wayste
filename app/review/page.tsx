@@ -416,6 +416,32 @@ function EntryCard({
         )}
       </div>
 
+      {/* Tier results (intermediate pipeline decisions) */}
+      {entry.tierResults && (entry.tierResults.tier1?.length || entry.tierResults.tier2?.length) && (
+        <div className="flex flex-col gap-1 text-[11px]">
+          {entry.tierResults.tier1 && entry.tierResults.tier1.length > 0 && (
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-neutral-600 font-medium shrink-0">T1:</span>
+              {entry.tierResults.tier1.map((r, i) => (
+                <span key={i} className="bg-neutral-800/80 text-neutral-400 px-1.5 py-0.5 rounded">
+                  {r.itemName} <span className="text-neutral-600">{Math.round(r.confidence * 100)}%</span>
+                </span>
+              ))}
+            </div>
+          )}
+          {entry.tierResults.tier2 && entry.tierResults.tier2.length > 0 && (
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-neutral-600 font-medium shrink-0">T2:</span>
+              {entry.tierResults.tier2.map((r, i) => (
+                <span key={i} className="bg-neutral-800/80 text-neutral-400 px-1.5 py-0.5 rounded">
+                  {r.itemName} <span className="text-neutral-600">{Math.round(r.confidence * 100)}%</span>
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Verdict badge */}
       {verdictBadge && (
         <p className={`text-xs font-medium ${verdictBadge.color}`}>

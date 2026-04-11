@@ -59,6 +59,12 @@ const Tier1ContextSchema = z.object({
   ),
 }).optional();
 
+// ── Intermediate tier results (for pilot-log traceability) ──
+const TierResultsSchema = z.object({
+  tier1: z.array(z.object({ itemName: z.string(), confidence: z.number() })).optional(),
+  tier2: z.array(z.object({ itemName: z.string(), confidence: z.number() })).optional(),
+}).optional();
+
 // ── Request validation (single-item format — backward compatible) ──
 const SingleRequestSchema = z.object({
   image: z.string().min(100),
@@ -87,6 +93,7 @@ const BatchRequestSchema = z.object({
   siteId: z.string().optional(),
   locale: z.enum(["en", "ja"]).optional(),
   meta: MetaSchema,
+  tierResults: TierResultsSchema,
 });
 
 // ── Union schema: accepts either format ──
@@ -460,6 +467,7 @@ export async function POST(request: Request) {
       const first = batchResults[0];
       if (first) {
         const logTimestamp = new Date().toISOString();
+        const batchTierResults = data.tierResults as { tier1?: { itemName: string; confidence: number }[]; tier2?: { itemName: string; confidence: number }[] } | undefined;
         runInBackground(
           Promise.all([
             recordCalibrationPrediction(first.result.confidence, first.modelUsed),
@@ -479,6 +487,7 @@ export async function POST(request: Request) {
               requestId,
               meta: meta as ClassifyMeta | undefined,
               overrideApplied: first.result.wasteStream !== first.raw.wasteStream,
+              tierResults: batchTierResults,
             })
           )
         );
@@ -574,6 +583,23 @@ export async function POST(request: Request) {
       latencyMs: totalServerMs,
     });
 
+    // Construct tierResults from available pipeline data
+    const tierResults = (() => {
+      const tr: { tier1?: { itemName: string; confidence: number }[]; tier2?: { itemName: string; confidence: number }[] } = {};
+      const t1Ctx = tier1Context as { className: string; confidence: number; tier2Results: { className: string; confidence: number }[] } | undefined;
+      if (t1Ctx) {
+        // Sub-classification path: T1 = tier1Context class, T2 = tier2Results
+        tr.tier1 = [{ itemName: t1Ctx.className, confidence: t1Ctx.confidence }];
+        if (t1Ctx.tier2Results?.length) {
+          tr.tier2 = t1Ctx.tier2Results.map(r => ({ itemName: r.className, confidence: r.confidence }));
+        }
+      } else if (yoloDetections && (yoloDetections as YoloDetectionLog[]).length > 0) {
+        // Standard path: T1 from YOLO detections
+        tr.tier1 = (yoloDetections as YoloDetectionLog[]).map(d => ({ itemName: d.className, confidence: d.confidence }));
+      }
+      return (tr.tier1 || tr.tier2) ? tr : undefined;
+    })();
+
     runInBackground(
       Promise.all([
         recordCalibrationPrediction(result.confidence, modelUsed),
@@ -594,6 +620,7 @@ export async function POST(request: Request) {
           meta: meta as ClassifyMeta | undefined,
           yoloDetections: yoloDetections as YoloDetectionLog[] | undefined,
           overrideApplied: result.wasteStream !== raw.wasteStream,
+          tierResults,
           ...(materialHint && {
             rgbAnalysis: {
               dominantHue: (materialHint as MaterialHint).dominantHue,

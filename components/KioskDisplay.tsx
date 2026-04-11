@@ -637,6 +637,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       modelUsed: "yolo-local" | "yolo-world" = "yolo-local",
       hint?: MaterialHint,
       refinedFrom?: string,
+      tierResults?: { tier1?: { itemName: string; confidence: number }[]; tier2?: { itemName: string; confidence: number }[] },
     ) {
       // Capture the same center short-side square that YOLO sees (e.g. 720×720
       // from 1280×720). Log images preserve full resolution for fine-tuning.
@@ -689,6 +690,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
                     }),
                   },
                 }),
+                ...(tierResults && { tierResults }),
               },
             }),
           }).catch(() => {}); // best-effort
@@ -934,7 +936,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       }
 
       /** Send per-bbox cropped images for unresolved detections via batch API. */
-      async function sendCroppedBatchApi(): Promise<(ClassificationResponse & { _bboxX?: number })[]> {
+      async function sendCroppedBatchApi(worldHints?: { className: string; confidence: number }[]): Promise<(ClassificationResponse & { _bboxX?: number })[]> {
         if (unresolvedDetections.length === 0) return [];
         const crops = await Promise.all(
           unresolvedDetections.map((det) => cropBboxToBase64(video, det.bbox))
@@ -973,6 +975,13 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
             siteId: siteConfigRef.current?.siteId,
             locale: localeRef.current,
             meta,
+            tierResults: (() => {
+              const tr: { tier1?: { itemName: string; confidence: number }[]; tier2?: { itemName: string; confidence: number }[] } = {};
+              const wasteT1 = yoloDetections.filter(d => !isYoloClassNotWaste(d.className));
+              if (wasteT1.length > 0) tr.tier1 = wasteT1.map(d => ({ itemName: d.className, confidence: d.confidence }));
+              if (worldHints?.length) tr.tier2 = worldHints.map(d => ({ itemName: d.className, confidence: d.confidence }));
+              return (tr.tier1 || tr.tier2) ? tr : undefined;
+            })(),
           }),
         });
         if (!res.ok) throw new Error(`Batch API error: ${res.status}`);
@@ -1096,7 +1105,10 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
               if (compoundResult) {
                 console.log(`[tier2] PET bottle compound: ${worldDetections.map(d => d.className).join(" + ")} in ${worldMs}ms`);
                 apiController.abort();
-                logYoloOnlyResult(video, compoundResult, [...yoloDetections, ...worldDetections], yoloMs + worldMs, analysis, "yolo-world");
+                const t1Waste = yoloDetections.filter(d => !isYoloClassNotWaste(d.className));
+                logYoloOnlyResult(video, compoundResult, [...yoloDetections, ...worldDetections], yoloMs + worldMs, analysis, "yolo-world",
+                  undefined, undefined,
+                  t1Waste.length > 0 ? { tier1: t1Waste.map(d => ({ itemName: d.className, confidence: d.confidence })) } : undefined);
                 mergeAndDeliver([compoundResult], [], []);
                 return;
               }
@@ -1171,7 +1183,9 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
                   result.itemName = refineClassName(result.itemName, worldHint);
                   console.log(`[tier2] YOLO World HIT: ${worldBest.className} (${(worldBest.confidence * 100).toFixed(1)}%) → ${result.itemName} [${result.wasteStream}] in ${worldMs}ms`);
                   apiController.abort();
-                  logYoloOnlyResult(video, result, [...yoloDetections, ...worldDetections], yoloMs + worldMs, analysis, "yolo-world", worldHint, worldOriginalName);
+                  const t1Waste2 = yoloDetections.filter(d => !isYoloClassNotWaste(d.className));
+                  logYoloOnlyResult(video, result, [...yoloDetections, ...worldDetections], yoloMs + worldMs, analysis, "yolo-world", worldHint, worldOriginalName,
+                    t1Waste2.length > 0 ? { tier1: t1Waste2.map(d => ({ itemName: d.className, confidence: d.confidence })) } : undefined);
                   mergeAndDeliver([result as ClassificationResponse & { _bboxX?: number }], [], []);
                   return;
                 }
@@ -1214,7 +1228,8 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           const tier3Promises: Promise<(ClassificationResponse & { _bboxX?: number })[]>[] = [];
 
           if (unresolvedDetections.length > 0) {
-            tier3Promises.push(sendCroppedBatchApi());
+            const wdHints = worldDetections.map(d => ({ className: d.className, confidence: d.confidence }));
+            tier3Promises.push(sendCroppedBatchApi(wdHints));
           }
           if (subclassDetections.length > 0) {
             tier3Promises.push(sendSubclassBatchApi(subclassTier2Hints));

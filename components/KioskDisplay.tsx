@@ -312,7 +312,11 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
               const body = await retryRes.json().catch(() => ({}));
               throw new Error((body as { error?: string }).error ?? `API error: ${retryRes.status}`);
             }
-            return (await retryRes.json()) as ClassificationResponse;
+            const retryData = await retryRes.json();
+            if (Array.isArray(retryData.results)) {
+              return { ...retryData.results[0], requestId: retryData.requestId } as ClassificationResponse;
+            }
+            return retryData as ClassificationResponse;
           }
 
           if (!res.ok) {
@@ -324,7 +328,15 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
             );
           }
 
-          const data = (await res.json()) as ClassificationResponse & { requestId?: string };
+          const responseData = await res.json();
+          // Multi-item response format: { results: ClassificationResponse[], requestId }
+          if (Array.isArray(responseData.results)) {
+            if (responseData.results.length === 0) throw new Error("Multi-item returned no results");
+          }
+          const data: ClassificationResponse & { requestId?: string } =
+            Array.isArray(responseData.results)
+              ? { ...responseData.results[0], requestId: responseData.requestId }
+              : responseData;
           if (data.requestId) {
             console.log(`[classify] TIMING: fetch=${fetchDoneMs}ms, requestId=${data.requestId}`);
           }

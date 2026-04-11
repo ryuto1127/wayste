@@ -9,7 +9,7 @@
 ## Tech Stack
 - TypeScript / Next.js 16 (App Router) / React 19 / Tailwind CSS v4
 - YOLO26m FP16 (ONNX Runtime Web) — browser object detection, COCO-80
-- YOLO World S (ONNX Runtime Web) — browser recycling detection, 23 classes
+- YOLO World S (ONNX Runtime Web) — browser recycling detection, 36 classes
 - OpenAI GPT-5.4 (nano → mini escalation) — cloud fallback
 - Upstash Redis (REST) / Vercel Blob / Vercel Serverless + Cron
 - Zod v4 / Jest v30 (281 tests, 11 suites) / EN+JA i18n (125+ keys)
@@ -24,8 +24,8 @@
 - `app/api/classify/route.ts` — Classification endpoint (GPT-5.4 nano→mini, overrides, Blob upload); supports single + batch (up to 4 items) formats
 - `lib/threshold-config.ts` — Master sensitivity (0–1) → all detection/inference thresholds; auto-calibration aware
 - `lib/frame-analyzer.ts` — CV pipeline: 120x120 canvas, ~33fps, background subtraction, auto-calibration, multi-blob detection (top 4 with per-blob sharpness/contrast/skin/saturation scoring)
-- `lib/yolo-inference.ts` — YOLO26m wrapper (Tier 1: confidence >= 0.65 → instant result, no server call); WebGPU primary, WASM fallback
-- `lib/yolo-world-inference.ts` — YOLO World S wrapper (Tier 2: fires when Tier 1 < 0.65, accepts >= 0.45)
+- `lib/yolo-inference.ts` — YOLO26m wrapper (Tier 1: detection floor 0.65, instant result when >= YOLO_FALLBACK_THRESHOLD — 0.75 at default sensitivity); WebGPU primary, WASM fallback
+- `lib/yolo-world-inference.ts` — YOLO World S wrapper (Tier 2: fires when Tier 1 < YOLO_FALLBACK_THRESHOLD, accepts >= YOLO_WORLD_ACCEPT_THRESHOLD — both 0.75 at default sensitivity); 36 recycling-specific classes
 - `lib/rgb-material-analyzer.ts` — Post-YOLO RGB/texture analysis: color (HSV), transparency, metallicity, bbox aspect ratio, LBP texture → refines YOLO class names + feeds MaterialHint to GPT
 - `lib/inference-backend.ts` — 3-tier orchestration; sequential model startup with `overallReady` gate; parallel API call when Tier 1 < 0.30
 - `lib/waste-rules-core.ts` — Word-boundary pattern matching + override engine (browser-safe)

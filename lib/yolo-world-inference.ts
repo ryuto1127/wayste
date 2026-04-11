@@ -139,9 +139,9 @@ export async function warmUpYoloWorld(): Promise<void> {
 /**
  * Run YOLO World inference on a video frame.
  *
- * Model output is [1, 27, 8400] (channels-first, no NMS):
+ * Model output is [1, N, 8400] (channels-first, no NMS):
  *   - 8400 candidate boxes
- *   - 27 channels = 4 (cx, cy, w, h) + 23 class scores
+ *   - N channels = 4 (cx, cy, w, h) + numClasses (36 pre-baked recycling classes)
  *
  * We apply argmax + confidence threshold + greedy NMS here.
  */
@@ -188,9 +188,9 @@ export async function runYoloWorldInference(
 
     const outputData = output.data as Float32Array;
     const shape = output.dims;
-    const numChannels = shape[1] as number; // 39 = 4 + 35
+    const numChannels = shape[1] as number; // 4 + numClasses (dynamically read from model)
     const numCandidates = shape[2] as number; // 8400
-    const numClasses = numChannels - 4; // 35
+    const numClasses = numChannels - 4;
 
     // ── Parse channels-first output ──
     // Data layout: outputData[ channel * numCandidates + candidateIdx ]

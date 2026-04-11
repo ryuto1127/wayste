@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, Suspense } from "react";
+import { useEffect, useState, useCallback, useMemo, Suspense } from "react";
 import { AdminNav } from "@/components/AdminNav";
 import { PerformancePanel } from "@/components/PerformancePanel";
 import type { PilotLogEntry } from "@/lib/types";
@@ -133,6 +133,19 @@ function ImageReviewPage() {
 
   const reviewed = entries.filter((e) => e.verdict !== null).length;
   const pending = entries.length - reviewed;
+
+  // Build sibling map: base requestId → all item names classified together
+  const siblingMap = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const e of entries) {
+      if (!e.requestId) continue;
+      const base = e.requestId.replace(/-\d+$/, "");
+      const arr = map.get(base) ?? [];
+      arr.push(e.itemName);
+      map.set(base, arr);
+    }
+    return map;
+  }, [entries]);
 
   const filtered = entries.filter((e) => {
     if (statusFilter === "pending" && e.verdict !== null) return false;
@@ -324,6 +337,7 @@ function ImageReviewPage() {
                 onDelete={deleteEntry}
                 locale={locale}
                 T={T}
+                siblingNames={entry.requestId ? siblingMap.get(entry.requestId.replace(/-\d+$/, "")) : undefined}
               />
             ))}
           </div>
@@ -340,6 +354,7 @@ function EntryCard({
   onDelete,
   locale,
   T,
+  siblingNames,
 }: {
   entry: ReviewEntry;
   saving: boolean;
@@ -347,6 +362,7 @@ function EntryCard({
   onDelete: (requestId: string) => void;
   locale: Locale;
   T: (key: Parameters<typeof t>[1]) => string;
+  siblingNames?: string[];
 }) {
   const [confirmingDelete, setConfirmingDelete] = useState(false);
 
@@ -395,6 +411,13 @@ function EntryCard({
       {/* Info */}
       <div>
         <p className="font-semibold text-white truncate">{entry.itemName}</p>
+        {siblingNames && siblingNames.length > 1 && (
+          <p className="text-xs text-neutral-400 mt-0.5 truncate">
+            {siblingNames.filter(n => n !== entry.itemName).length > 0
+              ? `+ ${siblingNames.filter(n => n !== entry.itemName).join(", ")}`
+              : `(${siblingNames.length} items)`}
+          </p>
+        )}
         <p className="text-xs text-neutral-500 mt-0.5">{date}</p>
       </div>
 

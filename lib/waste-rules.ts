@@ -171,10 +171,13 @@ Respond with ONLY a JSON object in this exact format, no other text:
       "reasoning": "one sentence explaining why this item goes in this stream",
       "preAction": "",
       "isCompound": false,
-      "components": []
+      "components": [],
+      "horizontalPosition": "left" or "center" or "right"
     }
   ]
 }
+
+Order items from LEFT to RIGHT as they appear in the image. Set horizontalPosition to where the item is located horizontally in the image ("left", "center", or "right").
 
 If no waste items are visible, return: { "items": [] }
 

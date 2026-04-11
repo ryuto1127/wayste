@@ -126,6 +126,7 @@ const RawClassificationSchema = z.object({
       })
     )
     .optional(),
+  horizontalPosition: z.enum(["left", "center", "right"]).optional(),
 });
 
 interface RawClassification {
@@ -136,6 +137,7 @@ interface RawClassification {
   preAction?: string;
   isCompound?: boolean;
   components?: ComponentPart[];
+  horizontalPosition?: "left" | "center" | "right";
 }
 
 // ── Multi-item raw response validation ──
@@ -270,8 +272,9 @@ async function callModelMulti(
                       additionalProperties: false,
                     },
                   },
+                  horizontalPosition: { type: "string", enum: ["left", "center", "right"] },
                 },
-                required: ["itemName", "wasteStream", "confidence", "reasoning", "preAction", "isCompound", "components"],
+                required: ["itemName", "wasteStream", "confidence", "reasoning", "preAction", "isCompound", "components", "horizontalPosition"],
                 additionalProperties: false,
               },
             },
@@ -512,6 +515,10 @@ export async function POST(request: Request) {
       const rawItems = await callModelMulti(openai, "gpt-5.4-mini", image, multiPrompt);
       const totalServerMs = Date.now() - startMs;
       console.log(`[${requestId}] multi-item classified ${rawItems.length} items in ${totalServerMs}ms`);
+
+      // Sort raw items left-to-right by horizontalPosition before building results
+      const posOrder: Record<string, number> = { left: 0, center: 1, right: 2 };
+      rawItems.sort((a, b) => (posOrder[a.horizontalPosition ?? "center"] ?? 1) - (posOrder[b.horizontalPosition ?? "center"] ?? 1));
 
       const multiResults = rawItems.map((raw) => {
         const result = buildClassificationResult(raw, siteConfig, locale);

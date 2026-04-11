@@ -757,8 +757,8 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           // Filter out not_waste classes (person, furniture, vehicles, etc.)
           const wasteDetections = detections.filter(d => !isYoloClassNotWaste(d.className));
 
-          // Compute material hint from best waste detection (or any detection)
-          const hintSource = wasteDetections[0] ?? detections[0];
+          // Compute material hint from best waste detection only (ignore non-waste)
+          const hintSource = wasteDetections[0];
           if (hintSource) {
             materialHintForApi = analyzeMaterial(video, hintSource.bbox);
           }
@@ -839,12 +839,15 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
               subclassDetections,
             );
           } else {
-            // No waste detections and no qualified blobs — escalate
+            // No waste detections and no qualified blobs
             if (detections.length > 0) {
-              console.log(`[tier1] Only non-waste detections (${detections.map(d => d.className).join(", ")}) in ${yoloMs}ms — escalating to YOLO World`);
-            } else {
-              console.log(`[tier1] No YOLO detections (${yoloMs}ms) — escalating to YOLO World`);
+              // YOLO detected only non-waste (person, furniture, vehicles, etc.)
+              // — nothing actionable on the platform; skip all further tiers.
+              console.log(`[tier1] Only non-waste detections (${detections.map(d => d.className).join(", ")}) in ${yoloMs}ms — ignoring`);
+              return;
             }
+            // No YOLO detections at all — escalate to YOLO World
+            console.log(`[tier1] No YOLO detections (${yoloMs}ms) — escalating to YOLO World`);
             escalateToYoloWorld(
               video, backend, null, apiPromise, apiController, true, detections, yoloMs, analysis,
               [], [], true,

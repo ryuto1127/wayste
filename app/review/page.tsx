@@ -420,8 +420,9 @@ function EntryCard({
       {(() => {
         // Use tierResults if available; fallback to yoloDetections for older entries
         // Show top 3 per tier, sorted by confidence descending
+        const NOT_WASTE = new Set(["person","bicycle","car","motorcycle","airplane","bus","train","truck","boat","traffic light","fire hydrant","stop sign","parking meter","bench","bird","cat","dog","horse","sheep","cow","elephant","bear","zebra","giraffe","chair","couch","potted plant","bed","dining table","toilet","sink","refrigerator"]);
         const top3 = (arr?: { itemName: string; confidence: number }[]) =>
-          arr?.slice().sort((a, b) => b.confidence - a.confidence).slice(0, 3);
+          arr?.filter(r => !NOT_WASTE.has(r.itemName)).sort((a, b) => b.confidence - a.confidence).slice(0, 3);
         const t1 = top3(entry.tierResults?.tier1
           ?? (entry.modelUsed !== "yolo-local" && entry.yoloDetections?.length
             ? entry.yoloDetections.map(d => ({ itemName: d.className, confidence: d.confidence }))

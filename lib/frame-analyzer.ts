@@ -456,6 +456,6 @@ export class FrameAnalyzer {
 // Recalibrate from pilot-log data.
 export function imageQualityBand(a: FrameAnalysis): ImageQuality {
   if (a.sharpnessScore > 1500) return "good";
-  if (a.sharpnessScore > 500) return "fair";
+  if (a.sharpnessScore > 1000) return "fair";
   return "poor";
 }

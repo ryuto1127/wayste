@@ -56,7 +56,7 @@ describe("FrameAnalyzer", () => {
   describe("sharpness gate", () => {
     it("returns sharp=false when laplacian variance is low", () => {
       const analysis = makeAnalysis({ sharpnessScore: 50 });
-      // imageQualityBand returns "poor" when sharpness < 500
+      // imageQualityBand returns "poor" when sharpness <= 1000
       const quality = imageQualityBand(analysis);
       expect(quality).toBe("poor");
     });
@@ -76,10 +76,10 @@ describe("imageQualityBand", () => {
   });
 
   it("returns 'fair' for moderate sharpness", () => {
-    expect(imageQualityBand(makeAnalysis({ sharpnessScore: 800 }))).toBe("fair");
+    expect(imageQualityBand(makeAnalysis({ sharpnessScore: 1200 }))).toBe("fair");
   });
 
   it("returns 'poor' for low sharpness", () => {
-    expect(imageQualityBand(makeAnalysis({ sharpnessScore: 400 }))).toBe("poor");
+    expect(imageQualityBand(makeAnalysis({ sharpnessScore: 800 }))).toBe("poor");
   });
 });

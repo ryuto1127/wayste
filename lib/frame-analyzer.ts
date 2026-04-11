@@ -53,7 +53,6 @@ const ROI_PIXEL_COUNT = ROI_W * ROI_H; // 5184
 const BG_LEARN_RATE = 0.015; // absorbs camera drift in ~10s; BG continues during confirm window to erode noise
 const BG_INIT_RATE = 0.15;
 const BG_INIT_FRAMES = 30; // ~4.5s of init at 7fps
-const BG_SETTLE_FRAMES = 45; // detection blocked until this many frames
 const FG_PIXEL_THRESHOLD = 25; // per-pixel diff threshold for foreground classification
 
 export const MOTION_RATIO_THRESHOLD = 0.12; // kept for external consumers
@@ -67,13 +66,22 @@ export class FrameAnalyzer {
   /** Mean luminance of the previous frame (0-255), used for adaptive BG rate. */
   private prevMeanLuminance = 128;
 
-  // ── Auto-calibration (collected during BG_SETTLE_FRAMES) ──
-  private calibrationSamples: { fg: number; blob: number }[] = [];
+  // ── Rolling noise floor calibration ──
   private calibration: Calibration | null = null;
+  private rollingCalBuffer: { fg: number; blob: number }[] = [];
+  private rollingCalFrameCounter = 0;
+  private idleFgThreshold = 0.035; // default from computeThresholds(0.5)
+  private static readonly ROLLING_CAL_BUFFER_SIZE = 30;
+  private static readonly ROLLING_CAL_INTERVAL = 150; // ~5s at 30fps
 
-  /** Returns auto-calibration data, or null if settling is not yet complete. */
+  /** Returns rolling calibration data, or null if not yet computed. */
   getCalibration(): Calibration | null {
     return this.calibration;
+  }
+
+  /** Set the current ROI foreground threshold (used to filter calibration samples). */
+  setIdleFgThreshold(threshold: number): void {
+    this.idleFgThreshold = threshold;
   }
 
   /**
@@ -393,30 +401,30 @@ export class FrameAnalyzer {
 
     this.prevGray = new Uint8Array(roiGray);
 
-    // ── Auto-calibration: collect noise-floor samples during settling ──
-    if (this.frameCount <= BG_SETTLE_FRAMES && !this.calibration) {
-      // Skip the first BG_INIT_FRAMES where the BG model is still bootstrapping
-      if (this.frameCount > BG_INIT_FRAMES) {
-        this.calibrationSamples.push({
-          fg: roiForegroundRatio,
-          blob: roiLargestBlobRatio,
-        });
+    // ── Rolling noise floor calibration (idle samples only) ──
+    // Collect samples when BG is adapting (idle/cooldown) and no object is present.
+    if (this.bgRate > 0 && this.frameCount > BG_INIT_FRAMES &&
+        roiForegroundRatio < this.idleFgThreshold) {
+      this.rollingCalBuffer.push({ fg: roiForegroundRatio, blob: roiLargestBlobRatio });
+      if (this.rollingCalBuffer.length > FrameAnalyzer.ROLLING_CAL_BUFFER_SIZE) {
+        this.rollingCalBuffer.shift();
       }
+    }
 
-      // Derive calibration once settling is complete
-      if (this.frameCount === BG_SETTLE_FRAMES && this.calibrationSamples.length > 0) {
-        const n = this.calibrationSamples.length;
-        const fgValues = this.calibrationSamples.map((s) => s.fg);
-        const blobValues = this.calibrationSamples.map((s) => s.blob);
-
+    // Recompute calibration every ~5 seconds
+    this.rollingCalFrameCounter++;
+    if (this.rollingCalFrameCounter >= FrameAnalyzer.ROLLING_CAL_INTERVAL) {
+      this.rollingCalFrameCounter = 0;
+      if (this.rollingCalBuffer.length >= 10) {
+        const n = this.rollingCalBuffer.length;
+        const fgValues = this.rollingCalBuffer.map((s) => s.fg);
+        const blobValues = this.rollingCalBuffer.map((s) => s.blob);
         const noiseFgMean = fgValues.reduce((a, b) => a + b, 0) / n;
         const noiseFgStd = Math.sqrt(
           fgValues.reduce((sum, v) => sum + (v - noiseFgMean) ** 2, 0) / n,
         );
         const noiseBlobMean = blobValues.reduce((a, b) => a + b, 0) / n;
-
         this.calibration = { noiseFgMean, noiseFgStd, noiseBlobMean };
-        this.calibrationSamples = []; // free memory
       }
     }
 
@@ -426,7 +434,7 @@ export class FrameAnalyzer {
       roiLargestBlobDiagonalRatio,
       sharpnessScore,
       blobs: blobInfos,
-      isSettled: this.frameCount >= BG_SETTLE_FRAMES,
+      isSettled: true,
       timestamp: Date.now(),
     };
   }
@@ -437,8 +445,9 @@ export class FrameAnalyzer {
     this.prevGray = null;
     this.frameCount = 0;
     this.prevMeanLuminance = 128;
-    this.calibrationSamples = [];
     this.calibration = null;
+    this.rollingCalBuffer = [];
+    this.rollingCalFrameCounter = 0;
   }
 }
 

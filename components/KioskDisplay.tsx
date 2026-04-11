@@ -26,7 +26,7 @@ import {
   type SystemStatus,
   YOLO_API_PARALLEL_THRESHOLD,
 } from "@/lib/inference-backend";
-import { computeThresholds, type ThresholdConfig } from "@/lib/threshold-config";
+import { computeThresholds, type ThresholdConfig, type Calibration } from "@/lib/threshold-config";
 import { loadYoloRules, loadYoloWorldRules, resolveYoloDetection, resolveYoloWorldDetection, resolvePetBottleCompound, isYoloClassNotWaste } from "@/lib/yolo-rules";
 import { analyzeMaterial, refineClassName } from "@/lib/rgb-material-analyzer";
 import type { MaterialHint } from "@/lib/types";
@@ -152,8 +152,8 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
   const lastAnalysisRef = useRef<FrameAnalysis | null>(null);
   const lastCachedRef = useRef("");
   const errorSetAtRef = useRef(0);
-  /** Whether auto-calibration has been applied to thresholds. */
-  const calibrationAppliedRef = useRef(false);
+  /** Last calibration object reference — detect rolling recalibration updates. */
+  const lastCalibrationRef = useRef<Calibration | null>(null);
   const errorRef = useRef<string | null>(null);
   /** Mirror of `locale` state as a ref for stale-closure-safe reads inside the CV interval. */
   const localeRef = useRef<Locale>(defaultLocale ?? "en");
@@ -368,19 +368,22 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       }
 
       // Set BG adaptation rate based on pipeline state.
-      // "nothing detected" results keep BG learning — there is no valid result
-      // to protect, and freezing would cause the item's absence to look like
-      // foreground when it leaves (because idle partially absorbed it).
+      // All result states (including nothing_detected) freeze BG to prevent
+      // non-waste objects from being absorbed. boostBackgroundAdaptation()
+      // rapidly corrects on exit (gone check or timeout).
       const currentState = stateRef.current;
       const bgRate =
         currentState === "idle" || currentState === "cooldown"
           ? BG_RATE_IDLE
-          : currentState === "result" && nothingDetectedCountRef.current > 0
-            ? BG_RATE_IDLE
-            : currentState === "result"
-              ? BG_RATE_RESULT
-              : BG_RATE_FROZEN;
+          : currentState === "result"
+            ? BG_RATE_RESULT
+            : BG_RATE_FROZEN;
       analyzer.setBgRate(bgRate);
+
+      // Keep analyzer's idle threshold in sync for rolling calibration
+      if (currentState === "idle" || currentState === "cooldown") {
+        analyzer.setIdleFgThreshold(thresholdsRef.current.ROI_FG_THRESHOLD);
+      }
 
       const analysisStart = performance.now();
       const analysis = analyzer.analyze(video);
@@ -419,14 +422,12 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
 
       if (!analysis.isSettled) return;
 
-      // Recompute thresholds once when auto-calibration completes
-      if (!calibrationAppliedRef.current) {
-        const cal = analyzer.getCalibration();
-        if (cal) {
-          const sensitivity = siteConfigRef.current?.sensitivity ?? 0.5;
-          thresholdsRef.current = computeThresholds(sensitivity, cal);
-          calibrationAppliedRef.current = true;
-        }
+      // Recompute thresholds when rolling calibration updates
+      const cal = analyzer.getCalibration();
+      if (cal && cal !== lastCalibrationRef.current) {
+        const sensitivity = siteConfigRef.current?.sensitivity ?? 0.5;
+        thresholdsRef.current = computeThresholds(sensitivity, cal);
+        lastCalibrationRef.current = cal;
       }
 
       const th = thresholdsRef.current;

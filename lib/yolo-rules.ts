@@ -97,7 +97,9 @@ export function loadYoloWorldRules(): Promise<YoloRulesConfig | null> {
   return worldRulesLoading;
 }
 
-/** Confidence threshold for sub-classification routing (80%). */
+/** Confidence threshold for focused material sub-classification routing (80%).
+ *  Above this: T2 material vocabulary path.
+ *  Below this: general T2/T3 escalation (T1 rules skipped). */
 const SUBCLASS_CONFIDENCE_THRESHOLD = 0.80;
 
 /**
@@ -107,7 +109,8 @@ const SUBCLASS_CONFIDENCE_THRESHOLD = 0.80;
  * - `{ needsSubclassification, subclassContext }` — high-confidence detection
  *   of a class that requires material identification; caller must route to
  *   Tier 2 material vocabulary.
- * - `null` — no rule matched; caller falls back to YOLO World / API.
+ * - `null` — no rule matched OR material-ambiguous class below threshold;
+ *   caller falls back to YOLO World / API.
  */
 export type YoloResolution =
   | { result: ClassificationResponse; needsSubclassification?: false }
@@ -123,6 +126,9 @@ export type YoloResolution =
  * When the rule has `needsSubclassification: true` and confidence ≥ 0.80,
  * returns a `YoloResolution` with `needsSubclassification: true` so the
  * caller can route to the material-focused Tier 2/3 path.
+ *
+ * When `needsSubclassification: true` but confidence < 0.80, returns `null`
+ * so the caller routes to general T2 (YOLO World) → T3 (GPT mini).
  */
 export function resolveYoloDetection(
   detection: YoloDetection,
@@ -167,25 +173,25 @@ export function resolveYoloDetection(
     return returnResolution ? { result } : result;
   }
 
-  // Sub-classification routing: high-confidence detection of a material-ambiguous
-  // class (bottle, cup, bowl, cutlery, wine glass) — skip Tier 1 resolution and
-  // route to Tier 2 material vocabulary instead.
-  if (
-    rule.needsSubclassification &&
-    detection.confidence >= SUBCLASS_CONFIDENCE_THRESHOLD
-  ) {
-    if (returnResolution) {
-      return {
-        result: null,
-        needsSubclassification: true,
-        subclassContext: {
-          className: detection.className,
-          confidence: detection.confidence,
-          bbox: detection.bbox,
-        },
-      };
+  // Sub-classification routing: material-ambiguous class (bottle, cup, bowl,
+  // cutlery, wine glass).
+  //   ≥ 80%: focused material sub-classification via T2 material vocabulary
+  //   < 80%: skip T1 rules entirely → general T2 (YOLO World) → T3 (GPT mini)
+  if (rule.needsSubclassification) {
+    if (detection.confidence >= SUBCLASS_CONFIDENCE_THRESHOLD) {
+      if (returnResolution) {
+        return {
+          result: null,
+          needsSubclassification: true,
+          subclassContext: {
+            className: detection.className,
+            confidence: detection.confidence,
+            bbox: detection.bbox,
+          },
+        };
+      }
     }
-    // Legacy call without returnResolution: return null to force fallback
+    // Below threshold or legacy call: return null → general T2/T3 escalation
     return null;
   }
 

@@ -83,15 +83,12 @@ describe("Tier 1: YOLO26m detection → waste stream", () => {
       expect(result!.modelUsed).toBe("yolo-local");
     });
 
-    // Sub-classification classes resolve normally below the 0.80 threshold
+    // Sub-classification classes always route to material identification
     it.each([
-      ["bottle", "recycling"],
-      ["wine glass", "recycling"],
-    ])("%s → %s (below subclass threshold)", (className, expectedStream) => {
+      "bottle", "wine glass",
+    ])("%s → null (routes to sub-classification at any confidence)", (className) => {
       const result = resolveYoloDetection(makeDetection(className, 0.75), config);
-      expect(result).not.toBeNull();
-      expect(result!.wasteStream).toBe(expectedStream);
-      expect(result!.modelUsed).toBe("yolo-local");
+      expect(result).toBeNull();
     });
   });
 
@@ -123,17 +120,12 @@ describe("Tier 1: YOLO26m detection → waste stream", () => {
       expect(result!.wasteStream).toBe(expectedStream);
     });
 
-    // Sub-classification classes resolve normally below the 0.80 threshold
+    // Sub-classification classes always route to material identification
     it.each([
-      ["cup", "landfill"],
-      ["fork", "landfill"],
-      ["knife", "landfill"],
-      ["spoon", "landfill"],
-      ["bowl", "landfill"],
-    ])("%s → %s (below subclass threshold)", (className, expectedStream) => {
+      "cup", "fork", "knife", "spoon", "bowl",
+    ])("%s → null (routes to sub-classification at any confidence)", (className) => {
       const result = resolveYoloDetection(makeDetection(className, 0.75), config);
-      expect(result).not.toBeNull();
-      expect(result!.wasteStream).toBe(expectedStream);
+      expect(result).toBeNull();
     });
   });
 
@@ -192,31 +184,29 @@ describe("Tier 1: YOLO26m detection → waste stream", () => {
   });
 
   it("includes preAction when defined in rules", () => {
-    // Use below-threshold confidence since bottle has needsSubclassification
-    const result = resolveYoloDetection(makeDetection("bottle", 0.75), config);
+    // Use "book" which has preAction but no needsSubclassification
+    const result = resolveYoloDetection(makeDetection("book", 0.85), config);
     expect(result).not.toBeNull();
-    expect(result!.preAction).toBe("Empty and rinse before recycling");
+    expect(result!.preAction).toBe("Remove plastic covers if present");
   });
 
   it("preserves detection confidence in result", () => {
-    // Use below-threshold confidence since bottle has needsSubclassification
-    const result = resolveYoloDetection(makeDetection("bottle", 0.75), config);
+    const result = resolveYoloDetection(makeDetection("book", 0.75), config);
     expect(result).not.toBeNull();
     expect(result!.confidence).toBe(0.75);
   });
 
-  describe("sub-classification routing (≥ 0.80 confidence)", () => {
+  describe("sub-classification routing (≥ 0.80 → material vocab, < 0.80 → general T2)", () => {
     it.each([
       "bottle", "cup", "fork", "knife", "spoon", "bowl", "wine glass",
-    ])("%s → returns null (routes to material sub-classification)", (className) => {
-      // Legacy call (without returnResolution) returns null to trigger fallback
+    ])("%s ≥ 0.80 → returns null (legacy call routes to fallback)", (className) => {
       const result = resolveYoloDetection(makeDetection(className, 0.85), config);
       expect(result).toBeNull();
     });
 
     it.each([
       "bottle", "cup", "fork", "knife", "spoon", "bowl", "wine glass",
-    ])("%s → needsSubclassification with returnResolution", (className) => {
+    ])("%s ≥ 0.80 → needsSubclassification with returnResolution", (className) => {
       const resolution = resolveYoloDetection(makeDetection(className, 0.85), config, "en", true);
       expect(resolution).not.toBeNull();
       expect(resolution!.needsSubclassification).toBe(true);
@@ -224,6 +214,17 @@ describe("Tier 1: YOLO26m detection → waste stream", () => {
         expect(resolution!.subclassContext.className).toBe(className);
         expect(resolution!.subclassContext.confidence).toBe(0.85);
       }
+    });
+
+    it.each([
+      "bottle", "cup", "fork", "knife", "spoon", "bowl", "wine glass",
+    ])("%s < 0.80 → null (skip T1 rules, general T2/T3 escalation)", (className) => {
+      // Below threshold: T1 rules skipped entirely, routes to general YOLO World → GPT mini
+      const result = resolveYoloDetection(makeDetection(className, 0.75), config);
+      expect(result).toBeNull();
+      // returnResolution also returns null (not needsSubclassification)
+      const resolution = resolveYoloDetection(makeDetection(className, 0.75), config, "en", true);
+      expect(resolution).toBeNull();
     });
   });
 });

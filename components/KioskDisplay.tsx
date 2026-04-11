@@ -787,7 +787,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
               // Tier 1: high confidence → try resolution with sub-classification awareness
               const resolution = resolveYoloDetection(detection, siteConfigRef.current!, localeRef.current, true);
               if (resolution?.needsSubclassification) {
-                // Material-ambiguous class (bottle, cup, etc.) at ≥ 80% — route to Tier 2 material path
+                // Material-ambiguous class (bottle, cup, etc.) at ≥ 80% — route to Tier 2 material vocab path
                 console.log(`[tier1] ${detection.className} (${(detection.confidence * 100).toFixed(1)}%) needs material sub-classification`);
                 subclassDetections.push(Object.assign({}, detection, {
                   _bboxX: bboxX,
@@ -874,7 +874,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
     }
 
     /**
-     * Crop the video frame to a YOLO detection's bbox with 20% margin,
+     * Crop the video frame to a YOLO detection's bbox with 30% margin,
      * clamped to frame bounds. Returns base64 JPEG and the crop coordinates.
      */
     async function cropBboxToBase64(
@@ -890,8 +890,8 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       const offsetY = Math.round((vh - side) / 2);
 
       const [bx, by, bw, bh] = bbox;
-      const marginX = bw * 0.2;
-      const marginY = bh * 0.2;
+      const marginX = bw * 0.3;
+      const marginY = bh * 0.3;
 
       // Crop coordinates in video pixel space
       const cx = Math.max(0, Math.round((bx - marginX) * scale + offsetX));
@@ -1025,12 +1025,18 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       /**
        * Send cropped images for sub-classification detections to the API
        * with tier1Context (material identification prompt path).
+       *
+       * @param tier2ResultsForContext — material-vocab-filtered T2 results (for the prompt)
+       * @param allWorldHints — ALL YOLO World detections (for diagnostic tierResults)
        */
       async function sendSubclassBatchApi(
         tier2ResultsForContext: { className: string; confidence: number }[],
+        allWorldHints?: { className: string; confidence: number }[],
       ): Promise<(ClassificationResponse & { _bboxX?: number })[]> {
         if (subclassDetections.length === 0) return [];
         const results: (ClassificationResponse & { _bboxX?: number })[] = [];
+        // Use all YOLO World detections for diagnostic T2 data (not just material-vocab filtered)
+        const t2Diagnostic = allWorldHints ?? tier2ResultsForContext;
         // Process each sub-classification detection individually (each gets its own tier1Context)
         for (const det of subclassDetections) {
           const crop = await cropBboxToBase64(video, det.subclassContext.bbox);
@@ -1051,7 +1057,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
                 confidence: det.subclassContext.confidence,
                 tier2Results: tier2ResultsForContext,
               },
-              tierResults: buildTr(tier2ResultsForContext.length > 0 ? tier2ResultsForContext.map(d => ({ itemName: d.className, confidence: d.confidence })) : undefined),
+              tierResults: buildTr(t2Diagnostic.length > 0 ? t2Diagnostic.map(d => ({ itemName: d.className, confidence: d.confidence })) : undefined),
             }),
           });
           if (!res.ok) continue;
@@ -1340,7 +1346,8 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
             tier3Promises.push(sendCroppedBatchApi(wdHints));
           }
           if (subclassDetections.length > 0) {
-            tier3Promises.push(sendSubclassBatchApi(subclassTier2Hints));
+            const allWdHints = worldDetections.map(d => ({ className: d.className, confidence: d.confidence }));
+            tier3Promises.push(sendSubclassBatchApi(subclassTier2Hints, allWdHints));
           }
 
           if (tier3Promises.length > 0) {

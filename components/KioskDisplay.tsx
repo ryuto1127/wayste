@@ -18,7 +18,6 @@ import {
   imageQualityBand,
   blobIsObject,
 } from "@/lib/frame-analyzer";
-import type { BlobInfo } from "@/lib/types";
 import {
   getInferenceBackend,
   subscribeSystemStatus,
@@ -275,14 +274,14 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
 
   // ── API call (with timeout + 429 retry) ──
   const classify = useCallback(
-    async (frame: string, meta: ClassifyMeta, yoloDetections?: YoloDetectionLog[], materialHint?: MaterialHint): Promise<ClassificationResponse & { requestId?: string }> => {
+    async (frame: string, meta: ClassifyMeta, yoloDetections?: YoloDetectionLog[], materialHint?: MaterialHint, multi?: boolean): Promise<ClassificationResponse & { requestId?: string }> => {
       const doFetch = async (): Promise<ClassificationResponse & { requestId?: string }> => {
         const fetchStartMs = Date.now();
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
 
         try {
-          const reqBody = { image: frame, meta, locale, yoloDetections, materialHint };
+          const reqBody = { image: frame, meta, locale, yoloDetections, materialHint, ...(multi && { multi: true }) };
           const res = await fetch("/api/classify", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -690,7 +689,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       const apiController = new AbortController();
       let yoloDetectionLogs: YoloDetectionLog[] | undefined;
       let materialHintForApi: MaterialHint | undefined;
-      const apiPromise = () => classifyViaApiAsync(video, analysis, apiController.signal, yoloDetectionLogs, materialHintForApi);
+      const apiPromise = (multi?: boolean) => classifyViaApiAsync(video, analysis, apiController.signal, yoloDetectionLogs, materialHintForApi, multi);
 
       if (!yoloReady || !backend) {
         // No YOLO at all — straight to API
@@ -724,49 +723,41 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
             materialHintForApi = analyzeMaterial(video, hintSource.bbox);
           }
 
-          // ── Blob-to-detection matching ──
-          // Match each YOLO detection to nearest blob by center-point distance.
-          // Then apply three-way routing for each blob.
-          const matchedBlobs = matchBlobsToDetections(blobs, wasteDetections);
-
-          // Collect resolved results from matched + unmatched blobs
-          const resolvedResults: ClassificationResponse[] = [];
-          const unresolvedForApi: BlobInfo[] = [];
+          // ── Bbox-based routing ──
+          // Iterate wasteDetections directly — no blob matching needed.
+          // Blobs remain the gate for triggering YOLO (presence detection) and
+          // detecting item removal (result screen), but routing uses bboxes.
+          const resolvedResults: (ClassificationResponse & { _bboxX?: number })[] = [];
+          const unresolvedDetections: (YoloDetection & { _bboxX: number })[] = [];
           let firstResolvedHint: MaterialHint | undefined;
           let firstResolvedOriginalName: string | undefined;
 
-          for (const { blob, detection } of matchedBlobs) {
-            if (detection) {
-              // Blob HAS a YOLO match
-              if (detection.confidence >= thresholdsRef.current.YOLO_FALLBACK_THRESHOLD) {
-                // Tier 1: high confidence → instant resolve via rules
-                const r = resolveYoloDetection(detection, siteConfigRef.current!, localeRef.current);
-                if (r) {
-                  const detHint = analyzeMaterial(video, detection.bbox);
-                  const originalName = r.itemName;
-                  r.itemName = refineClassName(r.itemName, detHint);
-                  if (resolvedResults.length === 0) {
-                    firstResolvedHint = detHint;
-                    firstResolvedOriginalName = originalName;
-                  }
-                  resolvedResults.push(r);
-                  continue;
+          for (const detection of wasteDetections.slice(0, 4)) {
+            const bboxX = detection.bbox[0] + detection.bbox[2] / 2; // center-x
+            if (detection.confidence >= thresholdsRef.current.YOLO_FALLBACK_THRESHOLD) {
+              // Tier 1: high confidence → instant resolve via rules
+              const r = resolveYoloDetection(detection, siteConfigRef.current!, localeRef.current);
+              if (r) {
+                const detHint = analyzeMaterial(video, detection.bbox);
+                const originalName = r.itemName;
+                r.itemName = refineClassName(r.itemName, detHint);
+                if (resolvedResults.length === 0) {
+                  firstResolvedHint = detHint;
+                  firstResolvedOriginalName = originalName;
                 }
+                (r as ClassificationResponse & { _bboxX?: number })._bboxX = bboxX;
+                resolvedResults.push(r as ClassificationResponse & { _bboxX?: number });
+                continue;
               }
-              // Lower confidence — try YOLO World or API
-              unresolvedForApi.push(blob);
-            } else {
-              // No YOLO match — check if it's a real object
-              if (blobIsObject(blob)) {
-                unresolvedForApi.push(blob);
-              }
-              // else: discard as noise (shadow, stain, hand fragment)
             }
-            if (resolvedResults.length + unresolvedForApi.length >= 4) break;
+            // Lower confidence — collect for Tier 2/3 escalation
+            unresolvedDetections.push(Object.assign({}, detection, { _bboxX: bboxX }));
           }
 
           // If we have high-confidence results and nothing unresolved, deliver instantly
-          if (resolvedResults.length > 0 && unresolvedForApi.length === 0) {
+          if (resolvedResults.length > 0 && unresolvedDetections.length === 0) {
+            // Sort by bbox x-coordinate (left-to-right)
+            resolvedResults.sort((a, b) => (a._bboxX ?? 0) - (b._bboxX ?? 0));
             console.log(`[tier1] YOLO HIT: ${resolvedResults.map((r) => r.itemName).join(" + ")} in ${yoloMs}ms`);
             logYoloOnlyResult(video, resolvedResults[0], detections, yoloMs, analysis, "yolo-local", firstResolvedHint, firstResolvedOriginalName);
             handleMultiClassificationResults(resolvedResults, resolvedResults.map(() => undefined));
@@ -775,18 +766,23 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
 
           // ── Some items need further resolution ──
           const best = wasteDetections[0] ?? null;
-          if (best || unresolvedForApi.length > 0) {
+          const hasUnresolved = unresolvedDetections.length > 0;
+          const hasBlobPresence = blobs.some(b => blobIsObject(b));
+
+          if (best || hasUnresolved || hasBlobPresence) {
             // Show optimistic UI for already-resolved items
             if (resolvedResults.length > 0) {
+              resolvedResults.sort((a, b) => (a._bboxX ?? 0) - (b._bboxX ?? 0));
               setStableResults(resolvedResults);
               resultEnterTimeRef.current = Date.now();
             }
 
             const fireApiInParallel = !best || best.confidence < YOLO_API_PARALLEL_THRESHOLD;
-            console.log(`[tier1] ${resolvedResults.length} resolved, ${unresolvedForApi.length} unresolved — escalating`);
+            console.log(`[tier1] ${resolvedResults.length} resolved, ${unresolvedDetections.length} unresolved — escalating`);
 
             escalateToYoloWorld(
               video, backend, best, apiPromise, apiController, fireApiInParallel, detections, yoloMs, analysis,
+              resolvedResults, unresolvedDetections, hasBlobPresence && wasteDetections.length === 0,
             );
           } else {
             // No waste detections and no qualified blobs — escalate
@@ -797,6 +793,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
             }
             escalateToYoloWorld(
               video, backend, null, apiPromise, apiController, true, detections, yoloMs, analysis,
+              [], [], true,
             );
           }
         })
@@ -811,44 +808,50 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
         });
     }
 
-    /** Match blobs to YOLO detections by center-point proximity. */
-    function matchBlobsToDetections(
-      blobs: BlobInfo[],
-      detections: YoloDetection[],
-    ): { blob: BlobInfo; detection: YoloDetection | null }[] {
-      const usedDetections = new Set<number>();
-      const result: { blob: BlobInfo; detection: YoloDetection | null }[] = [];
+    /**
+     * Crop the video frame to a YOLO detection's bbox with 20% margin,
+     * clamped to frame bounds. Returns base64 JPEG and the crop coordinates.
+     */
+    async function cropBboxToBase64(
+      video: HTMLVideoElement,
+      bbox: [number, number, number, number],
+    ): Promise<{ image: string; cropBox: [number, number, number, number] } | null> {
+      const vw = video.videoWidth;
+      const vh = video.videoHeight;
+      const side = Math.min(vw, vh);
+      // YOLO bbox is in 640×640 model space — scale to the center-crop square
+      const scale = side / YOLO_MODEL_SIZE;
+      const offsetX = Math.round((vw - side) / 2);
+      const offsetY = Math.round((vh - side) / 2);
 
-      for (const blob of blobs) {
-        const [bcx, bcy] = blob.bboxNorm;
-        let bestDist = Infinity;
-        let bestIdx = -1;
+      const [bx, by, bw, bh] = bbox;
+      const marginX = bw * 0.2;
+      const marginY = bh * 0.2;
 
-        for (let i = 0; i < detections.length; i++) {
-          if (usedDetections.has(i)) continue;
-          const d = detections[i];
-          // Detection bbox is [x, y, w, h] in pixel coords — normalize to 0-1
-          const dcx = (d.bbox[0] + d.bbox[2] / 2) / YOLO_MODEL_SIZE;
-          const dcy = (d.bbox[1] + d.bbox[3] / 2) / YOLO_MODEL_SIZE;
-          const dist = Math.sqrt((bcx - dcx) ** 2 + (bcy - dcy) ** 2);
-          if (dist < bestDist) {
-            bestDist = dist;
-            bestIdx = i;
-          }
-        }
+      // Crop coordinates in video pixel space
+      const cx = Math.max(0, Math.round((bx - marginX) * scale + offsetX));
+      const cy = Math.max(0, Math.round((by - marginY) * scale + offsetY));
+      const cw = Math.min(vw - cx, Math.round((bw + marginX * 2) * scale));
+      const ch = Math.min(vh - cy, Math.round((bh + marginY * 2) * scale));
 
-        // Match if distance is reasonable (< 0.3 normalized)
-        if (bestIdx >= 0 && bestDist < 0.3) {
-          usedDetections.add(bestIdx);
-          result.push({ blob, detection: detections[bestIdx] });
-        } else {
-          result.push({ blob, detection: null });
-        }
+      if (cw <= 0 || ch <= 0) return null;
 
-        if (result.length >= 4) break;
-      }
+      const canvas = new OffscreenCanvas(cw, ch);
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return null;
+      ctx.drawImage(video, cx, cy, cw, ch, 0, 0, cw, ch);
 
-      return result;
+      const blob = await canvas.convertToBlob({ type: "image/jpeg", quality: 0.82 });
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+      const image = dataUrl.split(",")[1];
+      if (!image) return null;
+
+      return { image, cropBox: [cx, cy, cw, ch] };
     }
 
     /** Tier 2: YOLO World fallback (on-demand). */
@@ -856,35 +859,123 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       video: HTMLVideoElement,
       backend: InferenceBackend,
       yoloBest: { className: string; confidence: number } | null,
-      apiPromise: () => Promise<{ result: (ClassificationResponse & { requestId?: string }) | null; requestId?: string }>,
+      apiPromise: (multi?: boolean) => Promise<{ result: (ClassificationResponse & { requestId?: string }) | null; requestId?: string }>,
       apiController: AbortController,
       fireApiInParallel: boolean,
       yoloDetections: YoloDetection[],
       yoloMs: number,
       analysis: FrameAnalysis,
+      /** Already-resolved high-confidence Tier 1 results (with _bboxX). */
+      tier1Results: (ClassificationResponse & { _bboxX?: number })[] = [],
+      /** Low-confidence detections that need Tier 2/3 resolution. */
+      unresolvedDetections: (YoloDetection & { _bboxX: number })[] = [],
+      /** True when blobs exist but YOLO found zero waste detections — triggers multi-item GPT fallback. */
+      zeroBboxFallback: boolean = false,
     ) {
+      type ApiResult = Promise<{ result: (ClassificationResponse & { requestId?: string }) | null; requestId?: string }>;
       // Start API call in parallel if confidence is very low
-      let apiInflight: ReturnType<typeof apiPromise> | null = null;
-      if (fireApiInParallel) {
-        apiInflight = apiPromise();
+      let apiInflight: ApiResult | null = null;
+      if (fireApiInParallel && unresolvedDetections.length === 0 && zeroBboxFallback) {
+        // Full-frame multi-item fallback — use multi-item prompt
+        apiInflight = apiPromise(true);
+      }
+
+      /** Send per-bbox cropped images for unresolved detections via batch API. */
+      async function sendCroppedBatchApi(): Promise<(ClassificationResponse & { _bboxX?: number })[]> {
+        if (unresolvedDetections.length === 0) return [];
+        const crops = await Promise.all(
+          unresolvedDetections.map((det) => cropBboxToBase64(video, det.bbox))
+        );
+        const validItems: { image: string; yoloHint: string | null; materialHint?: MaterialHint; cropBox: [number, number, number, number]; _bboxX: number }[] = [];
+        for (let i = 0; i < crops.length; i++) {
+          const crop = crops[i];
+          if (!crop) continue;
+          const det = unresolvedDetections[i];
+          const hint = analyzeMaterial(video, det.bbox);
+          validItems.push({
+            image: crop.image,
+            yoloHint: det.className,
+            materialHint: hint,
+            cropBox: crop.cropBox,
+            _bboxX: det._bboxX,
+          });
+        }
+        if (validItems.length === 0) return [];
+
+        const meta: ClassifyMeta = {
+          sharpnessScore: analysis.sharpnessScore,
+          imageQuality: imageQualityBand(analysis),
+        };
+
+        const res = await fetch("/api/classify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            items: validItems.map((v) => ({
+              image: v.image,
+              yoloHint: v.yoloHint,
+              materialHint: v.materialHint,
+              cropBox: v.cropBox,
+            })),
+            siteId: siteConfigRef.current?.siteId,
+            locale: localeRef.current,
+            meta,
+          }),
+        });
+        if (!res.ok) throw new Error(`Batch API error: ${res.status}`);
+        const data = await res.json() as { results: (ClassificationResponse & { requestId?: string })[] };
+        return (data.results ?? []).map((r, i) => ({
+          ...r,
+          _bboxX: validItems[i]?._bboxX,
+        }));
+      }
+
+      /** Merge all tier results, sort by bbox x, cap at 4. */
+      function mergeAndDeliver(
+        tier2Results: (ClassificationResponse & { _bboxX?: number })[],
+        tier3Results: (ClassificationResponse & { _bboxX?: number })[],
+        requestIds: (string | undefined)[],
+      ) {
+        const allResults = [...tier1Results, ...tier2Results, ...tier3Results];
+        // Sort by bbox x-coordinate; results without _bboxX go last
+        allResults.sort((a, b) => (a._bboxX ?? Infinity) - (b._bboxX ?? Infinity));
+        const capped = allResults.slice(0, 4);
+        const cappedIds = capped.map((r) =>
+          requestIds[allResults.indexOf(r)] ?? (r as ClassificationResponse & { requestId?: string }).requestId
+        );
+        handleMultiClassificationResults(capped, cappedIds);
       }
 
       if (!backend.isYoloWorldReady()) {
         // YOLO World not available — fall through to API
         console.log("[tier2] YOLO World not ready — falling through to API");
-        const promise = apiInflight ?? apiPromise();
-        promise
-          .then(({ result: r, requestId }) => {
-            if (r) handleClassificationResult(r, requestId);
-            else handleClassificationError(new Error("API returned no result"));
-          })
-          .catch((err) => {
-            if (yoloBest) {
-              handleClassificationResult(buildOfflineFallback(yoloBest.className, yoloBest.confidence), undefined);
-            } else {
-              handleClassificationError(err);
-            }
-          });
+        if (unresolvedDetections.length > 0) {
+          sendCroppedBatchApi()
+            .then((batchResults) => mergeAndDeliver([], batchResults, []))
+            .catch((err) => {
+              if (tier1Results.length > 0) {
+                mergeAndDeliver([], [], []);
+              } else if (yoloBest) {
+                handleClassificationResult(buildOfflineFallback(yoloBest.className, yoloBest.confidence), undefined);
+              } else {
+                handleClassificationError(err);
+              }
+            });
+        } else {
+          const promise = apiInflight ?? apiPromise(zeroBboxFallback);
+          promise
+            .then(({ result: r, requestId }) => {
+              if (r) mergeAndDeliver([], [r as ClassificationResponse & { _bboxX?: number }], [requestId]);
+              else handleClassificationError(new Error("API returned no result"));
+            })
+            .catch((err) => {
+              if (yoloBest) {
+                handleClassificationResult(buildOfflineFallback(yoloBest.className, yoloBest.confidence), undefined);
+              } else {
+                handleClassificationError(err);
+              }
+            });
+        }
         return;
       }
 
@@ -895,6 +986,8 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           const worldMs = Date.now() - worldStart;
           perfMonitor.recordWorldInference(worldMs);
 
+          const tier2Results: (ClassificationResponse & { _bboxX?: number })[] = [];
+
           if (worldDetections.length > 0) {
             // PET bottle compound check: bottle + cap/label detected together
             if (worldDetections.length >= 2) {
@@ -903,65 +996,127 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
                 console.log(`[tier2] PET bottle compound: ${worldDetections.map(d => d.className).join(" + ")} in ${worldMs}ms`);
                 apiController.abort();
                 logYoloOnlyResult(video, compoundResult, [...yoloDetections, ...worldDetections], yoloMs + worldMs, analysis, "yolo-world");
-                handleClassificationResult(compoundResult, undefined);
+                mergeAndDeliver([compoundResult], [], []);
                 return;
               }
             }
 
-            const worldBest = worldDetections[0];
-
-            if (worldBest.confidence >= thresholdsRef.current.YOLO_WORLD_ACCEPT_THRESHOLD) {
-              const result = resolveYoloWorldDetection(worldBest, siteConfigRef.current!, localeRef.current);
-              if (result) {
-                // Apply material refinement (same as Tier 1)
-                const worldHint = analyzeMaterial(video, worldBest.bbox);
-                const worldOriginalName = result.itemName;
-                result.itemName = refineClassName(result.itemName, worldHint);
-                console.log(`[tier2] YOLO World HIT: ${worldBest.className} (${(worldBest.confidence * 100).toFixed(1)}%) → ${result.itemName} [${result.wasteStream}] in ${worldMs}ms`);
-                apiController.abort();
-                logYoloOnlyResult(video, result, [...yoloDetections, ...worldDetections], yoloMs + worldMs, analysis, "yolo-world", worldHint, worldOriginalName);
-                handleClassificationResult(result, undefined);
-                return;
+            // Try to resolve each unresolved detection via YOLO World
+            const stillUnresolved: (YoloDetection & { _bboxX: number })[] = [];
+            for (const det of unresolvedDetections) {
+              // Find best YOLO World match near this detection's bbox
+              const detCx = (det.bbox[0] + det.bbox[2] / 2) / YOLO_MODEL_SIZE;
+              const detCy = (det.bbox[1] + det.bbox[3] / 2) / YOLO_MODEL_SIZE;
+              let bestWorld = worldDetections[0];
+              let bestDist = Infinity;
+              for (const wd of worldDetections) {
+                const wcx = (wd.bbox[0] + wd.bbox[2] / 2) / YOLO_MODEL_SIZE;
+                const wcy = (wd.bbox[1] + wd.bbox[3] / 2) / YOLO_MODEL_SIZE;
+                const dist = Math.sqrt((detCx - wcx) ** 2 + (detCy - wcy) ** 2);
+                if (dist < bestDist) { bestDist = dist; bestWorld = wd; }
               }
+              if (bestWorld && bestWorld.confidence >= thresholdsRef.current.YOLO_WORLD_ACCEPT_THRESHOLD) {
+                const r = resolveYoloWorldDetection(bestWorld, siteConfigRef.current!, localeRef.current);
+                if (r) {
+                  const worldHint = analyzeMaterial(video, bestWorld.bbox);
+                  r.itemName = refineClassName(r.itemName, worldHint);
+                  (r as ClassificationResponse & { _bboxX?: number })._bboxX = det._bboxX;
+                  tier2Results.push(r as ClassificationResponse & { _bboxX?: number });
+                  continue;
+                }
+              }
+              stillUnresolved.push(det);
             }
 
-            console.log(`[tier2] YOLO World conf=${(worldBest.confidence * 100).toFixed(1)}% — falling through to API (${worldMs}ms)`);
+            // If no unresolved detections came in, use YOLO World's best as a single result
+            if (unresolvedDetections.length === 0 && worldDetections.length > 0) {
+              const worldBest = worldDetections[0];
+              if (worldBest.confidence >= thresholdsRef.current.YOLO_WORLD_ACCEPT_THRESHOLD) {
+                const result = resolveYoloWorldDetection(worldBest, siteConfigRef.current!, localeRef.current);
+                if (result) {
+                  const worldHint = analyzeMaterial(video, worldBest.bbox);
+                  const worldOriginalName = result.itemName;
+                  result.itemName = refineClassName(result.itemName, worldHint);
+                  console.log(`[tier2] YOLO World HIT: ${worldBest.className} (${(worldBest.confidence * 100).toFixed(1)}%) → ${result.itemName} [${result.wasteStream}] in ${worldMs}ms`);
+                  apiController.abort();
+                  logYoloOnlyResult(video, result, [...yoloDetections, ...worldDetections], yoloMs + worldMs, analysis, "yolo-world", worldHint, worldOriginalName);
+                  mergeAndDeliver([result as ClassificationResponse & { _bboxX?: number }], [], []);
+                  return;
+                }
+              }
+              console.log(`[tier2] YOLO World conf=${(worldBest.confidence * 100).toFixed(1)}% — falling through to API (${worldMs}ms)`);
+            }
+
+            // All resolved via Tier 1 + Tier 2 — deliver
+            if (stillUnresolved.length === 0 && (tier1Results.length + tier2Results.length) > 0 && !zeroBboxFallback) {
+              console.log(`[tier2] All resolved: ${tier2Results.length} via YOLO World in ${worldMs}ms`);
+              mergeAndDeliver(tier2Results, [], []);
+              return;
+            }
+
+            // Still unresolved items — send per-bbox crops to API
+            if (stillUnresolved.length > 0) {
+              // Update unresolvedDetections for the batch API call
+              unresolvedDetections.length = 0;
+              unresolvedDetections.push(...stillUnresolved);
+            }
           } else {
             console.log(`[tier2] YOLO World no detections (${worldMs}ms) — falling through to API`);
           }
 
-          // Tier 3: API
-          const promise = apiInflight ?? apiPromise();
-          promise
-            .then(({ result: r, requestId }) => {
-              if (r) handleClassificationResult(r, requestId);
-              else handleClassificationError(new Error("API returned no result"));
-            })
-            .catch((err) => {
-              // Fallback: use whatever local detection we had, with material refinement
-              const fallbackDet = worldDetections[0];
-              let fallbackName = yoloBest?.className ?? fallbackDet?.className;
-              const fallbackConf = yoloBest?.confidence ?? (fallbackDet?.confidence ?? 0.1);
-              if (fallbackName && fallbackDet) {
-                const fbHint = analyzeMaterial(video, fallbackDet.bbox);
-                fallbackName = refineClassName(fallbackName, fbHint);
-              }
-              if (fallbackName) {
-                handleClassificationResult(buildOfflineFallback(fallbackName, fallbackConf), undefined);
-              } else {
-                handleClassificationError(err);
-              }
-            });
+          // Tier 3: per-bbox cropped API or full-frame multi-item fallback
+          if (unresolvedDetections.length > 0) {
+            sendCroppedBatchApi()
+              .then((batchResults) => mergeAndDeliver(tier2Results, batchResults, []))
+              .catch((err) => {
+                if (tier1Results.length + tier2Results.length > 0) {
+                  mergeAndDeliver(tier2Results, [], []);
+                } else {
+                  handleClassificationError(err);
+                }
+              });
+          } else {
+            // Zero-detection fallback: send full frame to API (multi-item prompt)
+            const promise = apiInflight ?? apiPromise(zeroBboxFallback);
+            promise
+              .then(({ result: r, requestId }) => {
+                if (r) mergeAndDeliver(tier2Results, [r as ClassificationResponse & { _bboxX?: number }], [requestId]);
+                else if (tier1Results.length + tier2Results.length > 0) mergeAndDeliver(tier2Results, [], []);
+                else handleClassificationError(new Error("API returned no result"));
+              })
+              .catch((err) => {
+                const fallbackDet = worldDetections[0];
+                let fallbackName = yoloBest?.className ?? fallbackDet?.className;
+                const fallbackConf = yoloBest?.confidence ?? (fallbackDet?.confidence ?? 0.1);
+                if (fallbackName && fallbackDet) {
+                  const fbHint = analyzeMaterial(video, fallbackDet.bbox);
+                  fallbackName = refineClassName(fallbackName, fbHint);
+                }
+                if (fallbackName) {
+                  handleClassificationResult(buildOfflineFallback(fallbackName, fallbackConf), undefined);
+                } else if (tier1Results.length + tier2Results.length > 0) {
+                  mergeAndDeliver(tier2Results, [], []);
+                } else {
+                  handleClassificationError(err);
+                }
+              });
+          }
         })
         .catch(() => {
           // YOLO World failed — fall through to API
-          const promise = apiInflight ?? apiPromise();
-          promise
-            .then(({ result: r, requestId }) => {
-              if (r) handleClassificationResult(r, requestId);
-              else handleClassificationError(new Error("API returned no result"));
-            })
-            .catch(handleClassificationError);
+          if (unresolvedDetections.length > 0) {
+            sendCroppedBatchApi()
+              .then((batchResults) => mergeAndDeliver([], batchResults, []))
+              .catch(handleClassificationError);
+          } else {
+            const promise = apiInflight ?? apiPromise(zeroBboxFallback);
+            promise
+              .then(({ result: r, requestId }) => {
+                if (r) mergeAndDeliver([], [r as ClassificationResponse & { _bboxX?: number }], [requestId]);
+                else handleClassificationError(new Error("API returned no result"));
+              })
+              .catch(handleClassificationError);
+          }
         });
     }
 
@@ -1148,6 +1303,8 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       signal?: AbortSignal,
       yoloDetections?: YoloDetectionLog[],
       materialHint?: MaterialHint,
+      /** When true, uses multi-item prompt — for zero-detection fallback. */
+      multi?: boolean,
     ): Promise<{ result: (ClassificationResponse & { requestId?: string }) | null; requestId?: string }> {
       // Send the same center short-side square that YOLO sees to the API.
       const procStart = Date.now();
@@ -1196,7 +1353,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
 
       if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
 
-      const result = await classify(frame, meta, yoloDetections, materialHint);
+      const result = await classify(frame, meta, yoloDetections, materialHint, multi);
       return { result, requestId: result.requestId };
     }
   }, [classify, transition, T]);

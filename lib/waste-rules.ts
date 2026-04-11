@@ -120,6 +120,76 @@ If isCompound is true, populate components like:
   }`;
 }
 
+/**
+ * Multi-item classification prompt for GPT-5.4 — used when both YOLO models
+ * return zero waste detections but foreground blobs exist (something is there
+ * but unrecognized). Asks GPT to identify ALL visible items (up to 4).
+ */
+export function buildMultiItemPrompt(
+  siteConfig: SiteConfig,
+  locale = "en",
+): string {
+  const streamIds = siteConfig.streams.map((s) => s.id);
+  const streamList = siteConfig.streams
+    .map((s) => `- "${s.id}" (${s.label}): ${s.description}`)
+    .join("\n");
+
+  const overridesSection =
+    siteConfig.overrides && siteConfig.overrides.length > 0
+      ? `\nItem rules — these override your general knowledge:\n${siteConfig.overrides.map((o) => `- ${o.pattern} → ${o.stream}${o.note ? ` (${o.note})` : ""}`).join("\n")}\n`
+      : "";
+
+  const canonicalSection =
+    siteConfig.canonicalNames && siteConfig.canonicalNames.length > 0
+      ? `\nPreferred item names (use one of these when the item matches; only use a different name if none fit):\n${siteConfig.canonicalNames.join(", ")}\n`
+      : "";
+
+  return `You are a waste sorting assistant installed at "${siteConfig.siteName}". A camera is pointed at a waste disposal area. Identify ALL visible waste items being held or presented to the camera and classify each one.
+
+Available waste streams at this location:
+${streamList}
+${overridesSection}${canonicalSection}
+Rules:
+1. Identify ALL distinct waste items visible in the image (up to 4 items).
+2. wasteStream must be exactly one of: ${streamIds.join(", ")}. If an item does not clearly fit any stream, use "needs_review".
+3. If the image is unclear, blurry, too dark, shows no item, or shows only a person without discernible waste items, return an empty items array.
+4. Be honest about confidence. Do NOT inflate confidence when an item is ambiguous or partially occluded. When genuinely uncertain, use a low confidence value (below 0.5).
+5. Consider the material composition of each item, not just its name.
+6. If an item appears to be a compound object with multiple separable parts (e.g., a coffee cup with a plastic lid and cardboard sleeve), set isCompound to true and list the components with individual disposal instructions.
+
+If an item appears transparent or translucent, identify the specific material (clear PET, clear glass, clear PP, etc.).
+Assess whether each item is clean enough for recycling or contaminated with food residue. If contaminated, classify to the stream for soiled items and note contamination in reasoning.
+
+Respond with ONLY a JSON object in this exact format, no other text:
+{
+  "items": [
+    {
+      "itemName": "short name of the identified item",
+      "wasteStream": "one of: ${streamIds.join(", ")}",
+      "confidence": 0.0 to 1.0,
+      "reasoning": "one sentence explaining why this item goes in this stream",
+      "preAction": "",
+      "isCompound": false,
+      "components": []
+    }
+  ]
+}
+
+If no waste items are visible, return: { "items": [] }
+
+If the user should do something before disposing (empty contents, remove lid/cap, rinse, disassemble), put a short instruction in preAction. Otherwise leave it as an empty string.
+
+If isCompound is true, populate components like:
+"components": [
+  { "partName": "plastic lid", "wasteStream": "recycling", "instruction": "Remove lid and recycle separately" },
+  { "partName": "paper cup", "wasteStream": "landfill", "instruction": "Lined cup goes to landfill" }
+]${
+    locale === "ja"
+      ? '\n\nIMPORTANT: Write itemName, reasoning, and component partName/instruction fields in Japanese (日本語). wasteStream values must remain English stream IDs.'
+      : ""
+  }`;
+}
+
 // ── Prompt formatting helpers ──
 
 function formatLocalCandidates(candidates?: LocalModelCandidate[]): string {

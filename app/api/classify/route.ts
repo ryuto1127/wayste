@@ -5,6 +5,7 @@ import type { ClassifyMeta, ComponentPart, YoloDetectionLog, LocalModelCandidate
 import {
   loadSiteConfig,
   buildClassificationPrompt,
+  buildMultiItemPrompt,
   buildClassificationResult,
   applyOverrides,
 } from "@/lib/waste-rules";
@@ -53,6 +54,8 @@ const SingleRequestSchema = z.object({
   meta: MetaSchema,
   yoloDetections: YoloDetectionsSchema,
   materialHint: MaterialHintSchema,
+  /** When true, uses the multi-item prompt and returns an array of results. */
+  multi: z.boolean().optional(),
 });
 
 // ── Batch item schema ──
@@ -109,6 +112,11 @@ interface RawClassification {
   isCompound?: boolean;
   components?: ComponentPart[];
 }
+
+// ── Multi-item raw response validation ──
+const RawMultiClassificationSchema = z.object({
+  items: z.array(RawClassificationSchema).max(4),
+});
 
 // ── Call a model with Structured Outputs ──
 async function callModel(
@@ -194,6 +202,93 @@ async function callModel(
   return validated.data as RawClassification;
 }
 
+
+// ── Call a model with multi-item Structured Outputs ──
+async function callModelMulti(
+  openai: OpenAI,
+  model: string,
+  image: string,
+  prompt: string
+): Promise<RawClassification[]> {
+  const response = await openai.chat.completions.create({
+    model,
+    max_completion_tokens: 4096,
+    response_format: {
+      type: "json_schema",
+      json_schema: {
+        name: "waste_classification_multi",
+        strict: true,
+        schema: {
+          type: "object",
+          properties: {
+            items: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  itemName: { type: "string" },
+                  wasteStream: { type: "string" },
+                  confidence: { type: "number" },
+                  reasoning: { type: "string" },
+                  preAction: { type: "string" },
+                  isCompound: { type: "boolean" },
+                  components: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: {
+                        partName: { type: "string" },
+                        wasteStream: { type: "string" },
+                        instruction: { type: "string" },
+                      },
+                      required: ["partName", "wasteStream", "instruction"],
+                      additionalProperties: false,
+                    },
+                  },
+                },
+                required: ["itemName", "wasteStream", "confidence", "reasoning", "preAction", "isCompound", "components"],
+                additionalProperties: false,
+              },
+            },
+          },
+          required: ["items"],
+          additionalProperties: false,
+        },
+      },
+    },
+    messages: [
+      {
+        role: "user",
+        content: [
+          {
+            type: "image_url",
+            image_url: {
+              url: `data:image/jpeg;base64,${image}`,
+              detail: "low",
+            },
+          },
+          { type: "text", text: prompt },
+        ],
+      },
+    ],
+  });
+
+  const text = response.choices[0]?.message?.content;
+  if (!text) throw new Error("No text response from model");
+
+  const parsed = JSON.parse(text);
+  const validated = RawMultiClassificationSchema.safeParse(parsed);
+  if (!validated.success) {
+    console.warn("[callModelMulti] Schema validation failed:", validated.error.issues);
+    // Attempt to extract items array from raw parse
+    if (Array.isArray(parsed?.items)) {
+      return (parsed.items as RawClassification[]).slice(0, 4);
+    }
+    return [];
+  }
+
+  return validated.data.items as RawClassification[];
+}
 
 export async function POST(request: Request) {
   // ── Redis-based rate limiting ──
@@ -346,7 +441,69 @@ export async function POST(request: Request) {
     }
 
     // ── Single-item mode (backward compatible) ──
-    const { image, yoloDetections, materialHint } = data as z.infer<typeof SingleRequestSchema>;
+    const singleData = data as z.infer<typeof SingleRequestSchema>;
+    const { image, yoloDetections, materialHint } = singleData;
+
+    // ── Multi-item mode: full-frame, zero-detection fallback ──
+    if (singleData.multi) {
+      const multiPrompt = buildMultiItemPrompt(siteConfig, locale);
+      const rawItems = await callModelMulti(openai, "gpt-5.4-mini", image, multiPrompt);
+      const totalServerMs = Date.now() - startMs;
+      console.log(`[${requestId}] multi-item classified ${rawItems.length} items in ${totalServerMs}ms`);
+
+      const multiResults = rawItems.map((raw) => {
+        const result = buildClassificationResult(raw, siteConfig, locale);
+        result.modelUsed = "mini";
+        const overrideCheck = applyOverrides(raw.itemName, raw.wasteStream, siteConfig, locale);
+        if (overrideCheck.conditionalStream && overrideCheck.condition && !overrideCheck.requiresStaff) {
+          const conditionLower = overrideCheck.condition.toLowerCase();
+          const reasoningLower = (raw.reasoning ?? "").toLowerCase();
+          if (reasoningLower.includes(conditionLower)) {
+            const condStreamDef = siteConfig.streams.find((s) => s.id === overrideCheck.conditionalStream);
+            if (condStreamDef) {
+              result.wasteStream = overrideCheck.conditionalStream;
+              result.binColor = condStreamDef.color;
+              result.binLabel = condStreamDef.label;
+              result.specialInstructions = overrideCheck.note;
+            }
+          }
+        }
+        return { result, raw };
+      });
+
+      // Background logging for first item
+      if (multiResults.length > 0) {
+        const first = multiResults[0];
+        const logTimestamp = new Date().toISOString();
+        runInBackground(
+          Promise.all([
+            recordCalibrationPrediction(first.result.confidence, "mini"),
+            uploadFrameToBlob(image, first.result.itemName, first.result.wasteStream, logTimestamp),
+          ]).then(([, imageUrl]) =>
+            logPilotEntry({
+              timestamp: logTimestamp,
+              modelUsed: "mini",
+              escalated: false,
+              itemName: first.result.itemName,
+              wasteStream: first.result.wasteStream,
+              confidence: first.result.confidence,
+              requiresVerification: first.result.needsReview,
+              latencyMs: totalServerMs,
+              imageUrl,
+              blobUploadFailed: !imageUrl,
+              requestId,
+              meta: meta as ClassifyMeta | undefined,
+              overrideApplied: first.result.wasteStream !== first.raw.wasteStream,
+            })
+          )
+        );
+      }
+
+      return NextResponse.json({
+        results: multiResults.map((m) => ({ ...m.result, requestId })),
+        requestId,
+      });
+    }
 
     const { result, raw, modelUsed } = await classifySingleImage(
       image,

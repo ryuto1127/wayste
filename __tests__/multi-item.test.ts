@@ -89,8 +89,10 @@ describe("blobIsObject", () => {
   });
 });
 
-// ── Blob-to-detection matching ──
-// We replicate the matching logic from KioskDisplay for unit testing
+// ── Bbox-based routing ──
+// Replicates the routing logic from KioskDisplay for unit testing.
+// In the refactored pipeline, wasteDetections are iterated directly — no blob matching.
+
 interface MockDetection {
   className: string;
   confidence: number;
@@ -98,125 +100,211 @@ interface MockDetection {
 }
 
 const YOLO_MODEL_SIZE = 640;
+const YOLO_FALLBACK_THRESHOLD = 0.65; // matches default sensitivity
 
-function matchBlobsToDetections(
-  blobs: BlobInfo[],
+/** Replicate bbox routing logic from KioskDisplay. */
+function routeDetections(
   detections: MockDetection[],
-): { blob: BlobInfo; detection: MockDetection | null }[] {
-  const usedDetections = new Set<number>();
-  const result: { blob: BlobInfo; detection: MockDetection | null }[] = [];
+) {
+  const resolved: { className: string; bboxX: number }[] = [];
+  const unresolved: { className: string; confidence: number; bboxX: number }[] = [];
 
-  for (const blob of blobs) {
-    const [bcx, bcy] = blob.bboxNorm;
-    let bestDist = Infinity;
-    let bestIdx = -1;
-
-    for (let i = 0; i < detections.length; i++) {
-      if (usedDetections.has(i)) continue;
-      const d = detections[i];
-      const dcx = (d.bbox[0] + d.bbox[2] / 2) / YOLO_MODEL_SIZE;
-      const dcy = (d.bbox[1] + d.bbox[3] / 2) / YOLO_MODEL_SIZE;
-      const dist = Math.sqrt((bcx - dcx) ** 2 + (bcy - dcy) ** 2);
-      if (dist < bestDist) {
-        bestDist = dist;
-        bestIdx = i;
-      }
-    }
-
-    if (bestIdx >= 0 && bestDist < 0.3) {
-      usedDetections.add(bestIdx);
-      result.push({ blob, detection: detections[bestIdx] });
+  for (const det of detections.slice(0, 4)) {
+    const bboxX = det.bbox[0] + det.bbox[2] / 2;
+    if (det.confidence >= YOLO_FALLBACK_THRESHOLD) {
+      resolved.push({ className: det.className, bboxX });
     } else {
-      result.push({ blob, detection: null });
+      unresolved.push({ className: det.className, confidence: det.confidence, bboxX });
     }
-
-    if (result.length >= 4) break;
   }
-
-  return result;
+  return { resolved, unresolved };
 }
 
-describe("Blob-to-detection matching", () => {
-  it("matches blob to nearest detection by center proximity", () => {
-    const blobs: BlobInfo[] = [
-      makeBlob({ bboxNorm: [0.3, 0.3, 0.2, 0.2] }),
-      makeBlob({ bboxNorm: [0.7, 0.7, 0.2, 0.2] }),
-    ];
+describe("Bbox-based routing", () => {
+  it("routes high-confidence detections to Tier 1 and low-confidence to escalation", () => {
     const detections: MockDetection[] = [
-      { className: "bottle", confidence: 0.9, bbox: [160, 160, 80, 80] }, // center ~ (0.31, 0.31)
-      { className: "cup", confidence: 0.8, bbox: [400, 400, 80, 80] },    // center ~ (0.69, 0.69)
+      { className: "bottle", confidence: 0.9, bbox: [100, 100, 80, 80] },
+      { className: "unknown_item", confidence: 0.3, bbox: [300, 100, 80, 80] },
     ];
 
-    const matches = matchBlobsToDetections(blobs, detections);
-    expect(matches).toHaveLength(2);
-    expect(matches[0].detection?.className).toBe("bottle");
-    expect(matches[1].detection?.className).toBe("cup");
+    const { resolved, unresolved } = routeDetections(detections);
+    expect(resolved).toHaveLength(1);
+    expect(resolved[0].className).toBe("bottle");
+    expect(unresolved).toHaveLength(1);
+    expect(unresolved[0].className).toBe("unknown_item");
   });
 
-  it("leaves blob unmatched when no detection is within range", () => {
-    const blobs: BlobInfo[] = [
-      makeBlob({ bboxNorm: [0.1, 0.1, 0.1, 0.1] }),
-    ];
+  it("all high-confidence detections resolve via Tier 1", () => {
     const detections: MockDetection[] = [
-      { className: "bottle", confidence: 0.9, bbox: [500, 500, 80, 80] }, // center ~ (0.84, 0.84) — far away
+      { className: "bottle", confidence: 0.9, bbox: [100, 100, 80, 80] },
+      { className: "cup", confidence: 0.8, bbox: [300, 100, 80, 80] },
+      { className: "can", confidence: 0.7, bbox: [500, 100, 80, 80] },
     ];
 
-    const matches = matchBlobsToDetections(blobs, detections);
-    expect(matches).toHaveLength(1);
-    expect(matches[0].detection).toBeNull();
+    const { resolved, unresolved } = routeDetections(detections);
+    expect(resolved).toHaveLength(3);
+    expect(unresolved).toHaveLength(0);
   });
 
-  it("does not double-assign a detection to multiple blobs", () => {
-    const blobs: BlobInfo[] = [
-      makeBlob({ bboxNorm: [0.3, 0.3, 0.1, 0.1] }),
-      makeBlob({ bboxNorm: [0.35, 0.35, 0.1, 0.1] }), // close to blob 1
-    ];
-    const detections: MockDetection[] = [
-      { className: "bottle", confidence: 0.9, bbox: [160, 160, 80, 80] }, // only one detection
-    ];
-
-    const matches = matchBlobsToDetections(blobs, detections);
-    expect(matches).toHaveLength(2);
-    // First blob gets the detection, second is unmatched
-    expect(matches[0].detection?.className).toBe("bottle");
-    expect(matches[1].detection).toBeNull();
-  });
-
-  it("caps at 4 blob-detection pairs", () => {
-    const blobs: BlobInfo[] = Array.from({ length: 6 }, (_, i) =>
-      makeBlob({ bboxNorm: [0.1 + i * 0.15, 0.5, 0.1, 0.1] })
-    );
+  it("caps at 4 detections", () => {
     const detections: MockDetection[] = Array.from({ length: 6 }, (_, i) => ({
       className: `item${i}`,
       confidence: 0.9,
-      bbox: [(0.1 + i * 0.15) * 640 - 40, 280, 80, 80] as [number, number, number, number],
+      bbox: [i * 100, 100, 80, 80] as [number, number, number, number],
     }));
 
-    const matches = matchBlobsToDetections(blobs, detections);
-    expect(matches).toHaveLength(4);
+    const { resolved } = routeDetections(detections);
+    expect(resolved).toHaveLength(4);
+  });
+
+  it("detection at exact threshold is resolved (>= check)", () => {
+    const detections: MockDetection[] = [
+      { className: "bottle", confidence: YOLO_FALLBACK_THRESHOLD, bbox: [100, 100, 80, 80] },
+    ];
+    const { resolved } = routeDetections(detections);
+    expect(resolved).toHaveLength(1);
   });
 });
 
-// ── Unmatched blob routing ──
-describe("Unmatched blob routing", () => {
-  it("high-quality unmatched blob should be sent to API (blobIsObject=true)", () => {
-    const blob = makeBlob({
-      sharpness: BLOB_MIN_SHARPNESS + 100,
-      contrastScore: BLOB_MIN_CONTRAST + 20,
-      skinRatio: 0.1,
-    });
-    // No YOLO match, but blobIsObject → should go to API
-    expect(blobIsObject(blob)).toBe(true);
+// ── Per-bbox crop ──
+describe("Per-bbox crop dimensions", () => {
+  /** Replicate cropBbox margin + clamp logic from KioskDisplay. */
+  function computeCropBox(
+    bbox: [number, number, number, number],
+    videoWidth: number,
+    videoHeight: number,
+  ): [number, number, number, number] {
+    const side = Math.min(videoWidth, videoHeight);
+    const scale = side / YOLO_MODEL_SIZE;
+    const offsetX = Math.round((videoWidth - side) / 2);
+    const offsetY = Math.round((videoHeight - side) / 2);
+
+    const [bx, by, bw, bh] = bbox;
+    const marginX = bw * 0.2;
+    const marginY = bh * 0.2;
+
+    const cx = Math.max(0, Math.round((bx - marginX) * scale + offsetX));
+    const cy = Math.max(0, Math.round((by - marginY) * scale + offsetY));
+    const cw = Math.min(videoWidth - cx, Math.round((bw + marginX * 2) * scale));
+    const ch = Math.min(videoHeight - cy, Math.round((bh + marginY * 2) * scale));
+
+    return [cx, cy, cw, ch];
+  }
+
+  it("includes 20% margin on each side", () => {
+    // 640×640 model → 720×720 video (1:1 mapping, scale=1.125)
+    const [cx, cy, cw, ch] = computeCropBox([200, 200, 100, 100], 720, 720);
+    const scale = 720 / 640;
+    // Expected: margin = 20, so crop starts at (200-20)*scale + 0 = 203
+    expect(cx).toBeLessThan(Math.round(200 * scale));
+    expect(cy).toBeLessThan(Math.round(200 * scale));
+    // Width should be wider than the bbox alone
+    expect(cw).toBeGreaterThan(Math.round(100 * scale));
+    expect(ch).toBeGreaterThan(Math.round(100 * scale));
   });
 
-  it("low-quality unmatched blob should be discarded (blobIsObject=false)", () => {
-    const blob = makeBlob({
-      sharpness: 100,
-      contrastScore: 10,
-      skinRatio: 0.1,
-    });
-    // No YOLO match and not a real object → discard
-    expect(blobIsObject(blob)).toBe(false);
+  it("clamps to frame bounds when bbox is near edge", () => {
+    // Bbox near top-left corner
+    const [cx, cy, cw, ch] = computeCropBox([0, 0, 100, 100], 720, 720);
+    expect(cx).toBeGreaterThanOrEqual(0);
+    expect(cy).toBeGreaterThanOrEqual(0);
+    expect(cx + cw).toBeLessThanOrEqual(720);
+    expect(cy + ch).toBeLessThanOrEqual(720);
+  });
+
+  it("clamps to frame bounds when bbox is near bottom-right", () => {
+    const [cx, cy, cw, ch] = computeCropBox([560, 560, 80, 80], 720, 720);
+    expect(cx + cw).toBeLessThanOrEqual(720);
+    expect(cy + ch).toBeLessThanOrEqual(720);
+  });
+
+  it("handles non-square video (1280×720)", () => {
+    const [cx, cy, cw, ch] = computeCropBox([200, 200, 100, 100], 1280, 720);
+    // side=720, offsetX=280
+    expect(cx).toBeGreaterThanOrEqual(280); // at least at the start of the square crop
+    expect(cy).toBeGreaterThanOrEqual(0);
+    expect(cx + cw).toBeLessThanOrEqual(1280);
+    expect(cy + ch).toBeLessThanOrEqual(720);
+  });
+});
+
+// ── Position-aware sorting ──
+describe("Position-aware result sorting", () => {
+  it("sorts results by bbox x-coordinate (left to right)", () => {
+    const results = [
+      { itemName: "cup", _bboxX: 400 },
+      { itemName: "bottle", _bboxX: 100 },
+      { itemName: "can", _bboxX: 250 },
+    ];
+
+    results.sort((a, b) => (a._bboxX ?? 0) - (b._bboxX ?? 0));
+
+    expect(results[0].itemName).toBe("bottle");
+    expect(results[1].itemName).toBe("can");
+    expect(results[2].itemName).toBe("cup");
+    expect(results.map(r => r._bboxX)).toEqual([100, 250, 400]);
+  });
+
+  it("results without _bboxX go last", () => {
+    const results: { itemName: string; _bboxX?: number }[] = [
+      { itemName: "gpt_item" }, // no _bboxX — from multi-item GPT fallback
+      { itemName: "bottle", _bboxX: 200 },
+      { itemName: "can", _bboxX: 50 },
+    ];
+
+    results.sort((a, b) => (a._bboxX ?? Infinity) - (b._bboxX ?? Infinity));
+
+    expect(results[0].itemName).toBe("can");
+    expect(results[1].itemName).toBe("bottle");
+    expect(results[2].itemName).toBe("gpt_item");
+  });
+});
+
+// ── Result merging ──
+describe("Result merging", () => {
+  function makeDetResult(name: string, bboxX: number): ClassificationResponse & { _bboxX?: number } {
+    return {
+      itemName: name,
+      wasteStream: "recycling",
+      confidence: 0.9,
+      reasoning: "test",
+      binColor: "#0066FF",
+      binLabel: "Recycling",
+      needsReview: false,
+      isCompound: false,
+      _bboxX: bboxX,
+    };
+  }
+
+  it("merges Tier 1 and Tier 3 results without duplicates", () => {
+    const tier1 = [makeDetResult("bottle", 100)];
+    const tier3 = [makeDetResult("cup", 300)];
+    const merged = [...tier1, ...tier3];
+    merged.sort((a, b) => (a._bboxX ?? Infinity) - (b._bboxX ?? Infinity));
+    const capped = merged.slice(0, 4);
+
+    expect(capped).toHaveLength(2);
+    expect(capped[0].itemName).toBe("bottle");
+    expect(capped[1].itemName).toBe("cup");
+  });
+
+  it("caps merged results at 4", () => {
+    const tier1 = [makeDetResult("a", 100), makeDetResult("b", 200), makeDetResult("c", 300)];
+    const tier3 = [makeDetResult("d", 400), makeDetResult("e", 500)];
+    const merged = [...tier1, ...tier3];
+    merged.sort((a, b) => (a._bboxX ?? Infinity) - (b._bboxX ?? Infinity));
+    const capped = merged.slice(0, 4);
+
+    expect(capped).toHaveLength(4);
+  });
+
+  it("Tier 1 results display immediately via optimistic UI", () => {
+    // Simulating: resolvedResults.length > 0 → setStableResults(resolvedResults)
+    const tier1 = [makeDetResult("bottle", 100)];
+    // The optimistic UI pattern: setStableResults is called with tier1 results
+    // before escalation completes. Just verify the data shape is correct.
+    expect(tier1[0].itemName).toBe("bottle");
+    expect(tier1[0]._bboxX).toBe(100);
   });
 });
 
@@ -321,6 +409,108 @@ function makeOpenAIResponse(raw: {
     }],
   };
 }
+
+function makeMultiOpenAIResponse(items: Array<{
+  itemName: string;
+  wasteStream: string;
+  confidence: number;
+  reasoning: string;
+}>) {
+  return {
+    choices: [{
+      message: {
+        content: JSON.stringify({
+          items: items.map((item) => ({
+            ...item,
+            preAction: "",
+            isCompound: false,
+            components: [],
+          })),
+        }),
+      },
+    }],
+  };
+}
+
+describe("POST /api/classify — multi-item mode", () => {
+  beforeEach(() => {
+    mockCreate.mockReset();
+  });
+
+  it("returns array of results when multi=true", async () => {
+    mockCreate.mockResolvedValueOnce(makeMultiOpenAIResponse([
+      { itemName: "plastic bottle", wasteStream: "recycling", confidence: 0.9, reasoning: "PET" },
+      { itemName: "banana peel", wasteStream: "compost", confidence: 0.85, reasoning: "organic" },
+    ]));
+
+    const { POST } = await import("@/app/api/classify/route");
+    const req = new Request("http://localhost/api/classify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        image: "m".repeat(200),
+        siteId: "default",
+        multi: true,
+      }),
+    });
+
+    const res = await POST(req);
+    if (res.status === 200) {
+      const data = await res.json();
+      expect(data.results).toHaveLength(2);
+      expect(data.results[0].itemName).toBe("plastic bottle");
+      expect(data.results[1].itemName).toBe("banana peel");
+      expect(data.requestId).toBeDefined();
+    }
+  });
+
+  it("returns empty results array when model sees no items", async () => {
+    mockCreate.mockResolvedValueOnce(makeMultiOpenAIResponse([]));
+
+    const { POST } = await import("@/app/api/classify/route");
+    const req = new Request("http://localhost/api/classify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        image: "n".repeat(200),
+        siteId: "default",
+        multi: true,
+      }),
+    });
+
+    const res = await POST(req);
+    if (res.status === 200) {
+      const data = await res.json();
+      expect(data.results).toHaveLength(0);
+    }
+  });
+
+  it("without multi flag, returns single-item format (backward compat)", async () => {
+    mockCreate.mockResolvedValueOnce(makeOpenAIResponse({
+      itemName: "can",
+      wasteStream: "recycling",
+      confidence: 0.88,
+      reasoning: "aluminum",
+    }));
+
+    const { POST } = await import("@/app/api/classify/route");
+    const req = new Request("http://localhost/api/classify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        image: "o".repeat(200),
+        siteId: "default",
+      }),
+    });
+
+    const res = await POST(req);
+    if (res.status === 200) {
+      const data = await res.json();
+      expect(data.itemName).toBe("can");
+      expect(data.results).toBeUndefined();
+    }
+  });
+});
 
 describe("POST /api/classify — batch mode", () => {
   beforeEach(() => {

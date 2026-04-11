@@ -9,6 +9,7 @@ import {
   loadSiteConfig,
   matchesPattern,
   buildClassificationPrompt,
+  buildMultiItemPrompt,
 } from "@/lib/waste-rules";
 import type { MaterialHint, SiteConfig } from "@/lib/types";
 
@@ -431,5 +432,53 @@ describe("buildClassificationPrompt — materialHint integration", () => {
     const prompt = buildClassificationPrompt(defaultConfig, "en");
     expect(prompt).not.toContain("Local analysis of detected region");
     expect(prompt).not.toContain("Dominant hue");
+  });
+});
+
+// ── buildMultiItemPrompt ──
+describe("buildMultiItemPrompt", () => {
+  it("instructs GPT to identify ALL visible items (not just the most prominent)", () => {
+    const prompt = buildMultiItemPrompt(defaultConfig, "en");
+    expect(prompt).toContain("ALL");
+    expect(prompt).toContain("up to 4");
+    expect(prompt).not.toContain("most prominent");
+  });
+
+  it("returns JSON schema with items array", () => {
+    const prompt = buildMultiItemPrompt(defaultConfig, "en");
+    expect(prompt).toContain('"items"');
+    expect(prompt).toContain("items array");
+  });
+
+  it("includes empty-items instruction for no-item case", () => {
+    const prompt = buildMultiItemPrompt(defaultConfig, "en");
+    expect(prompt).toContain('{ "items": [] }');
+  });
+
+  it("includes stream IDs from site config", () => {
+    const prompt = buildMultiItemPrompt(defaultConfig, "en");
+    for (const stream of defaultConfig.streams) {
+      expect(prompt).toContain(stream.id);
+    }
+  });
+
+  it("includes overrides from site config", () => {
+    const config = makeSiteConfig({
+      overrides: [{ pattern: "Coffee Cup", stream: "landfill", note: "Lined cup" }],
+    });
+    const prompt = buildMultiItemPrompt(config, "en");
+    expect(prompt).toContain("Coffee Cup");
+    expect(prompt).toContain("landfill");
+  });
+
+  it("adds Japanese instruction when locale=ja", () => {
+    const prompt = buildMultiItemPrompt(defaultConfig, "ja");
+    expect(prompt).toContain("日本語");
+  });
+
+  it("includes compound object handling", () => {
+    const prompt = buildMultiItemPrompt(defaultConfig, "en");
+    expect(prompt).toContain("isCompound");
+    expect(prompt).toContain("components");
   });
 });

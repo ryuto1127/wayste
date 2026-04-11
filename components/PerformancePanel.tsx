@@ -161,7 +161,7 @@ export function PerformancePanel() {
             <div>
               <label className="text-xs text-neutral-400 block mb-1">Thermal transitions</label>
               <div className="max-h-32 overflow-y-auto text-xs text-neutral-500 space-y-0.5 font-mono">
-                {thermalLog.map((ev, i) => (
+                {[...thermalLog].reverse().map((ev, i) => (
                   <div key={i}>
                     <span className="text-neutral-600">
                       {new Date(ev.ts * 1000).toLocaleTimeString()}

@@ -184,6 +184,25 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
     frameCounter: 0,
   });
 
+  // Reset thermal state when tab returns to foreground — background tab
+  // throttling inflates analysis durations, causing false thermal detection.
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible") {
+        const thermal = thermalRef.current;
+        if (thermal.throttling) {
+          thermal.throttling = false;
+          thermal.durations = [];
+          setThermalWarning(false);
+          perfMonitor.recordThermalState(false, 1);
+          console.log("[thermal] ✅ Tab visible — reset thermal state");
+        }
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, []);
+
   // Prevent SSR — this component requires browser APIs (camera, OffscreenCanvas)
   useEffect(() => setMounted(true), []);
 
@@ -405,33 +424,37 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       lastAnalysisRef.current = analysis;
 
       // ── Thermal monitoring: track analysis duration ──
+      // Skip thermal tracking when tab is hidden — browser background throttling
+      // inflates analysis duration and causes false thermal detection.
       const analysisDuration = performance.now() - analysisStart;
       perfMonitor.recordCvFrame(analysisDuration);
-      if (thermal.baselineSamples < 60) {
-        // Collecting baseline (first ~2 seconds)
-        thermal.durations.push(analysisDuration);
-        thermal.baselineSamples++;
-        if (thermal.baselineSamples === 60) {
-          thermal.baseline = thermal.durations.reduce((a, b) => a + b, 0) / thermal.durations.length;
-          thermal.durations = [];
-          console.log(`[thermal] Baseline analysis time: ${thermal.baseline.toFixed(2)}ms`);
-        }
-      } else {
-        thermal.durations.push(analysisDuration);
-        if (thermal.durations.length > 30) thermal.durations.shift();
-        const avg = thermal.durations.reduce((a, b) => a + b, 0) / thermal.durations.length;
-        const ratio = avg / thermal.baseline;
-        const wasThrottling = thermal.throttling;
-        // Trigger at 2× baseline, recover at 1.5× baseline (hysteresis)
-        if (avg > thermal.baseline * 2) {
-          thermal.throttling = true;
-        } else if (avg < thermal.baseline * 1.5) {
-          thermal.throttling = false;
-        }
-        perfMonitor.recordThermalState(thermal.throttling, ratio);
-        if (thermal.throttling !== wasThrottling) {
-          console.log(`[thermal] ${thermal.throttling ? "⚠️ Throttling detected" : "✅ Throttling resolved"} (avg=${avg.toFixed(2)}ms, baseline=${thermal.baseline.toFixed(2)}ms)`);
-          setThermalWarning(thermal.throttling);
+      if (!document.hidden) {
+        if (thermal.baselineSamples < 60) {
+          // Collecting baseline (first ~2 seconds)
+          thermal.durations.push(analysisDuration);
+          thermal.baselineSamples++;
+          if (thermal.baselineSamples === 60) {
+            thermal.baseline = thermal.durations.reduce((a, b) => a + b, 0) / thermal.durations.length;
+            thermal.durations = [];
+            console.log(`[thermal] Baseline analysis time: ${thermal.baseline.toFixed(2)}ms`);
+          }
+        } else {
+          thermal.durations.push(analysisDuration);
+          if (thermal.durations.length > 30) thermal.durations.shift();
+          const avg = thermal.durations.reduce((a, b) => a + b, 0) / thermal.durations.length;
+          const ratio = avg / thermal.baseline;
+          const wasThrottling = thermal.throttling;
+          // Trigger at 2× baseline, recover at 1.5× baseline (hysteresis)
+          if (avg > thermal.baseline * 2) {
+            thermal.throttling = true;
+          } else if (avg < thermal.baseline * 1.5) {
+            thermal.throttling = false;
+          }
+          perfMonitor.recordThermalState(thermal.throttling, ratio);
+          if (thermal.throttling !== wasThrottling) {
+            console.log(`[thermal] ${thermal.throttling ? "⚠️ Throttling detected" : "✅ Throttling resolved"} (avg=${avg.toFixed(2)}ms, baseline=${thermal.baseline.toFixed(2)}ms)`);
+            setThermalWarning(thermal.throttling);
+          }
         }
       }
 

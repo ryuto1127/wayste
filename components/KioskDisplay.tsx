@@ -1237,7 +1237,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
     ) {
       // Filter out "nothing detected" results
       const valid = results.filter(
-        (r) => r.itemName.toLowerCase() !== "nothing detected" && r.confidence !== 0
+        (r) => r.itemName?.toLowerCase() !== "nothing detected" && r.confidence !== 0
       );
 
       if (valid.length === 0) {

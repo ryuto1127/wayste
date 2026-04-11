@@ -7,7 +7,7 @@
  * at runtime.
  *
  * Heavier than YOLO26m (~50 MB vs 39 MB), so loaded on-demand and not run
- * continuously. Inference takes ~200-800ms on CPU depending on device.
+ * continuously. Inference takes ~50-200ms on WebGPU, ~200-800ms on WASM fallback.
  */
 import type { YoloDetection } from "./types";
 

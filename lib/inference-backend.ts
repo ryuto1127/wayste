@@ -8,7 +8,7 @@
  *
  *   2. **YOLO World (on-demand fallback)** — Open-vocabulary detector with
  *      pre-baked recycling classes. Runs when YOLO26m confidence is low or it
- *      detects no waste-relevant class. ~200-800ms on CPU.
+ *      detects no waste-relevant class. ~50-200ms on WebGPU, ~200-800ms on WASM fallback.
  *
  *   3. **OpenAI API (last resort)** — Handled in KioskDisplay.tsx, not here.
  *

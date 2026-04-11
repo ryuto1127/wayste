@@ -2,6 +2,7 @@
  * Global performance monitor singleton.
  *
  * KioskDisplay writes metrics here; the /review page reads them for visualization.
+ * Uses BroadcastChannel to sync data across tabs (kiosk tab → review tab).
  * Stores 600 seconds of 1-sample-per-second data in a circular buffer.
  */
 
@@ -39,6 +40,13 @@ type PerfListener = () => void;
 // ── Constants ──
 
 const BUFFER_SIZE = 600; // 10 minutes at 1 sample/sec
+const CHANNEL_NAME = "perf-monitor";
+
+// ── BroadcastChannel message types ──
+
+type PerfMessage =
+  | { type: "sample"; sample: PerfSample; thermalRatio: number }
+  | { type: "thermal"; throttling: boolean; ratio: number; event?: ThermalEvent };
 
 // ── Singleton ──
 
@@ -61,15 +69,41 @@ class PerfMonitor {
   private _lifetimeYolo = { sum: 0, min: Infinity, max: -Infinity, count: 0 };
   private _lifetimeWorld = { sum: 0, min: Infinity, max: -Infinity, count: 0 };
 
+  /** Current ratio of avg analysis time to baseline (1.0 = at baseline, 2.0 = throttle trigger). */
+  private _thermalRatio = 0;
+  private _lastRatioBroadcast = 0;
+
   // Thermal event log (keep last 100 transitions)
   private _thermalLog: ThermalEvent[] = [];
 
   // Subscribers
   private _listeners: Set<PerfListener> = new Set();
 
+  // Cross-tab channel
+  private _channel: BroadcastChannel | null = null;
+
   constructor() {
-    // Pre-allocate buffer
     this._buffer = new Array<PerfSample>(BUFFER_SIZE);
+
+    // Set up cross-tab receiver (safe for SSR — BroadcastChannel is browser-only)
+    if (typeof BroadcastChannel !== "undefined") {
+      this._channel = new BroadcastChannel(CHANNEL_NAME);
+      this._channel.onmessage = (ev: MessageEvent<PerfMessage>) => {
+        const msg = ev.data;
+        if (msg.type === "sample") {
+          this._ingestSample(msg.sample);
+          this._thermalRatio = msg.thermalRatio;
+        } else if (msg.type === "thermal") {
+          this._thermalRatio = msg.ratio;
+          this._lastThrottling = msg.throttling;
+          if (msg.event) {
+            this._thermalLog.push(msg.event);
+            if (this._thermalLog.length > 100) this._thermalLog.shift();
+          }
+          this._notify();
+        }
+      };
+    }
   }
 
   // ── Write API (called from KioskDisplay) ──
@@ -89,24 +123,40 @@ class PerfMonitor {
     this._worldEvents.push(durationMs);
   }
 
-  /** Current ratio of avg analysis time to baseline (1.0 = at baseline, 2.0 = throttle trigger). */
-  private _thermalRatio = 0;
-
   recordThermalState(throttling: boolean, ratio?: number): void {
     if (ratio !== undefined) this._thermalRatio = ratio;
     if (throttling !== this._lastThrottling) {
-      this._thermalLog.push({ ts: Date.now() / 1000, throttling });
+      const event: ThermalEvent = { ts: Date.now() / 1000, throttling };
+      this._thermalLog.push(event);
       if (this._thermalLog.length > 100) this._thermalLog.shift();
       this._lastThrottling = throttling;
+      // Broadcast thermal transition to other tabs
+      this._channel?.postMessage({
+        type: "thermal",
+        throttling,
+        ratio: this._thermalRatio,
+        event,
+      } satisfies PerfMessage);
+    } else if (ratio !== undefined) {
+      // Ratio updated but no state change — broadcast at most once per second for gauge
+      const now = Date.now();
+      if (now - this._lastRatioBroadcast > 1000) {
+        this._lastRatioBroadcast = now;
+        this._channel?.postMessage({
+          type: "thermal",
+          throttling,
+          ratio: this._thermalRatio,
+        } satisfies PerfMessage);
+      }
     }
   }
+
+  // ── Read API (called from /review PerformancePanel) ──
 
   /** Returns avg/baseline ratio. 0 = no data, 1.0 = baseline, >=2.0 = throttling. */
   getThermalRatio(): number {
     return this._thermalRatio;
   }
-
-  // ── Read API (called from /review PerformancePanel) ──
 
   /** Returns ordered samples from oldest to newest. */
   getSamples(): PerfSample[] {
@@ -150,6 +200,27 @@ class PerfMonitor {
 
   // ── Internal ──
 
+  /** Ingest a sample received from another tab via BroadcastChannel. */
+  private _ingestSample(sample: PerfSample): void {
+    this._buffer[this._writeIndex] = sample;
+    this._writeIndex = (this._writeIndex + 1) % BUFFER_SIZE;
+    if (this._size < BUFFER_SIZE) this._size++;
+
+    this._accumulate(this._lifetimeCv, sample.cvMs);
+    this._accumulate(this._lifetimeFps, sample.frameCount);
+    if (sample.yoloMs !== null) this._accumulate(this._lifetimeYolo, sample.yoloMs);
+    if (sample.worldMs !== null) this._accumulate(this._lifetimeWorld, sample.worldMs);
+    this._lastThrottling = sample.throttling;
+
+    this._notify();
+  }
+
+  private _notify(): void {
+    for (const fn of this._listeners) {
+      try { fn(); } catch { /* ignore */ }
+    }
+  }
+
   private _nowSecond(): number {
     return Math.floor(Date.now() / 1000);
   }
@@ -187,7 +258,7 @@ class PerfMonitor {
       throttling: this._lastThrottling,
     };
 
-    // Write to circular buffer
+    // Write locally
     this._buffer[this._writeIndex] = sample;
     this._writeIndex = (this._writeIndex + 1) % BUFFER_SIZE;
     if (this._size < BUFFER_SIZE) this._size++;
@@ -198,15 +269,19 @@ class PerfMonitor {
     if (yoloMs !== null) this._accumulate(this._lifetimeYolo, yoloMs);
     if (worldMs !== null) this._accumulate(this._lifetimeWorld, worldMs);
 
+    // Broadcast to other tabs
+    this._channel?.postMessage({
+      type: "sample",
+      sample,
+      thermalRatio: this._thermalRatio,
+    } satisfies PerfMessage);
+
     // Reset accumulators
     this._cvDurations = [];
     this._yoloEvents = [];
     this._worldEvents = [];
 
-    // Notify subscribers
-    for (const fn of this._listeners) {
-      try { fn(); } catch { /* ignore */ }
-    }
+    this._notify();
   }
 
   private _accumulate(

@@ -136,8 +136,8 @@ export async function DELETE(request: Request) {
     const remaining = allRaw.filter((_, i) => !deleteIndices.has(i));
     const pipe = redis.pipeline();
     pipe.del(KEYS.pilotLog);
-    if (remaining.length > 0) {
-      pipe.rpush(KEYS.pilotLog, ...remaining);
+    for (const entry of remaining) {
+      pipe.rpush(KEYS.pilotLog, typeof entry === "string" ? entry : JSON.stringify(entry));
     }
     if (verdictIds.length > 0) {
       pipe.hdel(VERDICTS_KEY, ...verdictIds);

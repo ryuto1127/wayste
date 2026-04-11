@@ -741,7 +741,7 @@ function AnalysisExportPanel({ locale }: { locale: Locale }) {
 
 // ── Bulk Delete Panel ──
 
-type BulkMode = "before" | "between" | "all";
+type BulkMode = "before" | "date" | "all";
 
 function BulkDeletePanel({
   onDelete,
@@ -753,8 +753,7 @@ function BulkDeletePanel({
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<BulkMode>("before");
   const [beforeDate, setBeforeDate] = useState("");
-  const [fromDate, setFromDate] = useState("");
-  const [toDate, setToDate] = useState("");
+  const [targetDate, setTargetDate] = useState("");
   const [confirming, setConfirming] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [lastResult, setLastResult] = useState<number | null>(null);
@@ -767,12 +766,12 @@ function BulkDeletePanel({
       p.set("all", "true");
     } else if (mode === "before") {
       if (!beforeDate) return null;
-      // end of that day
       p.set("before", new Date(`${beforeDate}T23:59:59.999Z`).toISOString());
     } else {
-      if (!fromDate || !toDate) return null;
-      p.set("from", new Date(`${fromDate}T00:00:00.000Z`).toISOString());
-      p.set("to", new Date(`${toDate}T23:59:59.999Z`).toISOString());
+      // date mode: delete all entries from the selected day
+      if (!targetDate) return null;
+      p.set("from", new Date(`${targetDate}T00:00:00.000Z`).toISOString());
+      p.set("to", new Date(`${targetDate}T23:59:59.999Z`).toISOString());
     }
     return p;
   };
@@ -797,7 +796,7 @@ function BulkDeletePanel({
   const canProceed =
     mode === "all" ||
     (mode === "before" && !!beforeDate) ||
-    (mode === "between" && !!fromDate && !!toDate && fromDate <= toDate);
+    (mode === "date" && !!targetDate);
 
   return (
     <div className="mb-6">
@@ -819,7 +818,7 @@ function BulkDeletePanel({
         <div className="mt-3 bg-neutral-900 border border-neutral-800 rounded-xl p-4 flex flex-col gap-4 max-w-lg">
           {/* Mode selector */}
           <div className="flex gap-2">
-            {(["before", "between", "all"] as BulkMode[]).map((m) => (
+            {(["before", "date", "all"] as BulkMode[]).map((m) => (
               <button
                 key={m}
                 onClick={() => { setMode(m); setConfirming(false); }}
@@ -828,7 +827,7 @@ function BulkDeletePanel({
                 }`}
               >
                 {m === "before" ? (ja ? "日付より前" : "Before date")
-                  : m === "between" ? (ja ? "期間指定" : "Between dates")
+                  : m === "date" ? (ja ? "日付を指定" : "Specific date")
                   : (ja ? "すべて" : "All")}
               </button>
             ))}
@@ -849,20 +848,15 @@ function BulkDeletePanel({
             </div>
           )}
 
-          {mode === "between" && (
-            <div className="flex items-center gap-2 flex-wrap">
-              <label className="text-xs text-neutral-400">{ja ? "から:" : "From:"}</label>
+          {mode === "date" && (
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-neutral-400 whitespace-nowrap">
+                {ja ? "削除する日付:" : "Date:"}
+              </label>
               <input
                 type="date"
-                value={fromDate}
-                onChange={(e) => { setFromDate(e.target.value); setConfirming(false); }}
-                className="bg-neutral-800 text-white text-xs rounded-lg px-3 py-1.5 border border-neutral-700 focus:outline-none focus:border-neutral-500"
-              />
-              <label className="text-xs text-neutral-400">{ja ? "まで:" : "To:"}</label>
-              <input
-                type="date"
-                value={toDate}
-                onChange={(e) => { setToDate(e.target.value); setConfirming(false); }}
+                value={targetDate}
+                onChange={(e) => { setTargetDate(e.target.value); setConfirming(false); }}
                 className="bg-neutral-800 text-white text-xs rounded-lg px-3 py-1.5 border border-neutral-700 focus:outline-none focus:border-neutral-500"
               />
             </div>

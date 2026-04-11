@@ -22,6 +22,7 @@ from ultralytics import YOLO
 # ── Classes to pre-bake ──
 # Must match YOLO_WORLD_CLASSES in lib/yolo-world-inference.ts exactly.
 RECYCLING_CLASSES = [
+    # ── Original 36 classes (indices 0-35, DO NOT reorder) ──
     "aluminium beverage can",
     "steel food can",
     "plastic bottle",
@@ -58,6 +59,24 @@ RECYCLING_CLASSES = [
     "cigarette butt",
     "pen",
     "plastic bottle label",
+    # ── New material sub-classification classes (indices 36+) ──
+    "steel beverage can",
+    "ceramic mug",
+    "ceramic bowl",
+    "paper bowl",
+    "plastic container",
+    "metal fork",
+    "metal knife",
+    "metal spoon",
+    "plastic fork",
+    "plastic knife",
+    "plastic spoon",
+    "wooden fork",
+    "wooden knife",
+    "wooden spoon",
+    "wooden chopsticks",
+    "glass wine glass",
+    "plastic wine glass",
 ]
 
 OUTPUT_DIR = Path(__file__).parent.parent / "public" / "models"

@@ -29,6 +29,7 @@ const MODEL_INPUT_SIZE = 640;
  * Order must match the class indices frozen into the ONNX model.
  */
 export const YOLO_WORLD_CLASSES = [
+  // ── Original 36 classes (indices 0-35) ──
   "aluminium beverage can",
   "steel food can",
   "plastic bottle",
@@ -65,6 +66,24 @@ export const YOLO_WORLD_CLASSES = [
   "cigarette butt",
   "pen",
   "plastic bottle label",
+  // ── Material sub-classification classes (indices 36-52) ──
+  "steel beverage can",
+  "ceramic mug",
+  "ceramic bowl",
+  "paper bowl",
+  "plastic container",
+  "metal fork",
+  "metal knife",
+  "metal spoon",
+  "plastic fork",
+  "plastic knife",
+  "plastic spoon",
+  "wooden fork",
+  "wooden knife",
+  "wooden spoon",
+  "wooden chopsticks",
+  "glass wine glass",
+  "plastic wine glass",
 ];
 
 /**
@@ -141,7 +160,7 @@ export async function warmUpYoloWorld(): Promise<void> {
  *
  * Model output is [1, N, 8400] (channels-first, no NMS):
  *   - 8400 candidate boxes
- *   - N channels = 4 (cx, cy, w, h) + numClasses (36 pre-baked recycling classes)
+ *   - N channels = 4 (cx, cy, w, h) + numClasses (53 pre-baked recycling classes)
  *
  * We apply argmax + confidence threshold + greedy NMS here.
  */

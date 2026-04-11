@@ -5,6 +5,7 @@ import type {
   LocalModelCandidate,
   MaterialHint,
 } from "./types";
+import { MATERIAL_VISUAL_CUES } from "./material-vocabulary";
 
 // Re-export all pure functions from the browser-safe core module.
 // Server-side consumers (API routes, tests) continue to import from this file.
@@ -186,6 +187,80 @@ If isCompound is true, populate components like:
 ]${
     locale === "ja"
       ? '\n\nIMPORTANT: Write itemName, reasoning, and component partName/instruction fields in Japanese (日本語). wasteStream values must remain English stream IDs.'
+      : ""
+  }`;
+}
+
+/**
+ * Material identification prompt for Tier 3 — used when Tier 1 detected a
+ * class with `needsSubclassification: true` at ≥ 80% confidence but Tier 2
+ * (YOLO World) was inconclusive (below acceptance threshold).
+ *
+ * Asks GPT to determine the MATERIAL of the item (not the item type, which
+ * is already known from Tier 1) using visual cues and the cropped image.
+ */
+export function buildMaterialIdentificationPrompt(
+  siteConfig: SiteConfig,
+  locale: string,
+  tier1Class: string,
+  tier1Confidence: number,
+  tier2Results: { className: string; confidence: number }[],
+): string {
+  const streamIds = siteConfig.streams.map((s) => s.id);
+  const streamList = siteConfig.streams
+    .map((s) => `- "${s.id}" (${s.label}): ${s.description}`)
+    .join("\n");
+
+  const overridesSection =
+    siteConfig.overrides && siteConfig.overrides.length > 0
+      ? `\nItem rules — these override your general knowledge:\n${siteConfig.overrides.map((o) => `- ${o.pattern} → ${o.stream}${o.note ? ` (${o.note})` : ""}`).join("\n")}\n`
+      : "";
+
+  const canonicalSection =
+    siteConfig.canonicalNames && siteConfig.canonicalNames.length > 0
+      ? `\nPreferred item names (use one of these when the item matches; only use a different name if none fit):\n${siteConfig.canonicalNames.join(", ")}\n`
+      : "";
+
+  // Tier 2 results section
+  const tier2Section = tier2Results.length > 0
+    ? `\nSub-classification model results (inconclusive):\n${tier2Results.map((r) => `  - ${r.className}: ${Math.round(r.confidence * 100)}%`).join("\n")}\n`
+    : "\nSub-classification model returned no results.\n";
+
+  // Material visual cues for the Tier 1 class
+  const cues = MATERIAL_VISUAL_CUES[tier1Class];
+  const materialsSection = cues
+    ? `\nPossible materials for "${tier1Class}":\n${cues.map((c) => `  - ${c.material}: ${c.cues}`).join("\n")}\n`
+    : "";
+
+  return `A local detection model identified this item as: ${tier1Class} (${Math.round(tier1Confidence * 100)}%).
+The image is cropped to show only this object.
+${tier2Section}
+Your task: Determine the MATERIAL of this ${tier1Class}.
+${materialsSection}
+Available waste streams at "${siteConfig.siteName}":
+${streamList}
+${overridesSection}${canonicalSection}
+Rules:
+1. You already know this is a ${tier1Class}. Focus ONLY on material.
+2. confidence reflects certainty about the MATERIAL, not the item type.
+3. Look for: transparency, surface texture, reflections, recycling symbols, pull-tabs, cap type, wall thickness.
+4. If genuinely uncertain about material, set confidence below 0.3.
+5. preAction: if the user should do something before disposal, include a short instruction.
+6. Use the item rules above to determine the correct wasteStream for the identified material.
+7. wasteStream must be exactly one of: ${streamIds.join(", ")}.
+
+Respond with ONLY a JSON object in this exact format, no other text:
+{
+  "itemName": "material-specific name (e.g. PET Bottle, Glass Bottle, Plastic Cup)",
+  "wasteStream": "one of: ${streamIds.join(", ")}",
+  "confidence": 0.0 to 1.0,
+  "reasoning": "one sentence explaining the material identification",
+  "preAction": "",
+  "isCompound": false,
+  "components": []
+}${
+    locale === "ja"
+      ? '\n\nIMPORTANT: Write itemName, reasoning, preAction, and component fields in Japanese (日本語). wasteStream values must remain English stream IDs.'
       : ""
   }`;
 }

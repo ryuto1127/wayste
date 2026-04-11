@@ -45,7 +45,7 @@ export async function GET(request: Request) {
     }
 
     // Collect entries that qualify for export
-    const toExport: { url: string; filename: string }[] = [];
+    const toExport: { url: string; filename: string; entry: PilotLogEntry; verdict: string }[] = [];
 
     for (const item of pilotRaw) {
       let entry: PilotLogEntry;
@@ -79,7 +79,7 @@ export async function GET(request: Request) {
 
       // Timestamp-based filename: 2026-04-04T10-23-15.jpg
       const ts = entry.timestamp.replace(/:/g, "-").replace(/\.\d+Z$/, "").replace("Z", "");
-      toExport.push({ url: entry.imageUrl, filename: `${ts}.jpg` });
+      toExport.push({ url: entry.imageUrl, filename: `${ts}.jpg`, entry, verdict });
     }
 
     if (toExport.length === 0) {
@@ -127,6 +127,24 @@ export async function GET(request: Request) {
         }
       }
     }
+
+    // Include metadata JSONL for training pipeline (prepare_pilot_data.py)
+    const jsonlLines = toExport.map(({ filename, entry, verdict }) =>
+      JSON.stringify({
+        requestId: entry.requestId,
+        timestamp: entry.timestamp,
+        modelUsed: entry.modelUsed,
+        itemName: entry.itemName,
+        wasteStream: entry.wasteStream,
+        confidence: entry.confidence,
+        verdict,
+        imageFile: filename,
+        imageUrl: entry.imageUrl,
+        yoloDetections: entry.yoloDetections ?? null,
+        correctStream: (entry as unknown as Record<string, unknown>).correctStream ?? null,
+      }),
+    );
+    archive.append(jsonlLines.join("\n") + "\n", { name: "metadata.jsonl" });
 
     archive.finalize();
 

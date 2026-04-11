@@ -193,6 +193,92 @@
       "wasteStream": "plastic",
       "reasoning": "Shrink-wrap labels on bottles are typically PP or PVC film — remove and dispose as plastic waste.",
       "preAction": "Peel off the label from the bottle"
+    },
+    "steel beverage can": {
+      "itemName": "Steel Beverage Can",
+      "wasteStream": "recycling",
+      "reasoning": "Steel cans are recyclable — rinse before recycling.",
+      "preAction": "Empty and rinse before recycling"
+    },
+    "ceramic mug": {
+      "itemName": "Ceramic Mug",
+      "wasteStream": "landfill",
+      "reasoning": "Ceramics are not recyclable in most curbside programs."
+    },
+    "ceramic bowl": {
+      "itemName": "Ceramic Bowl",
+      "wasteStream": "landfill",
+      "reasoning": "Ceramics are not recyclable in most curbside programs."
+    },
+    "paper bowl": {
+      "itemName": "Paper Bowl",
+      "wasteStream": "compost",
+      "reasoning": "Unlined paper bowls are compostable. If lined, they go to landfill."
+    },
+    "plastic container": {
+      "itemName": "Plastic Container",
+      "wasteStream": "landfill",
+      "reasoning": "Plastic containers are generally not recyclable unless clean and marked."
+    },
+    "metal fork": {
+      "itemName": "Metal Fork",
+      "wasteStream": "landfill",
+      "reasoning": "Metal utensils are not accepted in curbside recycling. Consider donating if reusable."
+    },
+    "metal knife": {
+      "itemName": "Metal Knife",
+      "wasteStream": "landfill",
+      "reasoning": "Metal utensils are not accepted in curbside recycling. Wrap blade for safety."
+    },
+    "metal spoon": {
+      "itemName": "Metal Spoon",
+      "wasteStream": "landfill",
+      "reasoning": "Metal utensils are not accepted in curbside recycling. Consider donating if reusable."
+    },
+    "plastic fork": {
+      "itemName": "Plastic Fork",
+      "wasteStream": "landfill",
+      "reasoning": "Plastic utensils are too small and lightweight to recycle."
+    },
+    "plastic knife": {
+      "itemName": "Plastic Knife",
+      "wasteStream": "landfill",
+      "reasoning": "Plastic utensils are too small and lightweight to recycle."
+    },
+    "plastic spoon": {
+      "itemName": "Plastic Spoon",
+      "wasteStream": "landfill",
+      "reasoning": "Plastic utensils are too small and lightweight to recycle."
+    },
+    "wooden fork": {
+      "itemName": "Wooden Fork",
+      "wasteStream": "compost",
+      "reasoning": "Untreated wood utensils are compostable."
+    },
+    "wooden knife": {
+      "itemName": "Wooden Knife",
+      "wasteStream": "compost",
+      "reasoning": "Untreated wood utensils are compostable."
+    },
+    "wooden spoon": {
+      "itemName": "Wooden Spoon",
+      "wasteStream": "compost",
+      "reasoning": "Untreated wood utensils are compostable."
+    },
+    "wooden chopsticks": {
+      "itemName": "Wooden Chopsticks",
+      "wasteStream": "compost",
+      "reasoning": "Disposable wooden chopsticks are compostable."
+    },
+    "glass wine glass": {
+      "itemName": "Glass Wine Glass",
+      "wasteStream": "landfill",
+      "reasoning": "Drinking glasses and stemware are not accepted in bottle recycling."
+    },
+    "plastic wine glass": {
+      "itemName": "Plastic Wine Glass",
+      "wasteStream": "landfill",
+      "reasoning": "Plastic cups and stemware are not recyclable."
     }
   }
 }

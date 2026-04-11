@@ -178,6 +178,13 @@ export interface YoloClassRule {
   wasteStream: WasteStream;
   reasoning: string;
   preAction?: string;
+  /**
+   * When true, this COCO-80 class requires material sub-classification
+   * (e.g., "bottle" → PET / glass / aluminium). If Tier 1 confidence ≥ 0.80,
+   * the pipeline skips Tier 1 resolution and routes to Tier 2 with a
+   * material-focused vocabulary instead.
+   */
+  needsSubclassification?: boolean;
 }
 
 export interface YoloRulesConfig {
@@ -248,6 +255,22 @@ export interface ItemOverride {
   conditionalStream?: WasteStream;
   /** Condition that must be met for conditionalStream to apply (e.g. "clean", "dry", "empty"). */
   condition?: string;
+}
+
+// ── Tier 1 sub-classification context ──
+/**
+ * Returned by `resolveYoloDetection()` when a COCO class has
+ * `needsSubclassification: true` and confidence ≥ 0.80. The pipeline
+ * must NOT resolve at Tier 1 — instead it routes to Tier 2 (material-focused
+ * vocabulary) and, if inconclusive, to Tier 3 (material identification prompt).
+ */
+export interface Tier1SubclassContext {
+  /** The COCO-80 class name (e.g., "bottle", "cup"). */
+  className: string;
+  /** Tier 1 detection confidence (≥ 0.80). */
+  confidence: number;
+  /** The detection's bounding box in model space [x, y, w, h]. */
+  bbox: [number, number, number, number];
 }
 
 // ── Local model candidate (passed to GPT prompts as context) ──

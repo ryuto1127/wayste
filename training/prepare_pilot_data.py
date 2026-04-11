@@ -1,14 +1,18 @@
 """
-Convert reviewed pilot log data (JSONL export) into YOLO fine-tuning dataset.
+Convert reviewed pilot log data into YOLO fine-tuning dataset.
+
+Accepts either:
+  - A ZIP file from /api/review/export (contains images + metadata.jsonl)
+  - A standalone JSONL file (images downloaded from URLs)
 
 Usage:
-  1. Review all entries at /review?mode=full
-  2. Export: curl -H "x-api-key: YOUR_KEY" https://your-app.vercel.app/api/review/export?format=finetune -o pilot-data.jsonl
-  3. Run: python training/prepare_pilot_data.py --input pilot-data.jsonl --output pilot_dataset
+  1. Review all entries at /review
+  2. Download the export ZIP from the review page
+  3. Run: python training/prepare_pilot_data.py --input review-images-2026-04-10.zip --output pilot_dataset
 
 Output structure:
   pilot_dataset/
-    images/train/         Downloaded images (80%)
+    images/train/         Images (80%)
     images/val/           (20%)
     labels/train/         YOLO annotation .txt files
     labels/val/
@@ -24,8 +28,11 @@ Uses the same 12-class system from prepare_dataset.py.
 import json
 import os
 import random
+import shutil
 import sys
+import tempfile
 import urllib.request
+import zipfile
 from pathlib import Path
 from collections import Counter
 
@@ -107,10 +114,67 @@ def map_coco_to_waste_class(coco_class_name: str):
     return COCO_TO_WASTE_CLASS.get(coco_class_name)
 
 
+def load_from_zip(zip_path: Path):
+    """Extract entries and images from the review export ZIP."""
+    tmp_dir = Path(tempfile.mkdtemp(prefix="pilot_export_"))
+    entries = []
+    image_dir = tmp_dir / "images"
+    image_dir.mkdir()
+
+    with zipfile.ZipFile(zip_path) as zf:
+        # Extract metadata.jsonl
+        jsonl_data = None
+        for name in zf.namelist():
+            if name == "metadata.jsonl":
+                jsonl_data = zf.read(name).decode("utf-8")
+            elif name.lower().endswith((".jpg", ".jpeg", ".png")):
+                zf.extract(name, image_dir)
+
+        if not jsonl_data:
+            print("ERROR: ZIP does not contain metadata.jsonl — was it exported from the review page?")
+            sys.exit(1)
+
+        for line_num, line in enumerate(jsonl_data.strip().split("\n"), 1):
+            if not line.strip():
+                continue
+            try:
+                entry = json.loads(line)
+                # Map imageFile to local path so we skip downloading
+                if entry.get("imageFile"):
+                    local_path = image_dir / entry["imageFile"]
+                    # Image might be at root or nested
+                    if not local_path.exists():
+                        for candidate in image_dir.rglob(entry["imageFile"]):
+                            local_path = candidate
+                            break
+                    if local_path.exists():
+                        entry["_localImage"] = str(local_path)
+                entries.append(entry)
+            except json.JSONDecodeError as e:
+                print(f"  WARN: Skipping JSONL line {line_num}: {e}")
+
+    return entries, tmp_dir
+
+
+def load_from_jsonl(jsonl_path: Path):
+    """Load entries from a standalone JSONL file."""
+    entries = []
+    with open(jsonl_path) as f:
+        for line_num, line in enumerate(f, 1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entries.append(json.loads(line))
+            except json.JSONDecodeError as e:
+                print(f"  WARN: Skipping line {line_num}: {e}")
+    return entries, None
+
+
 def main():
     import argparse
     parser = argparse.ArgumentParser(description="Prepare pilot data for YOLO fine-tuning")
-    parser.add_argument("--input", required=True, help="Path to finetune-dataset JSONL export")
+    parser.add_argument("--input", required=True, help="Path to export ZIP or JSONL file")
     parser.add_argument("--output", default="pilot_dataset", help="Output directory")
     parser.add_argument("--split-ratio", type=float, default=0.8, help="Train/val split ratio")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for split")
@@ -124,17 +188,14 @@ def main():
         print(f"ERROR: {input_path} not found")
         sys.exit(1)
 
-    # ── Parse JSONL ──
-    entries = []
-    with open(input_path) as f:
-        for line_num, line in enumerate(f, 1):
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                entries.append(json.loads(line))
-            except json.JSONDecodeError as e:
-                print(f"  WARN: Skipping line {line_num}: {e}")
+    # ── Load input (ZIP or JSONL) ──
+    tmp_dir = None
+    if input_path.suffix == ".zip":
+        print(f"Loading from ZIP: {input_path}")
+        entries, tmp_dir = load_from_zip(input_path)
+    else:
+        print(f"Loading from JSONL: {input_path}")
+        entries, tmp_dir = load_from_jsonl(input_path)
 
     print(f"Loaded {len(entries)} reviewed entries")
 
@@ -185,7 +246,14 @@ def main():
         correct_stream = entry.get("correctStream")
         dets = entry["yoloDetections"]
 
-        # Build YOLO annotation lines
+        # "wrong" verdict means the model misidentified the object.
+        # The bbox position may be usable but the class label is unreliable,
+        # so send these to manual annotation instead of auto-mapping.
+        if verdict == "wrong":
+            needs_annotation.append(entry)
+            continue
+
+        # Build YOLO annotation lines (only for "correct" verdicts)
         label_lines = []
         for det in dets:
             coco_name = det["className"]
@@ -198,11 +266,6 @@ def main():
                 unmapped_coco[coco_name] += 1
                 continue
 
-            # If verdict is "wrong" and we know the correct stream,
-            # check if the waste class mapping makes sense.
-            # (e.g., COCO "bottle" mapped to plastic_bottle/recycling,
-            #  but human says correct stream is "compost" → likely not a bottle)
-            # For now, trust the bbox but flag the class mismatch.
             label_lines.append(
                 f"{waste_class_id} {bbox_norm[0]:.6f} {bbox_norm[1]:.6f} {bbox_norm[2]:.6f} {bbox_norm[3]:.6f}"
             )
@@ -228,22 +291,24 @@ def main():
         "val": annotated[n_train:],
     }
 
-    # ── Download images and write labels ──
+    # ── Copy or download images and write labels ──
     for split_name, split_data in splits.items():
         print(f"\n  {split_name}: {len(split_data)} images")
         for item in split_data:
             entry = item["entry"]
             idx = item["index"]
-            image_url = entry["imageUrl"]
             fname = f"pilot_{idx:04d}.jpg"
 
             img_path = out_dir / "images" / split_name / fname
             lbl_path = out_dir / "labels" / split_name / f"pilot_{idx:04d}.txt"
 
-            # Download image
-            if not args.skip_download:
-                if not img_path.exists():
-                    ok = download_image(image_url, img_path)
+            # Use local image from ZIP if available, otherwise download
+            if not img_path.exists():
+                local = entry.get("_localImage")
+                if local and Path(local).exists():
+                    shutil.copy2(local, img_path)
+                elif not args.skip_download and entry.get("imageUrl"):
+                    ok = download_image(entry["imageUrl"], img_path)
                     if not ok:
                         continue
 
@@ -251,19 +316,19 @@ def main():
             with open(lbl_path, "w") as f:
                 f.write("\n".join(item["labels"]) + "\n")
 
-    # ── Download "needs annotation" images ──
-    print(f"\n── Downloading {len(needs_annotation)} images for manual annotation ──")
+    # ── Copy/download "needs annotation" images ──
+    print(f"\n── Processing {len(needs_annotation)} images for manual annotation ──")
     roboflow_manifest = []
     for i, entry in enumerate(needs_annotation):
-        image_url = entry.get("imageUrl")
-        if not image_url:
-            continue
         fname = f"annotate_{i:04d}.jpg"
         img_path = out_dir / "needs_annotation" / fname
 
-        if not args.skip_download:
-            if not img_path.exists():
-                download_image(image_url, img_path)
+        if not img_path.exists():
+            local = entry.get("_localImage")
+            if local and Path(local).exists():
+                shutil.copy2(local, img_path)
+            elif not args.skip_download and entry.get("imageUrl"):
+                download_image(entry["imageUrl"], img_path)
 
         correct_stream = entry.get("correctStream")
         likely_class = STREAM_TO_LIKELY_CLASS.get(correct_stream or "")
@@ -340,7 +405,8 @@ def main():
             f.write(f"\nTo include these, add mappings to COCO_TO_WASTE_CLASS in this script.\n")
 
         f.write(f"\nNEEDS ANNOTATION ({len(needs_annotation)} images):\n")
-        f.write(f"These images had no YOLO detections (API-only classification).\n")
+        f.write(f"Includes: images without YOLO detections + 'wrong' verdict entries\n")
+        f.write(f"(wrong verdicts have bbox position but unreliable class labels).\n")
         f.write(f"Import the needs_annotation/ folder into Roboflow for manual bbox annotation.\n")
         f.write(f"See manifest.json for item names and likely classes.\n\n")
 
@@ -360,7 +426,7 @@ def main():
         f.write(f"3. Merge with this dataset's images/ and labels/ directories\n")
         f.write(f"4. Merge with TACO dataset (training/dataset/) for combined training\n")
         f.write(f"5. Run fine-tuning:\n")
-        f.write(f"   yolo detect train model=yolo26n.pt data=data.yaml epochs=50 imgsz=640\n")
+        f.write(f"   caffeinate python supplement_and_train.py\n")
         f.write(f"\nIMPORTANT: This produces a GLOBAL model, not facility-specific.\n")
         f.write(f"Merge data from ALL facilities into one training set.\n")
         f.write(f"Facility-specific rules are handled by site config JSON, not the model.\n")
@@ -375,6 +441,11 @@ def main():
     print(f"  needs_annotation/:  {len(needs_annotation)} images for Roboflow")
     print(f"  manifest.json:      Full metadata")
     print(f"  report.txt:         Summary report")
+
+    # Clean up temporary extraction directory
+    if tmp_dir and Path(tmp_dir).exists():
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
     print(f"\nDone!")
 
 

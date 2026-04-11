@@ -6,6 +6,7 @@ import {
   loadSiteConfig,
   buildClassificationPrompt,
   buildMultiItemPrompt,
+  buildMaterialIdentificationPrompt,
   buildClassificationResult,
   applyOverrides,
 } from "@/lib/waste-rules";
@@ -46,6 +47,18 @@ const MaterialHintSchema = z.object({
   }).optional(),
 }).optional();
 
+// ── Tier 1 sub-classification context (material identification path) ──
+const Tier1ContextSchema = z.object({
+  className: z.string(),
+  confidence: z.number(),
+  tier2Results: z.array(
+    z.object({
+      className: z.string(),
+      confidence: z.number(),
+    })
+  ),
+}).optional();
+
 // ── Request validation (single-item format — backward compatible) ──
 const SingleRequestSchema = z.object({
   image: z.string().min(100),
@@ -56,6 +69,8 @@ const SingleRequestSchema = z.object({
   materialHint: MaterialHintSchema,
   /** When true, uses the multi-item prompt and returns an array of results. */
   multi: z.boolean().optional(),
+  /** Tier 1 sub-classification context — triggers material identification prompt. */
+  tier1Context: Tier1ContextSchema,
 });
 
 // ── Batch item schema ──
@@ -348,7 +363,42 @@ export async function POST(request: Request) {
     yoloHint: string | null | undefined,
     itemMaterialHint: MaterialHint | undefined,
     yoloDetections: YoloDetectionLog[] | undefined,
+    tier1Ctx?: { className: string; confidence: number; tier2Results: { className: string; confidence: number }[] },
   ) {
+    // ── Material identification path (Tier 1 sub-classification) ──
+    // When tier1Context is present, use the material-focused prompt instead
+    // of the generic classification prompt.
+    if (tier1Ctx) {
+      const prompt = buildMaterialIdentificationPrompt(
+        siteConfig,
+        locale,
+        tier1Ctx.className,
+        tier1Ctx.confidence,
+        tier1Ctx.tier2Results,
+      );
+      const raw = await callModel(openai, "gpt-5.4-mini", image, prompt);
+      const modelUsed = "mini" as const;
+      const result = buildClassificationResult(raw, siteConfig, locale);
+      result.modelUsed = modelUsed;
+
+      const overrideCheck = applyOverrides(raw.itemName, raw.wasteStream, siteConfig, locale);
+      if (overrideCheck.conditionalStream && overrideCheck.condition && !overrideCheck.requiresStaff) {
+        const conditionLower = overrideCheck.condition.toLowerCase();
+        const reasoningLower = (raw.reasoning ?? "").toLowerCase();
+        if (reasoningLower.includes(conditionLower)) {
+          const condStreamDef = siteConfig.streams.find((s) => s.id === overrideCheck.conditionalStream);
+          if (condStreamDef) {
+            result.wasteStream = overrideCheck.conditionalStream;
+            result.binColor = condStreamDef.color;
+            result.binLabel = condStreamDef.label;
+            result.specialInstructions = overrideCheck.note;
+          }
+        }
+      }
+      return { result, raw, modelUsed };
+    }
+
+    // ── Standard classification path ──
     const localCandidates: LocalModelCandidate[] | undefined =
       yoloDetections && yoloDetections.length > 0
         ? yoloDetections.slice(0, 3).map((d) => ({ className: d.className, confidence: d.confidence }))
@@ -442,7 +492,7 @@ export async function POST(request: Request) {
 
     // ── Single-item mode (backward compatible) ──
     const singleData = data as z.infer<typeof SingleRequestSchema>;
-    const { image, yoloDetections, materialHint } = singleData;
+    const { image, yoloDetections, materialHint, tier1Context } = singleData;
 
     // ── Multi-item mode: full-frame, zero-detection fallback ──
     if (singleData.multi) {
@@ -510,6 +560,7 @@ export async function POST(request: Request) {
       undefined,
       materialHint as MaterialHint | undefined,
       yoloDetections as YoloDetectionLog[] | undefined,
+      tier1Context as { className: string; confidence: number; tier2Results: { className: string; confidence: number }[] } | undefined,
     );
 
     const totalServerMs = Date.now() - startMs;

@@ -9,10 +9,12 @@
 import type {
   ClassificationResponse,
   SiteConfig,
+  Tier1SubclassContext,
   YoloDetection,
   YoloRulesConfig,
 } from "./types";
 import { buildClassificationResult } from "./waste-rules-core";
+import { poolConfidence } from "./material-vocabulary";
 
 let rulesCache: YoloRulesConfig | null = null;
 let rulesLoading: Promise<YoloRulesConfig | null> | null = null;
@@ -95,18 +97,54 @@ export function loadYoloWorldRules(): Promise<YoloRulesConfig | null> {
   return worldRulesLoading;
 }
 
+/** Confidence threshold for sub-classification routing (80%). */
+const SUBCLASS_CONFIDENCE_THRESHOLD = 0.80;
+
+/**
+ * Result of resolving a YOLO detection.
+ *
+ * - `{ result }` — fully resolved classification
+ * - `{ needsSubclassification, subclassContext }` — high-confidence detection
+ *   of a class that requires material identification; caller must route to
+ *   Tier 2 material vocabulary.
+ * - `null` — no rule matched; caller falls back to YOLO World / API.
+ */
+export type YoloResolution =
+  | { result: ClassificationResponse; needsSubclassification?: false }
+  | { result: null; needsSubclassification: true; subclassContext: Tier1SubclassContext };
+
 /**
  * Attempt to resolve a YOLO detection into a full ClassificationResponse
  * using the rules file and the site's override pipeline.
  *
  * Returns `null` if the detected class has no rule — caller should fall
  * back to the OpenAI API.
+ *
+ * When the rule has `needsSubclassification: true` and confidence ≥ 0.80,
+ * returns a `YoloResolution` with `needsSubclassification: true` so the
+ * caller can route to the material-focused Tier 2/3 path.
  */
 export function resolveYoloDetection(
   detection: YoloDetection,
   siteConfig: SiteConfig,
+  locale?: string,
+): ClassificationResponse | null;
+/**
+ * Overload that returns the full resolution object including sub-classification
+ * context. Pass `returnResolution: true` to use this form.
+ */
+export function resolveYoloDetection(
+  detection: YoloDetection,
+  siteConfig: SiteConfig,
+  locale: string,
+  returnResolution: true,
+): YoloResolution | null;
+export function resolveYoloDetection(
+  detection: YoloDetection,
+  siteConfig: SiteConfig,
   locale: string = "en",
-): ClassificationResponse | null {
+  returnResolution?: boolean,
+): ClassificationResponse | YoloResolution | null {
   if (!rulesCache) return null;
 
   const rule = rulesCache.rules[detection.className];
@@ -115,7 +153,7 @@ export function resolveYoloDetection(
   // Non-waste items (person, car, furniture, etc.) → instant "nothing detected"
   // so the pipeline doesn't waste time falling through to YOLO World / API.
   if (rule.wasteStream === "not_waste") {
-    return {
+    const result: ClassificationResponse = {
       itemName: "nothing_detected",
       wasteStream: "landfill",
       confidence: 0,
@@ -126,6 +164,29 @@ export function resolveYoloDetection(
       isCompound: false,
       modelUsed: "yolo-local",
     };
+    return returnResolution ? { result } : result;
+  }
+
+  // Sub-classification routing: high-confidence detection of a material-ambiguous
+  // class (bottle, cup, bowl, cutlery, wine glass) — skip Tier 1 resolution and
+  // route to Tier 2 material vocabulary instead.
+  if (
+    rule.needsSubclassification &&
+    detection.confidence >= SUBCLASS_CONFIDENCE_THRESHOLD
+  ) {
+    if (returnResolution) {
+      return {
+        result: null,
+        needsSubclassification: true,
+        subclassContext: {
+          className: detection.className,
+          confidence: detection.confidence,
+          bbox: detection.bbox,
+        },
+      };
+    }
+    // Legacy call without returnResolution: return null to force fallback
+    return null;
   }
 
   // Run through the same override/site-rule pipeline as the API route
@@ -142,7 +203,7 @@ export function resolveYoloDetection(
   );
 
   result.modelUsed = "yolo-local";
-  return result;
+  return returnResolution ? { result } : result;
 }
 
 /**
@@ -173,6 +234,41 @@ export function resolveYoloWorldDetection(
 
   result.modelUsed = "yolo-world";
   return result;
+}
+
+/**
+ * Apply confidence pooling to YOLO World detections, then attempt resolution.
+ * Pooling combines same-stream material classes (e.g., aluminium + steel cans)
+ * so split confidence doesn't cause unnecessary fallback to Tier 3.
+ *
+ * @param detections Raw YOLO World detections (pre-sorted by confidence desc).
+ * @param siteConfig Site configuration for stream mapping.
+ * @param locale Current locale.
+ * @returns Pooled detections and the best resolved result (if any).
+ */
+export function resolveYoloWorldWithPooling(
+  detections: YoloDetection[],
+  siteConfig: SiteConfig,
+  locale: string = "en",
+): {
+  pooledDetections: YoloDetection[];
+  bestResult: ClassificationResponse | null;
+  bestDetection: YoloDetection | null;
+} {
+  const pooled = poolConfidence(detections);
+
+  let bestResult: ClassificationResponse | null = null;
+  let bestDetection: YoloDetection | null = null;
+
+  for (const det of pooled) {
+    const result = resolveYoloWorldDetection(det, siteConfig, locale);
+    if (result && (!bestResult || det.confidence > (bestDetection?.confidence ?? 0))) {
+      bestResult = result;
+      bestDetection = det;
+    }
+  }
+
+  return { pooledDetections: pooled, bestResult, bestDetection };
 }
 
 /** Class names that indicate PET bottle components. */

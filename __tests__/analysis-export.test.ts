@@ -45,7 +45,7 @@ function makeRequest(params: Record<string, string> = {}): Request {
 
 const pilotEntries: PilotLogEntry[] = [
   makeEntry({ requestId: "aaa11111", modelUsed: "yolo-local", confidence: 0.90, itemName: "plastic bottle", wasteStream: "recycling" }),
-  makeEntry({ requestId: "bbb22222", modelUsed: "nano", confidence: 0.70, itemName: "coffee cup", wasteStream: "landfill", escalated: true }),
+  makeEntry({ requestId: "bbb22222", modelUsed: "mini", confidence: 0.70, itemName: "coffee cup", wasteStream: "landfill", escalated: true }),
   makeEntry({ requestId: "ccc33333", modelUsed: "yolo-local", confidence: 0.45, itemName: "banana peel", wasteStream: "compost" }),
   makeEntry({ requestId: "ddd44444", modelUsed: "yolo-world", confidence: 0.55, itemName: "aluminum can", wasteStream: "recycling", timestamp: "2026-03-01T08:00:00.000Z" }),
   makeEntry({ requestId: "eee55555", modelUsed: "mini", confidence: 0.30, itemName: "styrofoam box", wasteStream: "landfill" }),
@@ -164,8 +164,8 @@ describe("GET /api/review/export/analysis", () => {
 
     // yolo-local: 2 reviewed (aaa correct, ccc correct) → 1.0
     expect(data.summary.accuracyByModel["yolo-local"]).toBe(1.0);
-    // nano: 1 reviewed (bbb wrong) → 0.0
-    expect(data.summary.accuracyByModel["nano"]).toBe(0);
+    // mini: 1 reviewed (bbb wrong) → 0.0
+    expect(data.summary.accuracyByModel["mini"]).toBe(0);
   });
 
   it("returns CSV format", async () => {

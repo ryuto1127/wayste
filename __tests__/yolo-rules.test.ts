@@ -75,11 +75,20 @@ describe("Tier 1: YOLO26m detection → waste stream", () => {
 
   describe("recycling items", () => {
     it.each([
-      ["bottle", "recycling"],
-      ["wine glass", "recycling"],
       ["book", "recycling"],
     ])("%s → %s", (className, expectedStream) => {
       const result = resolveYoloDetection(makeDetection(className), config);
+      expect(result).not.toBeNull();
+      expect(result!.wasteStream).toBe(expectedStream);
+      expect(result!.modelUsed).toBe("yolo-local");
+    });
+
+    // Sub-classification classes resolve normally below the 0.80 threshold
+    it.each([
+      ["bottle", "recycling"],
+      ["wine glass", "recycling"],
+    ])("%s → %s (below subclass threshold)", (className, expectedStream) => {
+      const result = resolveYoloDetection(makeDetection(className, 0.75), config);
       expect(result).not.toBeNull();
       expect(result!.wasteStream).toBe(expectedStream);
       expect(result!.modelUsed).toBe("yolo-local");
@@ -107,14 +116,22 @@ describe("Tier 1: YOLO26m detection → waste stream", () => {
 
   describe("landfill items", () => {
     it.each([
+      ["toothbrush", "landfill"],
+    ])("%s → %s", (className, expectedStream) => {
+      const result = resolveYoloDetection(makeDetection(className), config);
+      expect(result).not.toBeNull();
+      expect(result!.wasteStream).toBe(expectedStream);
+    });
+
+    // Sub-classification classes resolve normally below the 0.80 threshold
+    it.each([
       ["cup", "landfill"],
       ["fork", "landfill"],
       ["knife", "landfill"],
       ["spoon", "landfill"],
       ["bowl", "landfill"],
-      ["toothbrush", "landfill"],
-    ])("%s → %s", (className, expectedStream) => {
-      const result = resolveYoloDetection(makeDetection(className), config);
+    ])("%s → %s (below subclass threshold)", (className, expectedStream) => {
+      const result = resolveYoloDetection(makeDetection(className, 0.75), config);
       expect(result).not.toBeNull();
       expect(result!.wasteStream).toBe(expectedStream);
     });
@@ -175,15 +192,39 @@ describe("Tier 1: YOLO26m detection → waste stream", () => {
   });
 
   it("includes preAction when defined in rules", () => {
-    const result = resolveYoloDetection(makeDetection("bottle"), config);
+    // Use below-threshold confidence since bottle has needsSubclassification
+    const result = resolveYoloDetection(makeDetection("bottle", 0.75), config);
     expect(result).not.toBeNull();
     expect(result!.preAction).toBe("Empty and rinse before recycling");
   });
 
   it("preserves detection confidence in result", () => {
-    const result = resolveYoloDetection(makeDetection("bottle", 0.92), config);
+    // Use below-threshold confidence since bottle has needsSubclassification
+    const result = resolveYoloDetection(makeDetection("bottle", 0.75), config);
     expect(result).not.toBeNull();
-    expect(result!.confidence).toBe(0.92);
+    expect(result!.confidence).toBe(0.75);
+  });
+
+  describe("sub-classification routing (≥ 0.80 confidence)", () => {
+    it.each([
+      "bottle", "cup", "fork", "knife", "spoon", "bowl", "wine glass",
+    ])("%s → returns null (routes to material sub-classification)", (className) => {
+      // Legacy call (without returnResolution) returns null to trigger fallback
+      const result = resolveYoloDetection(makeDetection(className, 0.85), config);
+      expect(result).toBeNull();
+    });
+
+    it.each([
+      "bottle", "cup", "fork", "knife", "spoon", "bowl", "wine glass",
+    ])("%s → needsSubclassification with returnResolution", (className) => {
+      const resolution = resolveYoloDetection(makeDetection(className, 0.85), config, "en", true);
+      expect(resolution).not.toBeNull();
+      expect(resolution!.needsSubclassification).toBe(true);
+      if (resolution!.needsSubclassification) {
+        expect(resolution!.subclassContext.className).toBe(className);
+        expect(resolution!.subclassContext.confidence).toBe(0.85);
+      }
+    });
   });
 });
 
@@ -332,8 +373,8 @@ describe("Rules JSON integrity", () => {
     expect(Object.keys(yoloRules.rules)).toHaveLength(80);
   });
 
-  it("YOLO World rules has all 36 recycling classes", () => {
-    expect(Object.keys(worldRules.rules)).toHaveLength(36);
+  it("YOLO World rules has all 53 recycling classes", () => {
+    expect(Object.keys(worldRules.rules)).toHaveLength(53);
   });
 
   it("every YOLO rule has required fields", () => {

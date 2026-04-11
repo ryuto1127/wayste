@@ -39,7 +39,24 @@
     { "pattern": "新聞", "stream": "recyclable", "note": "紐でまとめて資源ゴミへ" },
     { "pattern": "段ボール", "stream": "recyclable", "note": "たたんで資源ゴミへ" },
     { "pattern": "電池", "stream": "special", "note": "電池は特別収集です。専用の回収ボックスに入れてください" },
-    { "pattern": "battery", "stream": "special", "note": "電池は特別収集です。専用の回収ボックスに入れてください" }
+    { "pattern": "battery", "stream": "special", "note": "電池は特別収集です。専用の回収ボックスに入れてください" },
+    { "pattern": "steel beverage can", "stream": "recyclable", "note": "スチール缶は中を洗って資源ゴミへ" },
+    { "pattern": "ceramic mug", "stream": "non-burnable", "note": "陶器は不燃ゴミへ" },
+    { "pattern": "ceramic bowl", "stream": "non-burnable", "note": "陶器は不燃ゴミへ" },
+    { "pattern": "paper bowl", "stream": "burnable", "note": "紙製の器は可燃ゴミへ" },
+    { "pattern": "plastic container", "stream": "burnable", "note": "プラスチック容器は汚れていれば可燃ゴミ。きれいに洗えた場合はプラスチック", "conditionalStream": "plastic", "condition": "clean" },
+    { "pattern": "metal fork", "stream": "non-burnable", "note": "金属製カトラリーは不燃ゴミへ" },
+    { "pattern": "metal knife", "stream": "non-burnable", "note": "金属製カトラリーは不燃ゴミへ。刃を包んでください" },
+    { "pattern": "metal spoon", "stream": "non-burnable", "note": "金属製カトラリーは不燃ゴミへ" },
+    { "pattern": "plastic fork", "stream": "plastic", "note": "プラスチック製カトラリーはプラスチックへ" },
+    { "pattern": "plastic knife", "stream": "plastic", "note": "プラスチック製カトラリーはプラスチックへ" },
+    { "pattern": "plastic spoon", "stream": "plastic", "note": "プラスチック製カトラリーはプラスチックへ" },
+    { "pattern": "wooden fork", "stream": "burnable", "note": "木製カトラリーは可燃ゴミへ" },
+    { "pattern": "wooden knife", "stream": "burnable", "note": "木製カトラリーは可燃ゴミへ" },
+    { "pattern": "wooden spoon", "stream": "burnable", "note": "木製カトラリーは可燃ゴミへ" },
+    { "pattern": "wooden chopsticks", "stream": "burnable", "note": "割り箸は可燃ゴミへ" },
+    { "pattern": "glass wine glass", "stream": "non-burnable", "note": "ガラス製グラスは不燃ゴミへ" },
+    { "pattern": "plastic wine glass", "stream": "plastic", "note": "プラスチック製グラスはプラスチックへ" }
   ],
   "compounds": [
     {
@@ -67,7 +84,12 @@
     "白色トレイ", "色付きトレイ", "食品トレイ",
     "pet bottle", "coffee cup", "plastic bag", "aluminum can", "steel can",
     "cardboard", "battery", "glass bottle",
-    "white foam tray", "colored tray", "food tray"
+    "white foam tray", "colored tray", "food tray",
+    "steel beverage can", "ceramic mug", "ceramic bowl", "paper bowl",
+    "plastic container", "metal fork", "metal knife", "metal spoon",
+    "plastic fork", "plastic knife", "plastic spoon",
+    "wooden fork", "wooden knife", "wooden spoon", "wooden chopsticks",
+    "glass wine glass", "plastic wine glass"
   ],
   "defaultStream": "burnable"
 }

@@ -201,37 +201,44 @@
       "itemName": "Bottle",
       "wasteStream": "recycling",
       "reasoning": "Bottles are recyclable — empty and rinse before disposing.",
-      "preAction": "Empty and rinse before recycling"
+      "preAction": "Empty and rinse before recycling",
+      "needsSubclassification": true
     },
     "wine glass": {
       "itemName": "Glass",
       "wasteStream": "recycling",
-      "reasoning": "Glass is recyclable."
+      "reasoning": "Glass is recyclable.",
+      "needsSubclassification": true
     },
     "cup": {
       "itemName": "Cup",
       "wasteStream": "landfill",
-      "reasoning": "Most disposable cups have a plastic lining and are not recyclable."
+      "reasoning": "Most disposable cups have a plastic lining and are not recyclable.",
+      "needsSubclassification": true
     },
     "fork": {
       "itemName": "Fork",
       "wasteStream": "landfill",
-      "reasoning": "Plastic utensils are not recyclable."
+      "reasoning": "Plastic utensils are not recyclable.",
+      "needsSubclassification": true
     },
     "knife": {
       "itemName": "Knife (utensil)",
       "wasteStream": "landfill",
-      "reasoning": "Plastic utensils are not recyclable."
+      "reasoning": "Plastic utensils are not recyclable.",
+      "needsSubclassification": true
     },
     "spoon": {
       "itemName": "Spoon",
       "wasteStream": "landfill",
-      "reasoning": "Plastic utensils are not recyclable."
+      "reasoning": "Plastic utensils are not recyclable.",
+      "needsSubclassification": true
     },
     "bowl": {
       "itemName": "Bowl",
       "wasteStream": "landfill",
-      "reasoning": "Disposable bowls are typically not recyclable."
+      "reasoning": "Disposable bowls are typically not recyclable.",
+      "needsSubclassification": true
     },
     "banana": {
       "itemName": "Banana",

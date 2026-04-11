@@ -7,6 +7,7 @@ import type {
   FrameAnalysis,
   ClassifyMeta,
   SiteConfig,
+  Tier1SubclassContext,
   YoloDetection,
   YoloDetectionLog,
 } from "@/lib/types";
@@ -27,7 +28,8 @@ import {
 } from "@/lib/inference-backend";
 import { computeThresholds, type ThresholdConfig, type Calibration } from "@/lib/threshold-config";
 import { perfMonitor } from "@/lib/perf-monitor";
-import { loadYoloRules, loadYoloWorldRules, resolveYoloDetection, resolveYoloWorldDetection, resolvePetBottleCompound, isYoloClassNotWaste } from "@/lib/yolo-rules";
+import { loadYoloRules, loadYoloWorldRules, resolveYoloDetection, resolveYoloWorldDetection, resolvePetBottleCompound, resolveYoloWorldWithPooling, isYoloClassNotWaste } from "@/lib/yolo-rules";
+import { MATERIAL_VOCABULARY } from "@/lib/material-vocabulary";
 import { analyzeMaterial, refineClassName } from "@/lib/rgb-material-analyzer";
 import type { MaterialHint } from "@/lib/types";
 // kioskAuthHeaders replaced by session token (server-generated, HMAC-signed)
@@ -729,15 +731,27 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           // detecting item removal (result screen), but routing uses bboxes.
           const resolvedResults: (ClassificationResponse & { _bboxX?: number })[] = [];
           const unresolvedDetections: (YoloDetection & { _bboxX: number })[] = [];
+          /** Detections needing material sub-classification (Tier 2 material path). */
+          const subclassDetections: (YoloDetection & { _bboxX: number; subclassContext: Tier1SubclassContext })[] = [];
           let firstResolvedHint: MaterialHint | undefined;
           let firstResolvedOriginalName: string | undefined;
 
           for (const detection of wasteDetections.slice(0, 4)) {
             const bboxX = detection.bbox[0] + detection.bbox[2] / 2; // center-x
             if (detection.confidence >= thresholdsRef.current.YOLO_FALLBACK_THRESHOLD) {
-              // Tier 1: high confidence → instant resolve via rules
-              const r = resolveYoloDetection(detection, siteConfigRef.current!, localeRef.current);
-              if (r) {
+              // Tier 1: high confidence → try resolution with sub-classification awareness
+              const resolution = resolveYoloDetection(detection, siteConfigRef.current!, localeRef.current, true);
+              if (resolution?.needsSubclassification) {
+                // Material-ambiguous class (bottle, cup, etc.) at ≥ 80% — route to Tier 2 material path
+                console.log(`[tier1] ${detection.className} (${(detection.confidence * 100).toFixed(1)}%) needs material sub-classification`);
+                subclassDetections.push(Object.assign({}, detection, {
+                  _bboxX: bboxX,
+                  subclassContext: resolution.subclassContext,
+                }));
+                continue;
+              }
+              if (resolution?.result) {
+                const r = resolution.result;
                 const detHint = analyzeMaterial(video, detection.bbox);
                 const originalName = r.itemName;
                 r.itemName = refineClassName(r.itemName, detHint);
@@ -754,8 +768,8 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
             unresolvedDetections.push(Object.assign({}, detection, { _bboxX: bboxX }));
           }
 
-          // If we have high-confidence results and nothing unresolved, deliver instantly
-          if (resolvedResults.length > 0 && unresolvedDetections.length === 0) {
+          // If we have high-confidence results and nothing needs further resolution, deliver instantly
+          if (resolvedResults.length > 0 && unresolvedDetections.length === 0 && subclassDetections.length === 0) {
             // Sort by bbox x-coordinate (left-to-right)
             resolvedResults.sort((a, b) => (a._bboxX ?? 0) - (b._bboxX ?? 0));
             console.log(`[tier1] YOLO HIT: ${resolvedResults.map((r) => r.itemName).join(" + ")} in ${yoloMs}ms`);
@@ -767,9 +781,10 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           // ── Some items need further resolution ──
           const best = wasteDetections[0] ?? null;
           const hasUnresolved = unresolvedDetections.length > 0;
+          const hasSubclass = subclassDetections.length > 0;
           const hasBlobPresence = blobs.some(b => blobIsObject(b));
 
-          if (best || hasUnresolved || hasBlobPresence) {
+          if (best || hasUnresolved || hasSubclass || hasBlobPresence) {
             // Show optimistic UI for already-resolved items
             if (resolvedResults.length > 0) {
               resolvedResults.sort((a, b) => (a._bboxX ?? 0) - (b._bboxX ?? 0));
@@ -778,11 +793,12 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
             }
 
             const fireApiInParallel = !best || best.confidence < YOLO_API_PARALLEL_THRESHOLD;
-            console.log(`[tier1] ${resolvedResults.length} resolved, ${unresolvedDetections.length} unresolved — escalating`);
+            console.log(`[tier1] ${resolvedResults.length} resolved, ${unresolvedDetections.length} unresolved, ${subclassDetections.length} subclass — escalating`);
 
             escalateToYoloWorld(
               video, backend, best, apiPromise, apiController, fireApiInParallel, detections, yoloMs, analysis,
               resolvedResults, unresolvedDetections, hasBlobPresence && wasteDetections.length === 0,
+              subclassDetections,
             );
           } else {
             // No waste detections and no qualified blobs — escalate
@@ -871,6 +887,8 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       unresolvedDetections: (YoloDetection & { _bboxX: number })[] = [],
       /** True when blobs exist but YOLO found zero waste detections — triggers multi-item GPT fallback. */
       zeroBboxFallback: boolean = false,
+      /** Detections needing material sub-classification (bottle, cup, etc.). */
+      subclassDetections: (YoloDetection & { _bboxX: number; subclassContext: Tier1SubclassContext })[] = [],
     ) {
       type ApiResult = Promise<{ result: (ClassificationResponse & { requestId?: string }) | null; requestId?: string }>;
       // Start API call in parallel if confidence is very low
@@ -930,6 +948,44 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
         }));
       }
 
+      /**
+       * Send cropped images for sub-classification detections to the API
+       * with tier1Context (material identification prompt path).
+       */
+      async function sendSubclassBatchApi(
+        tier2ResultsForContext: { className: string; confidence: number }[],
+      ): Promise<(ClassificationResponse & { _bboxX?: number })[]> {
+        if (subclassDetections.length === 0) return [];
+        const results: (ClassificationResponse & { _bboxX?: number })[] = [];
+        // Process each sub-classification detection individually (each gets its own tier1Context)
+        for (const det of subclassDetections) {
+          const crop = await cropBboxToBase64(video, det.subclassContext.bbox);
+          if (!crop) continue;
+          const res = await fetch("/api/classify", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              image: crop.image,
+              siteId: siteConfigRef.current?.siteId,
+              locale: localeRef.current,
+              meta: {
+                sharpnessScore: analysis.sharpnessScore,
+                imageQuality: imageQualityBand(analysis),
+              },
+              tier1Context: {
+                className: det.subclassContext.className,
+                confidence: det.subclassContext.confidence,
+                tier2Results: tier2ResultsForContext,
+              },
+            }),
+          });
+          if (!res.ok) continue;
+          const data = await res.json() as ClassificationResponse & { requestId?: string };
+          results.push({ ...data, _bboxX: det._bboxX });
+        }
+        return results;
+      }
+
       /** Merge all tier results, sort by bbox x, cap at 4. */
       function mergeAndDeliver(
         tier2Results: (ClassificationResponse & { _bboxX?: number })[],
@@ -949,9 +1005,17 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       if (!backend.isYoloWorldReady()) {
         // YOLO World not available — fall through to API
         console.log("[tier2] YOLO World not ready — falling through to API");
+        const noWorldPromises: Promise<(ClassificationResponse & { _bboxX?: number })[]>[] = [];
         if (unresolvedDetections.length > 0) {
-          sendCroppedBatchApi()
-            .then((batchResults) => mergeAndDeliver([], batchResults, []))
+          noWorldPromises.push(sendCroppedBatchApi());
+        }
+        if (subclassDetections.length > 0) {
+          // No Tier 2 hints available — send directly to Tier 3 material prompt
+          noWorldPromises.push(sendSubclassBatchApi([]));
+        }
+        if (noWorldPromises.length > 0) {
+          Promise.all(noWorldPromises)
+            .then((allResults) => mergeAndDeliver([], allResults.flat(), []))
             .catch((err) => {
               if (tier1Results.length > 0) {
                 mergeAndDeliver([], [], []);
@@ -987,6 +1051,8 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           perfMonitor.recordWorldInference(worldMs);
 
           const tier2Results: (ClassificationResponse & { _bboxX?: number })[] = [];
+          /** Tier 2 results collected from sub-classification path (for tier1Context). */
+          const subclassTier2Hints: { className: string; confidence: number }[] = [];
 
           if (worldDetections.length > 0) {
             // PET bottle compound check: bottle + cap/label detected together
@@ -999,6 +1065,37 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
                 mergeAndDeliver([compoundResult], [], []);
                 return;
               }
+            }
+
+            // ── Material sub-classification via YOLO World ──
+            // For detections that need material identification, filter YOLO World
+            // results to only the relevant material vocabulary and apply confidence
+            // pooling before threshold comparison.
+            const subclassStillPending: typeof subclassDetections = [];
+            for (const det of subclassDetections) {
+              const vocabSet = new Set(MATERIAL_VOCABULARY[det.subclassContext.className] ?? []);
+              // Filter YOLO World detections to material vocabulary for this class
+              const materialDetections = worldDetections.filter((wd) => vocabSet.has(wd.className));
+              if (materialDetections.length > 0) {
+                // Apply confidence pooling (e.g., aluminium + steel → combined confidence)
+                const { pooledDetections, bestResult, bestDetection } = resolveYoloWorldWithPooling(
+                  materialDetections, siteConfigRef.current!, localeRef.current,
+                );
+                // Record all pooled results as tier 2 hints (for tier1Context if we fall through to Tier 3)
+                for (const pd of pooledDetections) {
+                  subclassTier2Hints.push({ className: pd.className, confidence: pd.confidence });
+                }
+                if (bestDetection && bestDetection.confidence >= thresholdsRef.current.YOLO_WORLD_ACCEPT_THRESHOLD && bestResult) {
+                  const worldHint = analyzeMaterial(video, bestDetection.bbox);
+                  bestResult.itemName = refineClassName(bestResult.itemName, worldHint);
+                  console.log(`[tier2] Material sub-class HIT: ${det.subclassContext.className} → ${bestDetection.className} (${(bestDetection.confidence * 100).toFixed(1)}%) in ${worldMs}ms`);
+                  (bestResult as ClassificationResponse & { _bboxX?: number })._bboxX = det._bboxX;
+                  tier2Results.push(bestResult as ClassificationResponse & { _bboxX?: number });
+                  continue;
+                }
+              }
+              // Inconclusive — will need Tier 3 material identification
+              subclassStillPending.push(det);
             }
 
             // Try to resolve each unresolved detection via YOLO World
@@ -1029,7 +1126,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
             }
 
             // If no unresolved detections came in, use YOLO World's best as a single result
-            if (unresolvedDetections.length === 0 && worldDetections.length > 0) {
+            if (unresolvedDetections.length === 0 && subclassDetections.length === 0 && worldDetections.length > 0) {
               const worldBest = worldDetections[0];
               if (worldBest.confidence >= thresholdsRef.current.YOLO_WORLD_ACCEPT_THRESHOLD) {
                 const result = resolveYoloWorldDetection(worldBest, siteConfigRef.current!, localeRef.current);
@@ -1048,7 +1145,12 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
             }
 
             // All resolved via Tier 1 + Tier 2 — deliver
-            if (stillUnresolved.length === 0 && (tier1Results.length + tier2Results.length) > 0 && !zeroBboxFallback) {
+            if (
+              stillUnresolved.length === 0 &&
+              subclassStillPending.length === 0 &&
+              (tier1Results.length + tier2Results.length) > 0 &&
+              !zeroBboxFallback
+            ) {
               console.log(`[tier2] All resolved: ${tier2Results.length} via YOLO World in ${worldMs}ms`);
               mergeAndDeliver(tier2Results, [], []);
               return;
@@ -1060,14 +1162,35 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
               unresolvedDetections.length = 0;
               unresolvedDetections.push(...stillUnresolved);
             }
+
+            // Update subclassDetections for the Tier 3 material API call
+            if (subclassStillPending.length > 0) {
+              subclassDetections.length = 0;
+              subclassDetections.push(...subclassStillPending);
+            } else {
+              subclassDetections.length = 0;
+            }
           } else {
             console.log(`[tier2] YOLO World no detections (${worldMs}ms) — falling through to API`);
+            // No YOLO World results — all sub-class detections need Tier 3 (no hints to add)
           }
 
-          // Tier 3: per-bbox cropped API or full-frame multi-item fallback
+          // Tier 3: per-bbox cropped API, material identification, or full-frame multi-item fallback
+          const tier3Promises: Promise<(ClassificationResponse & { _bboxX?: number })[]>[] = [];
+
           if (unresolvedDetections.length > 0) {
-            sendCroppedBatchApi()
-              .then((batchResults) => mergeAndDeliver(tier2Results, batchResults, []))
+            tier3Promises.push(sendCroppedBatchApi());
+          }
+          if (subclassDetections.length > 0) {
+            tier3Promises.push(sendSubclassBatchApi(subclassTier2Hints));
+          }
+
+          if (tier3Promises.length > 0) {
+            Promise.all(tier3Promises)
+              .then((allBatchResults) => {
+                const combined = allBatchResults.flat();
+                mergeAndDeliver(tier2Results, combined, []);
+              })
               .catch((err) => {
                 if (tier1Results.length + tier2Results.length > 0) {
                   mergeAndDeliver(tier2Results, [], []);
@@ -1075,9 +1198,9 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
                   handleClassificationError(err);
                 }
               });
-          } else {
+          } else if (zeroBboxFallback && tier1Results.length + tier2Results.length === 0) {
             // Zero-detection fallback: send full frame to API (multi-item prompt)
-            const promise = apiInflight ?? apiPromise(zeroBboxFallback);
+            const promise = apiInflight ?? apiPromise(true);
             promise
               .then(({ result: r, requestId }) => {
                 if (r) mergeAndDeliver(tier2Results, [r as ClassificationResponse & { _bboxX?: number }], [requestId]);
@@ -1100,6 +1223,9 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
                   handleClassificationError(err);
                 }
               });
+          } else if (tier1Results.length + tier2Results.length > 0) {
+            // We have some resolved results — deliver them
+            mergeAndDeliver(tier2Results, [], []);
           }
         })
         .catch(() => {

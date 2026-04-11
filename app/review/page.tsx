@@ -766,12 +766,13 @@ function BulkDeletePanel({
       p.set("all", "true");
     } else if (mode === "before") {
       if (!beforeDate) return null;
-      p.set("before", new Date(`${beforeDate}T23:59:59.999Z`).toISOString());
+      // Use local timezone so the selected date matches user's day boundary
+      p.set("before", new Date(`${beforeDate}T23:59:59.999`).toISOString());
     } else {
-      // date mode: delete all entries from the selected day
+      // date mode: delete all entries from the selected day (local timezone)
       if (!targetDate) return null;
-      p.set("from", new Date(`${targetDate}T00:00:00.000Z`).toISOString());
-      p.set("to", new Date(`${targetDate}T23:59:59.999Z`).toISOString());
+      p.set("from", new Date(`${targetDate}T00:00:00.000`).toISOString());
+      p.set("to", new Date(`${targetDate}T23:59:59.999`).toISOString());
     }
     return p;
   };

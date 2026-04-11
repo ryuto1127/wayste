@@ -334,7 +334,9 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
             }
             const retryData = await retryRes.json();
             if (Array.isArray(retryData.results)) {
-              return { ...retryData.results[0], requestId: retryData.requestId } as ClassificationResponse;
+              const retryResult = { ...retryData.results[0], requestId: retryData.requestId } as ClassificationResponse & { _multiResults?: ClassificationResponse[] };
+              if (retryData.results.length > 1) retryResult._multiResults = retryData.results;
+              return retryResult;
             }
             return retryData as ClassificationResponse;
           }
@@ -353,10 +355,14 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           if (Array.isArray(responseData.results)) {
             if (responseData.results.length === 0) throw new Error("Multi-item returned no results");
           }
-          const data: ClassificationResponse & { requestId?: string } =
+          const data: ClassificationResponse & { requestId?: string; _multiResults?: ClassificationResponse[] } =
             Array.isArray(responseData.results)
               ? { ...responseData.results[0], requestId: responseData.requestId }
               : responseData;
+          // Preserve all multi-item results so callers can display them all
+          if (Array.isArray(responseData.results) && responseData.results.length > 1) {
+            data._multiResults = responseData.results;
+          }
           if (data.requestId) {
             console.log(`[classify] TIMING: fetch=${fetchDoneMs}ms, requestId=${data.requestId}`);
           }
@@ -812,7 +818,8 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
             // Sort by bbox x-coordinate (left-to-right)
             resolvedResults.sort((a, b) => (a._bboxX ?? 0) - (b._bboxX ?? 0));
             console.log(`[tier1] YOLO HIT: ${resolvedResults.map((r) => r.itemName).join(" + ")} in ${yoloMs}ms`);
-            logYoloOnlyResult(video, resolvedResults[0], detections, yoloMs, analysis, "yolo-local", firstResolvedHint, firstResolvedOriginalName);
+            logYoloOnlyResult(video, resolvedResults[0], detections, yoloMs, analysis, "yolo-local", firstResolvedHint, firstResolvedOriginalName,
+              { tier1: wasteDetections.map(d => ({ itemName: d.className, confidence: d.confidence })).sort((a, b) => b.confidence - a.confidence).slice(0, 5) });
             handleMultiClassificationResults(resolvedResults, resolvedResults.map(() => undefined));
             return;
           }
@@ -917,7 +924,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       video: HTMLVideoElement,
       backend: InferenceBackend,
       yoloBest: { className: string; confidence: number } | null,
-      apiPromise: (multi?: boolean, tierResults?: { tier1?: { itemName: string; confidence: number }[]; tier2?: { itemName: string; confidence: number }[] }) => Promise<{ result: (ClassificationResponse & { requestId?: string }) | null; requestId?: string }>,
+      apiPromise: (multi?: boolean, tierResults?: { tier1?: { itemName: string; confidence: number }[]; tier2?: { itemName: string; confidence: number }[] }) => Promise<{ result: (ClassificationResponse & { requestId?: string }) | null; requestId?: string; multiResults?: ClassificationResponse[] }>,
       apiController: AbortController,
       fireApiInParallel: boolean,
       yoloDetections: YoloDetection[],
@@ -932,21 +939,27 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       /** Detections needing material sub-classification (bottle, cup, etc.). */
       subclassDetections: (YoloDetection & { _bboxX: number; subclassContext: Tier1SubclassContext })[] = [],
     ) {
-      type ApiResult = Promise<{ result: (ClassificationResponse & { requestId?: string }) | null; requestId?: string }>;
+      type ApiResult = Promise<{ result: (ClassificationResponse & { requestId?: string }) | null; requestId?: string; multiResults?: ClassificationResponse[] }>;
       // Start API call in parallel if confidence is very low
       let apiInflight: ApiResult | null = null;
       // Derive T1 hints from YOLO detections (available for all apiPromise calls in this scope)
       type TrType = { tier1?: { itemName: string; confidence: number }[]; tier2?: { itemName: string; confidence: number }[] };
-      const tier1HintsLocal = yoloDetections.filter(d => !isYoloClassNotWaste(d.className))
-        .map(d => ({ itemName: d.className, confidence: d.confidence }));
-      const buildTr = (t2?: { itemName: string; confidence: number }[]): TrType | undefined => {
-        const tr: TrType = {};
-        if (tier1HintsLocal.length > 0) tr.tier1 = tier1HintsLocal;
-        if (t2?.length) tr.tier2 = t2;
-        return (tr.tier1 || tr.tier2) ? tr : undefined;
+      // ALL T1 detections for diagnostic logging — exclude "person" (always present), top 5 by confidence
+      const tier1AllHints = yoloDetections
+        .filter(d => d.className !== "person")
+        .map(d => ({ itemName: d.className, confidence: d.confidence }))
+        .sort((a, b) => b.confidence - a.confidence)
+        .slice(0, 5);
+      // Waste-only T1 detections for control-flow decisions
+      const tier1WasteHints = tier1AllHints.filter(d => !isYoloClassNotWaste(d.itemName));
+      const buildTr = (t2?: { itemName: string; confidence: number }[]): TrType => {
+        return {
+          tier1: tier1AllHints,
+          ...(t2 !== undefined && { tier2: t2 }),
+        };
       };
 
-      if (fireApiInParallel && unresolvedDetections.length === 0 && zeroBboxFallback && tier1HintsLocal.length > 0) {
+      if (fireApiInParallel && unresolvedDetections.length === 0 && zeroBboxFallback && tier1WasteHints.length > 0) {
         // Fire API in parallel only when we have T1 waste detections (T2 data not yet available).
         // Skip parallel fire when T1 found zero waste — wait for T2 to complete first
         // so tier results are included in the request.
@@ -994,11 +1007,10 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
             locale: localeRef.current,
             meta,
             tierResults: (() => {
-              const tr: { tier1?: { itemName: string; confidence: number }[]; tier2?: { itemName: string; confidence: number }[] } = {};
-              const wasteT1 = yoloDetections.filter(d => !isYoloClassNotWaste(d.className));
-              if (wasteT1.length > 0) tr.tier1 = wasteT1.map(d => ({ itemName: d.className, confidence: d.confidence }));
-              if (worldHints?.length) tr.tier2 = worldHints.map(d => ({ itemName: d.className, confidence: d.confidence }));
-              return (tr.tier1 || tr.tier2) ? tr : undefined;
+              return {
+                tier1: tier1AllHints,
+                ...(worldHints !== undefined && { tier2: worldHints.map(d => ({ itemName: d.className, confidence: d.confidence })) }),
+              };
             })(),
           }),
         });
@@ -1039,6 +1051,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
                 confidence: det.subclassContext.confidence,
                 tier2Results: tier2ResultsForContext,
               },
+              tierResults: buildTr(tier2ResultsForContext.length > 0 ? tier2ResultsForContext.map(d => ({ itemName: d.className, confidence: d.confidence })) : undefined),
             }),
           });
           if (!res.ok) continue;
@@ -1090,8 +1103,9 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
         } else {
           const promise = apiInflight ?? apiPromise(zeroBboxFallback, buildTr());
           promise
-            .then(({ result: r, requestId }) => {
-              if (r) mergeAndDeliver([], [r as ClassificationResponse & { _bboxX?: number }], [requestId]);
+            .then(({ result: r, requestId, multiResults }) => {
+              const apiResults = (multiResults ?? (r ? [r] : [])).map(item => item as ClassificationResponse & { _bboxX?: number });
+              if (apiResults.length > 0) mergeAndDeliver([], apiResults, apiResults.map(() => requestId));
               else handleClassificationError(new Error("API returned no result"));
             })
             .catch((err) => {
@@ -1125,11 +1139,10 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
               if (compoundResult) {
                 console.log(`[tier2] PET bottle compound: ${worldDetections.map(d => d.className).join(" + ")} in ${worldMs}ms`);
                 apiController.abort();
-                const t1Waste = yoloDetections.filter(d => !isYoloClassNotWaste(d.className));
                 logYoloOnlyResult(video, compoundResult, [...yoloDetections, ...worldDetections], yoloMs + worldMs, analysis, "yolo-world",
                   undefined, undefined,
                   {
-                    ...(t1Waste.length > 0 && { tier1: t1Waste.map(d => ({ itemName: d.className, confidence: d.confidence })) }),
+                    tier1: tier1AllHints,
                     tier2: worldDetections.map(d => ({ itemName: d.className, confidence: d.confidence })),
                   });
                 mergeAndDeliver([compoundResult], [], []);
@@ -1260,10 +1273,9 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
                 console.log(`[tier2] YOLO World HIT: ${tier2Results.map(r => `${r.itemName} [${r.wasteStream}]`).join(" + ")} in ${worldMs}ms`);
                 apiController.abort();
                 const primary = tier2Results[0];
-                const t1Waste2 = yoloDetections.filter(d => !isYoloClassNotWaste(d.className));
                 logYoloOnlyResult(video, primary, [...yoloDetections, ...worldDetections], yoloMs + worldMs, analysis, "yolo-world", undefined, undefined,
                   {
-                    ...(t1Waste2.length > 0 && { tier1: t1Waste2.map(d => ({ itemName: d.className, confidence: d.confidence })) }),
+                    tier1: tier1AllHints,
                     tier2: worldDetections.map(d => ({ itemName: d.className, confidence: d.confidence })),
                   });
                 mergeAndDeliver(tier2Results, [], []);
@@ -1287,13 +1299,12 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
               const primary = allResolved[0];
               if (primary) {
                 const primaryIsT2 = tier2Results.includes(primary);
-                const wasteT1All = yoloDetections.filter(d => !isYoloClassNotWaste(d.className));
                 logYoloOnlyResult(
                   video, primary, [...yoloDetections, ...worldDetections], yoloMs + worldMs, analysis,
                   primaryIsT2 ? "yolo-world" : "yolo-local",
                   undefined, undefined,
                   {
-                    ...(wasteT1All.length > 0 && { tier1: wasteT1All.map(d => ({ itemName: d.className, confidence: d.confidence })) }),
+                    tier1: tier1AllHints,
                     tier2: worldDetections.map(d => ({ itemName: d.className, confidence: d.confidence })),
                   },
                 );
@@ -1350,8 +1361,9 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
             const t2Hints = worldDetections.map(d => ({ itemName: d.className, confidence: d.confidence }));
             const promise = apiInflight ?? apiPromise(true, buildTr(t2Hints));
             promise
-              .then(({ result: r, requestId }) => {
-                if (r) mergeAndDeliver(tier2Results, [r as ClassificationResponse & { _bboxX?: number }], [requestId]);
+              .then(({ result: r, requestId, multiResults }) => {
+                const apiResults = (multiResults ?? (r ? [r] : [])).map(item => item as ClassificationResponse & { _bboxX?: number });
+                if (apiResults.length > 0) mergeAndDeliver(tier2Results, apiResults, apiResults.map(() => requestId));
                 else if (tier1Results.length + tier2Results.length > 0) mergeAndDeliver(tier2Results, [], []);
                 else handleClassificationError(new Error("API returned no result"));
               })
@@ -1385,8 +1397,9 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           } else {
             const promise = apiInflight ?? apiPromise(zeroBboxFallback, buildTr());
             promise
-              .then(({ result: r, requestId }) => {
-                if (r) mergeAndDeliver([], [r as ClassificationResponse & { _bboxX?: number }], [requestId]);
+              .then(({ result: r, requestId, multiResults }) => {
+                const apiResults = (multiResults ?? (r ? [r] : [])).map(item => item as ClassificationResponse & { _bboxX?: number });
+                if (apiResults.length > 0) mergeAndDeliver([], apiResults, apiResults.map(() => requestId));
                 else handleClassificationError(new Error("API returned no result"));
               })
               .catch(handleClassificationError);
@@ -1579,7 +1592,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       /** When true, uses multi-item prompt — for zero-detection fallback. */
       multi?: boolean,
       tierResults?: { tier1?: { itemName: string; confidence: number }[]; tier2?: { itemName: string; confidence: number }[] },
-    ): Promise<{ result: (ClassificationResponse & { requestId?: string }) | null; requestId?: string }> {
+    ): Promise<{ result: (ClassificationResponse & { requestId?: string }) | null; requestId?: string; multiResults?: ClassificationResponse[] }> {
       // Send the same center short-side square that YOLO sees to the API.
       const procStart = Date.now();
       const vw = video.videoWidth;
@@ -1628,7 +1641,8 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
 
       const result = await classify(frame, meta, yoloDetections, materialHint, multi, tierResults);
-      return { result, requestId: result.requestId };
+      const multiResults = (result as ClassificationResponse & { _multiResults?: ClassificationResponse[] })._multiResults;
+      return { result, requestId: result.requestId, multiResults };
     }
   }, [classify, transition, T]);
 

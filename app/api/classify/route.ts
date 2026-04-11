@@ -533,34 +533,37 @@ export async function POST(request: Request) {
         return { result, raw };
       });
 
-      // Background logging for first item
+      // Background logging for all multi-item results
       if (multiResults.length > 0) {
-        const first = multiResults[0];
         const logTimestamp = new Date().toISOString();
+        const clientTierResults = (data as z.infer<typeof SingleRequestSchema>).tierResults as { tier1?: { itemName: string; confidence: number }[]; tier2?: { itemName: string; confidence: number }[] } | undefined
+          ?? (() => {
+            const yd = (data as z.infer<typeof SingleRequestSchema>).yoloDetections as YoloDetectionLog[] | undefined;
+            return yd?.length ? { tier1: yd.map(d => ({ itemName: d.className, confidence: d.confidence })) } : undefined;
+          })();
         runInBackground(
           Promise.all([
-            recordCalibrationPrediction(first.result.confidence, "mini"),
-            uploadFrameToBlob(image, first.result.itemName, first.result.wasteStream, logTimestamp),
+            recordCalibrationPrediction(multiResults[0].result.confidence, "mini"),
+            uploadFrameToBlob(image, multiResults[0].result.itemName, multiResults[0].result.wasteStream, logTimestamp),
           ]).then(([, imageUrl]) =>
-            logPilotEntry({
-              timestamp: logTimestamp,
-              modelUsed: "mini",
-              escalated: false,
-              itemName: first.result.itemName,
-              wasteStream: first.result.wasteStream,
-              confidence: first.result.confidence,
-              requiresVerification: first.result.needsReview,
-              latencyMs: totalServerMs,
-              imageUrl,
-              blobUploadFailed: !imageUrl,
-              requestId,
-              meta: meta as ClassifyMeta | undefined,
-              overrideApplied: first.result.wasteStream !== first.raw.wasteStream,
-              tierResults: (() => {
-                const yd = (data as z.infer<typeof SingleRequestSchema>).yoloDetections as YoloDetectionLog[] | undefined;
-                return yd?.length ? { tier1: yd.map(d => ({ itemName: d.className, confidence: d.confidence })) } : undefined;
-              })(),
-            })
+            Promise.all(multiResults.map((item, i) =>
+              logPilotEntry({
+                timestamp: logTimestamp,
+                modelUsed: "mini",
+                escalated: false,
+                itemName: item.result.itemName,
+                wasteStream: item.result.wasteStream,
+                confidence: item.result.confidence,
+                requiresVerification: item.result.needsReview,
+                latencyMs: totalServerMs,
+                imageUrl,
+                blobUploadFailed: !imageUrl,
+                requestId: i === 0 ? requestId : `${requestId}-${i}`,
+                meta: meta as ClassifyMeta | undefined,
+                overrideApplied: item.result.wasteStream !== item.raw.wasteStream,
+                tierResults: clientTierResults,
+              })
+            ))
           )
         );
       }

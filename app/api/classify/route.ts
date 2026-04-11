@@ -17,6 +17,7 @@ import { redis } from "@/lib/redis";
 import { generateRequestId } from "@/lib/request-id";
 
 import { recordCalibrationPrediction } from "@/lib/calibration";
+import { isYoloClassNotWaste } from "@/lib/yolo-rules";
 
 // ── Shared sub-schemas ──
 const MetaSchema = z.object({
@@ -600,7 +601,8 @@ export async function POST(request: Request) {
           tr.tier2 = t1Ctx.tier2Results.map(r => ({ itemName: r.className, confidence: r.confidence }));
         }
       } else if (yoloDetections && (yoloDetections as YoloDetectionLog[]).length > 0) {
-        tr.tier1 = (yoloDetections as YoloDetectionLog[]).map(d => ({ itemName: d.className, confidence: d.confidence }));
+        const wasteOnly = (yoloDetections as YoloDetectionLog[]).filter(d => !isYoloClassNotWaste(d.className));
+        if (wasteOnly.length > 0) tr.tier1 = wasteOnly.map(d => ({ itemName: d.className, confidence: d.confidence }));
       }
       return (tr.tier1 || tr.tier2) ? tr : undefined;
     })();

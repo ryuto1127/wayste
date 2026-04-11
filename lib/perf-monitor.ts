@@ -21,6 +21,8 @@ export interface PerfSample {
   worldMs: number | null;
   /** Whether thermal throttling was active */
   throttling: boolean;
+  /** Avg/baseline ratio at this moment (0 = no baseline yet) */
+  thermalRatio: number;
 }
 
 export interface PerfStats {
@@ -256,6 +258,7 @@ class PerfMonitor {
       yoloMs,
       worldMs,
       throttling: this._lastThrottling,
+      thermalRatio: this._thermalRatio,
     };
 
     // Write locally

@@ -6,10 +6,12 @@ import { perfMonitor, type PerfSample, type PerfStats, type ThermalEvent } from 
 // ── Chart constants ──
 
 const CHART_W = 800;
-const CHART_H = 200;
+const THERMAL_STRIP_H = 20;
+const THERMAL_GAP = 6;
+const CHART_H = 200 + THERMAL_STRIP_H + THERMAL_GAP;
 const PADDING = { top: 20, right: 60, bottom: 30, left: 50 };
 const PLOT_W = CHART_W - PADDING.left - PADDING.right;
-const PLOT_H = CHART_H - PADDING.top - PADDING.bottom;
+const PLOT_H = CHART_H - PADDING.top - PADDING.bottom - THERMAL_STRIP_H - THERMAL_GAP;
 
 // Colors
 const CV_COLOR = "#38bdf8";      // sky-400
@@ -89,11 +91,15 @@ export function PerformancePanel() {
                 style={{ width: CHART_W, height: CHART_H }}
               />
               {/* Legend */}
-              <div className="flex gap-4 mt-2 text-xs">
+              <div className="flex gap-4 mt-2 text-xs flex-wrap">
                 <LegendItem color={CV_COLOR} label="CV analysis (ms)" />
                 <LegendItem color={FPS_COLOR} label="Frame rate (fps)" />
                 <LegendItem color={YOLO_COLOR} label="YOLO T1 (ms)" dot />
                 <LegendItem color={WORLD_COLOR} label="YOLO World T2 (ms)" dot />
+                <div className="flex items-center gap-1.5 text-neutral-400">
+                  <span className="w-4 h-2 rounded-sm" style={{ background: "linear-gradient(to right, #065f46, #fbbf24, #f87171)" }} />
+                  Thermal ratio
+                </div>
               </div>
             </div>
           )}
@@ -352,6 +358,67 @@ function drawChart(ctx: CanvasRenderingContext2D, samples: PerfSample[]): void {
       ctx.fill();
     }
   }
+
+  // ── Thermal ratio strip ──
+  // Color-coded bar below the main chart showing thermal danger over time.
+  const stripTop = PADDING.top + PLOT_H + THERMAL_GAP + 20; // 20 = space for time labels
+  const stripH = THERMAL_STRIP_H;
+  const barW = Math.max(xScale, 1);
+
+  // Background
+  ctx.fillStyle = "#1a1a1a";
+  ctx.fillRect(PADDING.left, stripTop, PLOT_W, stripH);
+
+  // Label
+  ctx.fillStyle = TEXT_COLOR;
+  ctx.font = "9px monospace";
+  ctx.textAlign = "right";
+  ctx.fillText("thermal", PADDING.left - 6, stripTop + stripH / 2 + 3);
+
+  // Threshold labels on right
+  ctx.textAlign = "left";
+  ctx.fillStyle = "#666";
+  ctx.fillText("2.5x", PADDING.left + PLOT_W + 6, stripTop + stripH / 2 + 3);
+
+  for (let i = 0; i < samples.length; i++) {
+    const ratio = samples[i].thermalRatio;
+    if (!ratio || ratio === 0) continue;
+    const x = toX(i) - barW / 2;
+
+    // Color: green → yellow → red mapped to 0.5–2.5
+    ctx.fillStyle = ratioToColor(ratio);
+    ctx.fillRect(x, stripTop, barW + 0.5, stripH);
+  }
+
+  // Draw threshold lines at 1.5x and 2.0x
+  const ratio1_5 = 1.5 / 2.5; // position within strip
+  const ratio2_0 = 2.0 / 2.5;
+  ctx.strokeStyle = "rgba(255,255,255,0.2)";
+  ctx.lineWidth = 0.5;
+  ctx.setLineDash([3, 3]);
+  // Vertical reference lines aren't meaningful here — draw as thin horizontal markers at edges
+  // Instead, we'll just outline the strip
+  ctx.setLineDash([]);
+  ctx.strokeStyle = "#333";
+  ctx.lineWidth = 0.5;
+  ctx.strokeRect(PADDING.left, stripTop, PLOT_W, stripH);
+}
+
+/** Map thermal ratio to a green→yellow→red color. */
+function ratioToColor(ratio: number): string {
+  // Clamp to 0.5–2.5 range for color mapping
+  const t = Math.max(0, Math.min(1, (ratio - 0.5) / 2.0)); // 0 at 0.5x, 1 at 2.5x
+  if (t < 0.5) {
+    // Green → Yellow (0.5x–1.5x)
+    const g = Math.round(209 - t * 2 * 80);  // 209 → 129
+    const r = Math.round(6 + t * 2 * 245);   // 6 → 251
+    return `rgb(${r},${g},52)`;
+  }
+  // Yellow → Red (1.5x–2.5x)
+  const u = (t - 0.5) * 2; // 0–1
+  const r = Math.round(251 - u * 3);   // stays ~248
+  const g = Math.round(129 - u * 100); // 129 → 29
+  return `rgb(${r},${g},36)`;
 }
 
 // ── Small helper components ──

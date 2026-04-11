@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { perfMonitor, type PerfSample, type PerfStats, type ThermalEvent } from "@/lib/perf-monitor";
+import { perfMonitor, type PerfSample, type PerfStats, type ThermalEvent, type TimeScale } from "@/lib/perf-monitor";
 
 // ── Chart constants ──
 
@@ -32,14 +32,15 @@ export function PerformancePanel() {
   const [thermalLog, setThermalLog] = useState<ThermalEvent[]>([]);
   const [throttling, setThrottling] = useState(false);
   const [thermalRatio, setThermalRatio] = useState(0);
+  const [scale, setScale] = useState<TimeScale>("10m");
 
   const refresh = useCallback(() => {
-    setSamples(perfMonitor.getSamples());
+    setSamples(perfMonitor.getSamples(scale));
     setStats(perfMonitor.getLifetimeStats());
     setThermalLog(perfMonitor.getThermalLog());
     setThrottling(perfMonitor.isThrottling());
     setThermalRatio(perfMonitor.getThermalRatio());
-  }, []);
+  }, [scale]);
 
   // Subscribe to updates + poll every second when open
   useEffect(() => {
@@ -57,8 +58,8 @@ export function PerformancePanel() {
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    drawChart(ctx, samples);
-  }, [open, samples]);
+    drawChart(ctx, samples, scale);
+  }, [open, samples, scale]);
 
   const hasSamples = samples.length > 0;
 
@@ -73,8 +74,25 @@ export function PerformancePanel() {
 
       {open && (
         <div className="mt-3 bg-neutral-900 border border-neutral-800 rounded-xl p-4 space-y-4">
-          {/* Thermal gauge */}
-          <ThermalGauge ratio={thermalRatio} throttling={throttling} />
+          {/* Scale selector + thermal gauge */}
+          <div className="flex items-center justify-between gap-4">
+            <ThermalGauge ratio={thermalRatio} throttling={throttling} />
+            <div className="flex gap-1 shrink-0">
+              {(["10m", "1h", "24h"] as const).map((s) => (
+                <button
+                  key={s}
+                  onClick={() => setScale(s)}
+                  className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
+                    scale === s
+                      ? "bg-neutral-700 text-white"
+                      : "bg-neutral-800 text-neutral-500 hover:text-neutral-300"
+                  }`}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          </div>
 
           {!hasSamples && (
             <p className="text-xs text-neutral-600">Waiting for kiosk data...</p>
@@ -194,7 +212,7 @@ function ThermalGauge({ ratio, throttling }: { ratio: number; throttling: boolea
         : "#f87171"; // red-400
 
   return (
-    <div>
+    <div className="flex-1 min-w-0">
       <div className="flex items-center justify-between mb-1.5">
         <label className="text-xs text-neutral-400">Thermal state</label>
         <span
@@ -238,7 +256,7 @@ function ThermalGauge({ ratio, throttling }: { ratio: number; throttling: boolea
 
 // ── Chart drawing ──
 
-function drawChart(ctx: CanvasRenderingContext2D, samples: PerfSample[]): void {
+function drawChart(ctx: CanvasRenderingContext2D, samples: PerfSample[], scale: TimeScale = "10m"): void {
   const w = CHART_W;
   const h = CHART_H;
 
@@ -312,11 +330,11 @@ function drawChart(ctx: CanvasRenderingContext2D, samples: PerfSample[]): void {
     const x = toX(idx);
     const sec = samples[idx].ts;
     const d = new Date(sec * 1000);
-    ctx.fillText(
-      `${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}:${d.getSeconds().toString().padStart(2, "0")}`,
-      x,
-      PADDING.top + PLOT_H + 16,
-    );
+    const hh = d.getHours().toString().padStart(2, "0");
+    const mm = d.getMinutes().toString().padStart(2, "0");
+    const ss = d.getSeconds().toString().padStart(2, "0");
+    const timeLabel = scale === "24h" ? `${hh}:${mm}` : `${hh}:${mm}:${ss}`;
+    ctx.fillText(timeLabel, x, PADDING.top + PLOT_H + 16);
   }
 
   // Draw CV analysis line

@@ -3,7 +3,11 @@
  *
  * KioskDisplay writes metrics here; the /review page reads them for visualization.
  * Uses BroadcastChannel to sync data across tabs (kiosk tab → review tab).
- * Stores 600 seconds of 1-sample-per-second data in a circular buffer.
+ *
+ * Three resolution tiers:
+ *   - "10m": 600 samples, 1/sec  (10 minutes)
+ *   - "1h":  360 samples, 10/sec (1 hour)
+ *   - "24h": 1440 samples, 1/min (24 hours)
  */
 
 // ── Types ──
@@ -11,9 +15,9 @@
 export interface PerfSample {
   /** Unix timestamp (seconds) */
   ts: number;
-  /** Average CV analysis time (ms) for frames in this second */
+  /** Average CV analysis time (ms) */
   cvMs: number;
-  /** Number of analyze() calls in this second */
+  /** Number of analyze() calls (per-second for 10m, averaged for coarser) */
   frameCount: number;
   /** YOLO Tier 1 inference time (ms), or null if not fired */
   yoloMs: number | null;
@@ -37,12 +41,25 @@ export interface ThermalEvent {
   throttling: boolean;
 }
 
+export type TimeScale = "10m" | "1h" | "24h";
+
 type PerfListener = () => void;
 
 // ── Constants ──
 
-const BUFFER_SIZE = 600; // 10 minutes at 1 sample/sec
 const CHANNEL_NAME = "perf-monitor";
+
+interface TierConfig {
+  size: number;
+  /** How many 1-sec samples to aggregate into one entry */
+  bucketSec: number;
+}
+
+const TIERS: Record<TimeScale, TierConfig> = {
+  "10m": { size: 600, bucketSec: 1 },
+  "1h":  { size: 360, bucketSec: 10 },
+  "24h": { size: 1440, bucketSec: 60 },
+};
 
 // ── BroadcastChannel message types ──
 
@@ -50,13 +67,101 @@ type PerfMessage =
   | { type: "sample"; sample: PerfSample; thermalRatio: number }
   | { type: "thermal"; throttling: boolean; ratio: number; event?: ThermalEvent };
 
+// ── Circular buffer helper ──
+
+class CircularBuffer {
+  private _buf: PerfSample[];
+  private _wi = 0;
+  private _size = 0;
+  private _cap: number;
+
+  constructor(capacity: number) {
+    this._cap = capacity;
+    this._buf = new Array<PerfSample>(capacity);
+  }
+
+  push(sample: PerfSample): void {
+    this._buf[this._wi] = sample;
+    this._wi = (this._wi + 1) % this._cap;
+    if (this._size < this._cap) this._size++;
+  }
+
+  toArray(): PerfSample[] {
+    if (this._size === 0) return [];
+    const result: PerfSample[] = [];
+    const start = this._size < this._cap ? 0 : this._wi;
+    for (let i = 0; i < this._size; i++) {
+      const idx = (start + i) % this._cap;
+      if (this._buf[idx]) result.push(this._buf[idx]);
+    }
+    return result;
+  }
+}
+
+// ── Downsampling accumulator ──
+
+class DownsampleAcc {
+  private _bucketSec: number;
+  private _currentBucket = 0;
+  private _samples: PerfSample[] = [];
+  private _target: CircularBuffer;
+
+  constructor(bucketSec: number, target: CircularBuffer) {
+    this._bucketSec = bucketSec;
+    this._target = target;
+  }
+
+  add(sample: PerfSample): void {
+    const bucket = Math.floor(sample.ts / this._bucketSec);
+    if (this._currentBucket === 0) {
+      this._currentBucket = bucket;
+    }
+    if (bucket !== this._currentBucket) {
+      this._flush();
+      this._currentBucket = bucket;
+    }
+    this._samples.push(sample);
+  }
+
+  private _flush(): void {
+    if (this._samples.length === 0) return;
+    const n = this._samples.length;
+    let cvSum = 0, fpsSum = 0, yoloSum = 0, yoloN = 0, worldSum = 0, worldN = 0;
+    let ratioSum = 0, throttleCount = 0;
+
+    for (const s of this._samples) {
+      cvSum += s.cvMs;
+      fpsSum += s.frameCount;
+      if (s.yoloMs !== null) { yoloSum += s.yoloMs; yoloN++; }
+      if (s.worldMs !== null) { worldSum += s.worldMs; worldN++; }
+      ratioSum += s.thermalRatio;
+      if (s.throttling) throttleCount++;
+    }
+
+    this._target.push({
+      ts: this._samples[0].ts,
+      cvMs: cvSum / n,
+      frameCount: Math.round(fpsSum / n),
+      yoloMs: yoloN > 0 ? yoloSum / yoloN : null,
+      worldMs: worldN > 0 ? worldSum / worldN : null,
+      throttling: throttleCount > n / 2,
+      thermalRatio: ratioSum / n,
+    });
+    this._samples = [];
+  }
+}
+
 // ── Singleton ──
 
 class PerfMonitor {
-  // Circular buffer
-  private _buffer: PerfSample[] = [];
-  private _writeIndex = 0;
-  private _size = 0;
+  // Tiered buffers
+  private _buf10m = new CircularBuffer(TIERS["10m"].size);
+  private _buf1h = new CircularBuffer(TIERS["1h"].size);
+  private _buf24h = new CircularBuffer(TIERS["24h"].size);
+
+  // Downsamplers feed coarser buffers
+  private _ds1h = new DownsampleAcc(TIERS["1h"].bucketSec, this._buf1h);
+  private _ds24h = new DownsampleAcc(TIERS["24h"].bucketSec, this._buf24h);
 
   // Accumulator for current second
   private _currentSecond = 0;
@@ -71,7 +176,7 @@ class PerfMonitor {
   private _lifetimeYolo = { sum: 0, min: Infinity, max: -Infinity, count: 0 };
   private _lifetimeWorld = { sum: 0, min: Infinity, max: -Infinity, count: 0 };
 
-  /** Current ratio of avg analysis time to baseline (1.0 = at baseline, 2.0 = throttle trigger). */
+  /** Current ratio of avg analysis time to baseline. */
   private _thermalRatio = 0;
   private _lastRatioBroadcast = 0;
 
@@ -85,16 +190,14 @@ class PerfMonitor {
   private _channel: BroadcastChannel | null = null;
 
   constructor() {
-    this._buffer = new Array<PerfSample>(BUFFER_SIZE);
-
-    // Set up cross-tab receiver (safe for SSR — BroadcastChannel is browser-only)
     if (typeof BroadcastChannel !== "undefined") {
       this._channel = new BroadcastChannel(CHANNEL_NAME);
       this._channel.onmessage = (ev: MessageEvent<PerfMessage>) => {
         const msg = ev.data;
         if (msg.type === "sample") {
-          this._ingestSample(msg.sample);
+          this._commitSample(msg.sample);
           this._thermalRatio = msg.thermalRatio;
+          this._notify();
         } else if (msg.type === "thermal") {
           this._thermalRatio = msg.ratio;
           this._lastThrottling = msg.throttling;
@@ -132,22 +235,15 @@ class PerfMonitor {
       this._thermalLog.push(event);
       if (this._thermalLog.length > 100) this._thermalLog.shift();
       this._lastThrottling = throttling;
-      // Broadcast thermal transition to other tabs
       this._channel?.postMessage({
-        type: "thermal",
-        throttling,
-        ratio: this._thermalRatio,
-        event,
+        type: "thermal", throttling, ratio: this._thermalRatio, event,
       } satisfies PerfMessage);
     } else if (ratio !== undefined) {
-      // Ratio updated but no state change — broadcast at most once per second for gauge
       const now = Date.now();
       if (now - this._lastRatioBroadcast > 1000) {
         this._lastRatioBroadcast = now;
         this._channel?.postMessage({
-          type: "thermal",
-          throttling,
-          ratio: this._thermalRatio,
+          type: "thermal", throttling, ratio: this._thermalRatio,
         } satisfies PerfMessage);
       }
     }
@@ -155,30 +251,18 @@ class PerfMonitor {
 
   // ── Read API (called from /review PerformancePanel) ──
 
-  /** Returns avg/baseline ratio. 0 = no data, 1.0 = baseline, >=2.0 = throttling. */
-  getThermalRatio(): number {
-    return this._thermalRatio;
-  }
+  getThermalRatio(): number { return this._thermalRatio; }
 
-  /** Returns ordered samples from oldest to newest. */
-  getSamples(): PerfSample[] {
+  getSamples(scale: TimeScale = "10m"): PerfSample[] {
     this._flushCurrentSecond();
-    if (this._size === 0) return [];
-    const result: PerfSample[] = [];
-    const start = this._size < BUFFER_SIZE ? 0 : this._writeIndex;
-    for (let i = 0; i < this._size; i++) {
-      const idx = (start + i) % BUFFER_SIZE;
-      if (this._buffer[idx]) result.push(this._buffer[idx]);
+    switch (scale) {
+      case "10m": return this._buf10m.toArray();
+      case "1h":  return this._buf1h.toArray();
+      case "24h": return this._buf24h.toArray();
     }
-    return result;
   }
 
-  getLifetimeStats(): {
-    cv: PerfStats;
-    fps: PerfStats;
-    yolo: PerfStats;
-    world: PerfStats;
-  } {
+  getLifetimeStats() {
     return {
       cv: this._toStats(this._lifetimeCv),
       fps: this._toStats(this._lifetimeFps),
@@ -187,13 +271,8 @@ class PerfMonitor {
     };
   }
 
-  getThermalLog(): ThermalEvent[] {
-    return [...this._thermalLog];
-  }
-
-  isThrottling(): boolean {
-    return this._lastThrottling;
-  }
+  getThermalLog(): ThermalEvent[] { return [...this._thermalLog]; }
+  isThrottling(): boolean { return this._lastThrottling; }
 
   subscribe(fn: PerfListener): () => void {
     this._listeners.add(fn);
@@ -202,19 +281,17 @@ class PerfMonitor {
 
   // ── Internal ──
 
-  /** Ingest a sample received from another tab via BroadcastChannel. */
-  private _ingestSample(sample: PerfSample): void {
-    this._buffer[this._writeIndex] = sample;
-    this._writeIndex = (this._writeIndex + 1) % BUFFER_SIZE;
-    if (this._size < BUFFER_SIZE) this._size++;
+  /** Write a sample to all tier buffers + lifetime stats. */
+  private _commitSample(sample: PerfSample): void {
+    this._buf10m.push(sample);
+    this._ds1h.add(sample);
+    this._ds24h.add(sample);
 
     this._accumulate(this._lifetimeCv, sample.cvMs);
     this._accumulate(this._lifetimeFps, sample.frameCount);
     if (sample.yoloMs !== null) this._accumulate(this._lifetimeYolo, sample.yoloMs);
     if (sample.worldMs !== null) this._accumulate(this._lifetimeWorld, sample.worldMs);
     this._lastThrottling = sample.throttling;
-
-    this._notify();
   }
 
   private _notify(): void {
@@ -229,10 +306,7 @@ class PerfMonitor {
 
   private _ensureSecond(): void {
     const sec = this._nowSecond();
-    if (this._currentSecond === 0) {
-      this._currentSecond = sec;
-      return;
-    }
+    if (this._currentSecond === 0) { this._currentSecond = sec; return; }
     if (sec !== this._currentSecond) {
       this._flushCurrentSecond();
       this._currentSecond = sec;
@@ -261,25 +335,13 @@ class PerfMonitor {
       thermalRatio: this._thermalRatio,
     };
 
-    // Write locally
-    this._buffer[this._writeIndex] = sample;
-    this._writeIndex = (this._writeIndex + 1) % BUFFER_SIZE;
-    if (this._size < BUFFER_SIZE) this._size++;
-
-    // Update lifetime stats
-    this._accumulate(this._lifetimeCv, cvAvg);
-    this._accumulate(this._lifetimeFps, frameCount);
-    if (yoloMs !== null) this._accumulate(this._lifetimeYolo, yoloMs);
-    if (worldMs !== null) this._accumulate(this._lifetimeWorld, worldMs);
+    this._commitSample(sample);
 
     // Broadcast to other tabs
     this._channel?.postMessage({
-      type: "sample",
-      sample,
-      thermalRatio: this._thermalRatio,
+      type: "sample", sample, thermalRatio: this._thermalRatio,
     } satisfies PerfMessage);
 
-    // Reset accumulators
     this._cvDurations = [];
     this._yoloEvents = [];
     this._worldEvents = [];
@@ -308,5 +370,4 @@ class PerfMonitor {
   }
 }
 
-// Export singleton
 export const perfMonitor = new PerfMonitor();

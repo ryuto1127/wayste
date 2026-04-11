@@ -93,6 +93,7 @@ export function initYoloWorld(modelUrl = "/models/yolo-world-s.onnx"): Promise<b
 
       session = await ort.InferenceSession.create(modelUrl, {
         executionProviders: [provider],
+        graphOptimizationLevel: "all",
         logSeverityLevel: 3,
       });
 

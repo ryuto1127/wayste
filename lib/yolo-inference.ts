@@ -69,6 +69,7 @@ export function initYolo(modelUrl = "/models/yolo26m.onnx"): Promise<boolean> {
 
       session = await ort.InferenceSession.create(modelUrl, {
         executionProviders: [provider],
+        graphOptimizationLevel: "all",
         logSeverityLevel: 3,
       });
 
@@ -165,53 +166,94 @@ export async function runYoloInference(
     const results = await session.run({ images: inputTensor });
 
     // ── Postprocess ──
-    // Fine-tuned YOLO output shape: [1, 300, 6]
-    //   Each row: [x1, y1, x2, y2, confidence, classId]
-    //   300 = max detections (NMS already applied by the model)
+    // NMS-free output shape: [1, 84, 8400] (channels-first) or [1, 8400, 84] (rows-first)
+    //   84 = 4 (cx, cy, w, h) + 80 (COCO class scores)
+    //   8400 = candidate boxes (no NMS applied)
     const output = results[Object.keys(results)[0]];
     if (!output) return [];
 
     const outputData = output.data as Float32Array;
     const shape = output.dims;
 
-    const detections: YoloDetection[] = [];
+    const rawDetections: YoloDetection[] = [];
+    const numClasses = COCO_CLASSES.length; // 80
 
-    // Shape: [1, 300, 6] — post-NMS format
-    const numDetections = shape[1] as number;
-    const stride = shape[2] as number; // 6
+    // Detect layout: channels-first [1, 84, 8400] vs rows-first [1, 8400, 84]
+    const channelsFirst = (shape[1] as number) === numClasses + 4;
+    const numCandidates = channelsFirst ? (shape[2] as number) : (shape[1] as number);
 
-    for (let i = 0; i < numDetections; i++) {
-      const base = i * stride;
-      const x1 = outputData[base + 0];
-      const y1 = outputData[base + 1];
-      const x2 = outputData[base + 2];
-      const y2 = outputData[base + 3];
-      const confidence = outputData[base + 4];
-      const classId = Math.round(outputData[base + 5]);
+    for (let i = 0; i < numCandidates; i++) {
+      // Find best class score via argmax
+      let bestScore = -1;
+      let bestClassId = -1;
+      for (let c = 0; c < numClasses; c++) {
+        const score = channelsFirst
+          ? outputData[(4 + c) * numCandidates + i]
+          : outputData[i * (numClasses + 4) + 4 + c];
+        if (score > bestScore) {
+          bestScore = score;
+          bestClassId = c;
+        }
+      }
 
-      // Skip empty/invalid detections
-      if (confidence < confidenceThreshold) continue;
-      if (classId < 0 || classId >= COCO_CLASSES.length) continue;
+      if (bestScore < confidenceThreshold) continue;
+      if (bestClassId < 0 || bestClassId >= numClasses) continue;
 
-      const w = x2 - x1;
-      const h = y2 - y1;
-      const boxArea = w * h;
+      // Read box (cx, cy, w, h) in pixel coords (0-640)
+      const cx = channelsFirst ? outputData[0 * numCandidates + i] : outputData[i * (numClasses + 4) + 0];
+      const cy = channelsFirst ? outputData[1 * numCandidates + i] : outputData[i * (numClasses + 4) + 1];
+      const bw = channelsFirst ? outputData[2 * numCandidates + i] : outputData[i * (numClasses + 4) + 2];
+      const bh = channelsFirst ? outputData[3 * numCandidates + i] : outputData[i * (numClasses + 4) + 3];
+
+      const boxArea = bw * bh;
       if (boxArea < minBoxArea) continue;
 
-      detections.push({
-        classId,
-        className: COCO_CLASSES[classId],
-        confidence,
-        bbox: [x1, y1, w, h],
+      // Convert center format → corner format
+      const x1 = cx - bw / 2;
+      const y1 = cy - bh / 2;
+
+      rawDetections.push({
+        classId: bestClassId,
+        className: COCO_CLASSES[bestClassId],
+        confidence: bestScore,
+        bbox: [x1, y1, bw, bh],
       });
     }
 
     // Sort by confidence descending
-    detections.sort((a, b) => b.confidence - a.confidence);
+    rawDetections.sort((a, b) => b.confidence - a.confidence);
 
-    return detections;
+    // ── Greedy NMS (IoU threshold 0.5) ──
+    const NMS_IOU = 0.5;
+    const kept: YoloDetection[] = [];
+
+    for (const det of rawDetections) {
+      let dominated = false;
+      for (const k of kept) {
+        if (iou(det.bbox, k.bbox) > NMS_IOU) {
+          dominated = true;
+          break;
+        }
+      }
+      if (!dominated) kept.push(det);
+    }
+
+    return kept;
   } catch (err) {
     console.warn("[yolo] Inference error:", err);
     return [];
   }
+}
+
+/** Compute Intersection-over-Union for two [x, y, w, h] boxes. */
+function iou(a: [number, number, number, number], b: [number, number, number, number]): number {
+  const ax2 = a[0] + a[2], ay2 = a[1] + a[3];
+  const bx2 = b[0] + b[2], by2 = b[1] + b[3];
+  const ix1 = Math.max(a[0], b[0]);
+  const iy1 = Math.max(a[1], b[1]);
+  const ix2 = Math.min(ax2, bx2);
+  const iy2 = Math.min(ay2, by2);
+  const inter = Math.max(0, ix2 - ix1) * Math.max(0, iy2 - iy1);
+  const union = a[2] * a[3] + b[2] * b[3] - inter;
+  return union > 0 ? inter / union : 0;
 }

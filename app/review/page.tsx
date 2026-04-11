@@ -419,11 +419,14 @@ function EntryCard({
       {/* Tier results (intermediate pipeline decisions) */}
       {(() => {
         // Use tierResults if available; fallback to yoloDetections for older entries
-        const t1 = entry.tierResults?.tier1
+        // Show top 3 per tier, sorted by confidence descending
+        const top3 = (arr?: { itemName: string; confidence: number }[]) =>
+          arr?.slice().sort((a, b) => b.confidence - a.confidence).slice(0, 3);
+        const t1 = top3(entry.tierResults?.tier1
           ?? (entry.modelUsed !== "yolo-local" && entry.yoloDetections?.length
             ? entry.yoloDetections.map(d => ({ itemName: d.className, confidence: d.confidence }))
-            : undefined);
-        const t2 = entry.tierResults?.tier2;
+            : undefined));
+        const t2 = top3(entry.tierResults?.tier2);
         if (!t1?.length && !t2?.length) return null;
         return (
           <div className="flex flex-col gap-1 text-[11px]">

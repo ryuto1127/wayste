@@ -1241,8 +1241,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       );
 
       if (valid.length === 0) {
-        nothingDetectedCountRef.current++;
-        pendingItemRef.current = false;
+        nothingDetectedCountRef.current = 0;
         setStableResults([{
           itemName: "nothing_detected",
           wasteStream: "landfill",

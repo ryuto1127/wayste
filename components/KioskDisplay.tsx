@@ -27,6 +27,7 @@ import {
   YOLO_API_PARALLEL_THRESHOLD,
 } from "@/lib/inference-backend";
 import { computeThresholds, type ThresholdConfig, type Calibration } from "@/lib/threshold-config";
+import { perfMonitor } from "@/lib/perf-monitor";
 import { loadYoloRules, loadYoloWorldRules, resolveYoloDetection, resolveYoloWorldDetection, resolvePetBottleCompound, isYoloClassNotWaste } from "@/lib/yolo-rules";
 import { analyzeMaterial, refineClassName } from "@/lib/rgb-material-analyzer";
 import type { MaterialHint } from "@/lib/types";
@@ -392,6 +393,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
 
       // ── Thermal monitoring: track analysis duration ──
       const analysisDuration = performance.now() - analysisStart;
+      perfMonitor.recordCvFrame(analysisDuration);
       if (thermal.baselineSamples < 60) {
         // Collecting baseline (first ~2 seconds)
         thermal.durations.push(analysisDuration);
@@ -405,6 +407,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
         thermal.durations.push(analysisDuration);
         if (thermal.durations.length > 30) thermal.durations.shift();
         const avg = thermal.durations.reduce((a, b) => a + b, 0) / thermal.durations.length;
+        const ratio = avg / thermal.baseline;
         const wasThrottling = thermal.throttling;
         // Trigger at 2× baseline, recover at 1.5× baseline (hysteresis)
         if (avg > thermal.baseline * 2) {
@@ -412,6 +415,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
         } else if (avg < thermal.baseline * 1.5) {
           thermal.throttling = false;
         }
+        perfMonitor.recordThermalState(thermal.throttling, ratio);
         if (thermal.throttling !== wasThrottling) {
           console.log(`[thermal] ${thermal.throttling ? "⚠️ Throttling detected" : "✅ Throttling resolved"} (avg=${avg.toFixed(2)}ms, baseline=${thermal.baseline.toFixed(2)}ms)`);
           setThermalWarning(thermal.throttling);
@@ -705,6 +709,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       backend.detect(video)
         .then((detections) => {
           const yoloMs = Date.now() - yoloStart;
+          perfMonitor.recordYoloInference(yoloMs);
 
           if (detections.length > 0) {
             yoloDetectionLogs = toDetectionLogs(detections);
@@ -888,6 +893,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       backend.detectWorld(video)
         .then((worldDetections) => {
           const worldMs = Date.now() - worldStart;
+          perfMonitor.recordWorldInference(worldMs);
 
           if (worldDetections.length > 0) {
             // PET bottle compound check: bottle + cap/label detected together

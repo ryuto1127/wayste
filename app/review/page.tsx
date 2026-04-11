@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, Suspense } from "react";
 import { AdminNav } from "@/components/AdminNav";
+import { PerformancePanel } from "@/components/PerformancePanel";
 import type { PilotLogEntry } from "@/lib/types";
 import type { Locale } from "@/lib/i18n";
 import { t } from "@/lib/i18n";
@@ -220,6 +221,9 @@ function ImageReviewPage() {
             </button>
           )}
         </div>
+
+        {/* Performance monitoring */}
+        <PerformancePanel />
 
         {/* Analysis export */}
         <AnalysisExportPanel locale={locale} />

@@ -942,8 +942,10 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
         return (tr.tier1 || tr.tier2) ? tr : undefined;
       };
 
-      if (fireApiInParallel && unresolvedDetections.length === 0 && zeroBboxFallback) {
-        // Full-frame multi-item fallback — use multi-item prompt (T2 not yet available)
+      if (fireApiInParallel && unresolvedDetections.length === 0 && zeroBboxFallback && tier1HintsLocal.length > 0) {
+        // Fire API in parallel only when we have T1 waste detections (T2 data not yet available).
+        // Skip parallel fire when T1 found zero waste — wait for T2 to complete first
+        // so tier results are included in the request.
         apiInflight = apiPromise(true, buildTr());
       }
 

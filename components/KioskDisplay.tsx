@@ -295,14 +295,14 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
 
   // ── API call (with timeout + 429 retry) ──
   const classify = useCallback(
-    async (frame: string, meta: ClassifyMeta, yoloDetections?: YoloDetectionLog[], materialHint?: MaterialHint, multi?: boolean): Promise<ClassificationResponse & { requestId?: string }> => {
+    async (frame: string, meta: ClassifyMeta, yoloDetections?: YoloDetectionLog[], materialHint?: MaterialHint, multi?: boolean, tierResults?: { tier1?: { itemName: string; confidence: number }[]; tier2?: { itemName: string; confidence: number }[] }): Promise<ClassificationResponse & { requestId?: string }> => {
       const doFetch = async (): Promise<ClassificationResponse & { requestId?: string }> => {
         const fetchStartMs = Date.now();
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
 
         try {
-          const reqBody = { image: frame, meta, locale, yoloDetections, materialHint, ...(multi && { multi: true }) };
+          const reqBody = { image: frame, meta, locale, yoloDetections, materialHint, ...(multi && { multi: true }), ...(tierResults && { tierResults }) };
           const res = await fetch("/api/classify", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -728,7 +728,8 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       const apiController = new AbortController();
       let yoloDetectionLogs: YoloDetectionLog[] | undefined;
       let materialHintForApi: MaterialHint | undefined;
-      const apiPromise = (multi?: boolean) => classifyViaApiAsync(video, analysis, apiController.signal, yoloDetectionLogs, materialHintForApi, multi);
+      type TierHints = { tier1?: { itemName: string; confidence: number }[]; tier2?: { itemName: string; confidence: number }[] };
+      const apiPromise = (multi?: boolean, tierResults?: TierHints) => classifyViaApiAsync(video, analysis, apiController.signal, yoloDetectionLogs, materialHintForApi, multi, tierResults);
 
       if (!yoloReady || !backend) {
         // No YOLO at all — straight to API
@@ -912,7 +913,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       video: HTMLVideoElement,
       backend: InferenceBackend,
       yoloBest: { className: string; confidence: number } | null,
-      apiPromise: (multi?: boolean) => Promise<{ result: (ClassificationResponse & { requestId?: string }) | null; requestId?: string }>,
+      apiPromise: (multi?: boolean, tierResults?: { tier1?: { itemName: string; confidence: number }[]; tier2?: { itemName: string; confidence: number }[] }) => Promise<{ result: (ClassificationResponse & { requestId?: string }) | null; requestId?: string }>,
       apiController: AbortController,
       fireApiInParallel: boolean,
       yoloDetections: YoloDetection[],
@@ -930,9 +931,20 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       type ApiResult = Promise<{ result: (ClassificationResponse & { requestId?: string }) | null; requestId?: string }>;
       // Start API call in parallel if confidence is very low
       let apiInflight: ApiResult | null = null;
+      // Derive T1 hints from YOLO detections (available for all apiPromise calls in this scope)
+      type TrType = { tier1?: { itemName: string; confidence: number }[]; tier2?: { itemName: string; confidence: number }[] };
+      const tier1HintsLocal = yoloDetections.filter(d => !isYoloClassNotWaste(d.className))
+        .map(d => ({ itemName: d.className, confidence: d.confidence }));
+      const buildTr = (t2?: { itemName: string; confidence: number }[]): TrType | undefined => {
+        const tr: TrType = {};
+        if (tier1HintsLocal.length > 0) tr.tier1 = tier1HintsLocal;
+        if (t2?.length) tr.tier2 = t2;
+        return (tr.tier1 || tr.tier2) ? tr : undefined;
+      };
+
       if (fireApiInParallel && unresolvedDetections.length === 0 && zeroBboxFallback) {
-        // Full-frame multi-item fallback — use multi-item prompt
-        apiInflight = apiPromise(true);
+        // Full-frame multi-item fallback — use multi-item prompt (T2 not yet available)
+        apiInflight = apiPromise(true, buildTr());
       }
 
       /** Send per-bbox cropped images for unresolved detections via batch API. */
@@ -1070,7 +1082,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
               }
             });
         } else {
-          const promise = apiInflight ?? apiPromise(zeroBboxFallback);
+          const promise = apiInflight ?? apiPromise(zeroBboxFallback, buildTr());
           promise
             .then(({ result: r, requestId }) => {
               if (r) mergeAndDeliver([], [r as ClassificationResponse & { _bboxX?: number }], [requestId]);
@@ -1265,7 +1277,8 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
               });
           } else if (zeroBboxFallback && tier1Results.length + tier2Results.length === 0) {
             // Zero-detection fallback: send full frame to API (multi-item prompt)
-            const promise = apiInflight ?? apiPromise(true);
+            const t2Hints = worldDetections.map(d => ({ itemName: d.className, confidence: d.confidence }));
+            const promise = apiInflight ?? apiPromise(true, buildTr(t2Hints));
             promise
               .then(({ result: r, requestId }) => {
                 if (r) mergeAndDeliver(tier2Results, [r as ClassificationResponse & { _bboxX?: number }], [requestId]);
@@ -1300,7 +1313,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
               .then((batchResults) => mergeAndDeliver([], batchResults, []))
               .catch(handleClassificationError);
           } else {
-            const promise = apiInflight ?? apiPromise(zeroBboxFallback);
+            const promise = apiInflight ?? apiPromise(zeroBboxFallback, buildTr());
             promise
               .then(({ result: r, requestId }) => {
                 if (r) mergeAndDeliver([], [r as ClassificationResponse & { _bboxX?: number }], [requestId]);
@@ -1495,6 +1508,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       materialHint?: MaterialHint,
       /** When true, uses multi-item prompt — for zero-detection fallback. */
       multi?: boolean,
+      tierResults?: { tier1?: { itemName: string; confidence: number }[]; tier2?: { itemName: string; confidence: number }[] },
     ): Promise<{ result: (ClassificationResponse & { requestId?: string }) | null; requestId?: string }> {
       // Send the same center short-side square that YOLO sees to the API.
       const procStart = Date.now();
@@ -1543,7 +1557,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
 
       if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
 
-      const result = await classify(frame, meta, yoloDetections, materialHint, multi);
+      const result = await classify(frame, meta, yoloDetections, materialHint, multi, tierResults);
       return { result, requestId: result.requestId };
     }
   }, [classify, transition, T]);

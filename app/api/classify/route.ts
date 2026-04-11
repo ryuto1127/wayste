@@ -77,6 +77,8 @@ const SingleRequestSchema = z.object({
   multi: z.boolean().optional(),
   /** Tier 1 sub-classification context — triggers material identification prompt. */
   tier1Context: Tier1ContextSchema,
+  /** Client-provided intermediate tier results (T1/T2 detections for pilot-log). */
+  tierResults: TierResultsSchema,
 });
 
 // ── Batch item schema ──
@@ -587,18 +589,17 @@ export async function POST(request: Request) {
       latencyMs: totalServerMs,
     });
 
-    // Construct tierResults from available pipeline data
-    const tierResults = (() => {
+    // Prefer client-provided tierResults (has complete T1/T2 data).
+    // Fall back to server-constructed from yoloDetections / tier1Context.
+    const tierResults = (singleData.tierResults as { tier1?: { itemName: string; confidence: number }[]; tier2?: { itemName: string; confidence: number }[] } | undefined) ?? (() => {
       const tr: { tier1?: { itemName: string; confidence: number }[]; tier2?: { itemName: string; confidence: number }[] } = {};
       const t1Ctx = tier1Context as { className: string; confidence: number; tier2Results: { className: string; confidence: number }[] } | undefined;
       if (t1Ctx) {
-        // Sub-classification path: T1 = tier1Context class, T2 = tier2Results
         tr.tier1 = [{ itemName: t1Ctx.className, confidence: t1Ctx.confidence }];
         if (t1Ctx.tier2Results?.length) {
           tr.tier2 = t1Ctx.tier2Results.map(r => ({ itemName: r.className, confidence: r.confidence }));
         }
       } else if (yoloDetections && (yoloDetections as YoloDetectionLog[]).length > 0) {
-        // Standard path: T1 from YOLO detections
         tr.tier1 = (yoloDetections as YoloDetectionLog[]).map(d => ({ itemName: d.className, confidence: d.confidence }));
       }
       return (tr.tier1 || tr.tier2) ? tr : undefined;

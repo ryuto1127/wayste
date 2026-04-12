@@ -852,6 +852,10 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
               // YOLO detected only non-waste (person, furniture, vehicles, etc.)
               // — nothing actionable on the platform; skip all further tiers.
               console.log(`[tier1] Only non-waste detections (${detections.map(d => d.className).join(", ")}) in ${yoloMs}ms — ignoring`);
+              nothingDetectedCountRef.current++;
+              cooldownStartRef.current = Date.now();
+              transition("cooldown");
+              inFlightRef.current = false;
               return;
             }
             // No YOLO detections at all — escalate to YOLO World

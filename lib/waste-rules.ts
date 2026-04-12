@@ -96,6 +96,7 @@ Rules:
 
 If the item appears transparent or translucent, identify the specific material (clear PET, clear glass, clear PP, etc.).
 Assess whether the item is clean enough for recycling or contaminated with food residue. If contaminated, classify to the stream for soiled items and note contamination in reasoning.
+For utensils (forks, knives, spoons, chopsticks, straws, stirrers, etc.), always include the material in itemName (e.g., "wooden knife", "plastic fork", "metal spoon", "bamboo chopsticks"). The material determines the correct waste stream: wooden/bamboo → compost, plastic → landfill, metal → recycling.
 ${candidatesSection}${materialSection}
 Respond with ONLY a JSON object in this exact format, no other text:
 {
@@ -160,6 +161,7 @@ Rules:
 
 If an item appears transparent or translucent, identify the specific material (clear PET, clear glass, clear PP, etc.).
 Assess whether each item is clean enough for recycling or contaminated with food residue. If contaminated, classify to the stream for soiled items and note contamination in reasoning.
+For utensils (forks, knives, spoons, chopsticks, straws, stirrers, etc.), always include the material in itemName (e.g., "wooden knife", "plastic fork", "metal spoon", "bamboo chopsticks"). The material determines the correct waste stream: wooden/bamboo → compost, plastic → landfill, metal → recycling.
 
 Respond with ONLY a JSON object in this exact format, no other text:
 {
@@ -247,10 +249,11 @@ Rules:
 1. You already know this is a ${tier1Class}. Focus ONLY on material.
 2. confidence reflects certainty about the MATERIAL, not the item type.
 3. Look for: transparency, surface texture, reflections, recycling symbols, pull-tabs, cap type, wall thickness.
-4. If genuinely uncertain about material, set confidence below 0.3.
-5. preAction: if the user should do something before disposal, include a short instruction.
-6. Use the item rules above to determine the correct wasteStream for the identified material.
-7. wasteStream must be exactly one of: ${streamIds.join(", ")}.
+4. For utensils (forks, knives, spoons, chopsticks, straws, stirrers), always include the material in itemName (e.g., "wooden knife", "plastic fork", "metal spoon", "bamboo chopsticks"). Wooden/bamboo → compost, plastic → landfill, metal → recycling.
+5. If genuinely uncertain about material, set confidence below 0.3.
+6. preAction: if the user should do something before disposal, include a short instruction.
+7. Use the item rules above to determine the correct wasteStream for the identified material.
+8. wasteStream must be exactly one of: ${streamIds.join(", ")}.
 
 Respond with ONLY a JSON object in this exact format, no other text:
 {

@@ -215,6 +215,12 @@ export async function runYoloWorldInference(
     // Data layout: outputData[ channel * numCandidates + candidateIdx ]
     const rawDetections: YoloDetection[] = [];
 
+    // DEBUG: track what the model actually outputs before filtering
+    let debugBestConf = 0;
+    let debugBestClass = "";
+    let debugBestArea = 0;
+    let debugDroppedByArea = 0;
+
     for (let i = 0; i < numCandidates; i++) {
       // Find best class score
       let bestScore = -1;
@@ -237,7 +243,17 @@ export async function runYoloWorldInference(
       const bh = outputData[3 * numCandidates + i];
 
       const boxArea = bw * bh;
-      if (boxArea < minBoxArea) continue;
+
+      if (bestScore > debugBestConf) {
+        debugBestConf = bestScore;
+        debugBestClass = YOLO_WORLD_CLASSES[bestClassId];
+        debugBestArea = boxArea;
+      }
+
+      if (boxArea < minBoxArea) {
+        debugDroppedByArea++;
+        continue;
+      }
 
       // Convert center format → corner format
       const x1 = cx - bw / 2;
@@ -249,6 +265,12 @@ export async function runYoloWorldInference(
         confidence: bestScore,
         bbox: [x1, y1, bw, bh],
       });
+    }
+
+    if (debugBestConf > 0 || debugDroppedByArea > 0) {
+      console.log(
+        `[yolo-world-debug] best: ${debugBestClass} ${(debugBestConf * 100).toFixed(1)}% area=${Math.round(debugBestArea)}, droppedByArea=${debugDroppedByArea}, kept=${rawDetections.length}`
+      );
     }
 
     // Sort by confidence descending

@@ -353,7 +353,20 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           const responseData = await res.json();
           // Multi-item response format: { results: ClassificationResponse[], requestId }
           if (Array.isArray(responseData.results)) {
-            if (responseData.results.length === 0) throw new Error("Multi-item returned no results");
+            if (responseData.results.length === 0) {
+              console.warn("[classify] Multi-item returned no results — treating as unclassifiable");
+              return {
+                itemName: "unknown",
+                wasteStream: "landfill",
+                confidence: 0,
+                reasoning: "Classification returned no results",
+                binColor: "#525252",
+                binLabel: "",
+                needsReview: true,
+                isCompound: false,
+                modelUsed: "mini" as const,
+              };
+            }
           }
           const data: ClassificationResponse & { requestId?: string; _multiResults?: ClassificationResponse[] } =
             Array.isArray(responseData.results)

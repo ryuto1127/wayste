@@ -180,6 +180,12 @@ export async function runYoloInference(
     const numDetections = output.dims[1] as number; // 300
     const detections: YoloDetection[] = [];
 
+    // DEBUG: track what the model actually outputs before filtering
+    let debugBestConf = 0;
+    let debugBestClass = "";
+    let debugBestArea = 0;
+    let debugDroppedByArea = 0;
+
     for (let i = 0; i < numDetections; i++) {
       const offset = i * 6;
       const x1 = outputData[offset];
@@ -194,8 +200,18 @@ export async function runYoloInference(
 
       const bw = x2 - x1;
       const bh = y2 - y1;
+      const area = bw * bh;
 
-      if (bw * bh < minBoxArea) continue;
+      if (confidence > debugBestConf) {
+        debugBestConf = confidence;
+        debugBestClass = COCO_CLASSES[classId];
+        debugBestArea = area;
+      }
+
+      if (area < minBoxArea) {
+        debugDroppedByArea++;
+        continue;
+      }
 
       detections.push({
         classId,
@@ -203,6 +219,12 @@ export async function runYoloInference(
         confidence,
         bbox: [x1, y1, bw, bh],
       });
+    }
+
+    if (debugBestConf > 0 || debugDroppedByArea > 0) {
+      console.log(
+        `[yolo-debug] best: ${debugBestClass} ${(debugBestConf * 100).toFixed(1)}% area=${Math.round(debugBestArea)}, droppedByArea=${debugDroppedByArea}, kept=${detections.length}`
+      );
     }
 
     // Sort by confidence descending

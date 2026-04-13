@@ -573,9 +573,20 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       if (state === "result") {
         // Result stays on screen until item is removed — no minimum display time.
         // Uses lenient resultHasFg so distant/small items don't prematurely dismiss.
+
+        // DEBUG: log foreground values every ~1s during result state
+        const resultElapsed = Date.now() - resultEnterTimeRef.current;
+        if (Math.floor(resultElapsed / 1000) !== Math.floor((resultElapsed - ANALYSIS_INTERVAL_MS) / 1000)) {
+          console.log(`[result-debug] t=${(resultElapsed/1000).toFixed(0)}s resultHasFg=${resultHasFg} roiHasFg=${roiHasFg} fgRatio=${analysis.roiForegroundRatio.toFixed(4)} blobRatio=${analysis.roiLargestBlobRatio.toFixed(4)} thFg=${th.RESULT_FG_THRESHOLD.toFixed(4)} thBlob=${th.RESULT_BLOB_THRESHOLD.toFixed(4)} goneCount=${goneCountRef.current}`);
+        }
+
         if (!resultHasFg) {
           goneCountRef.current++;
+          if (goneCountRef.current === 1) {
+            console.log(`[result-debug] gone started: fgRatio=${analysis.roiForegroundRatio.toFixed(4)} blobRatio=${analysis.roiLargestBlobRatio.toFixed(4)}`);
+          }
           if (goneCountRef.current >= RESULT_GONE_FRAMES) {
+            console.log(`[result-debug] gone confirmed (${RESULT_GONE_FRAMES} frames) → cooldown`);
             // Item removed — boost BG adaptation so the
             // model rapidly absorbs the current scene (was frozen during result).
             analyzer.boostBackgroundAdaptation();
@@ -586,6 +597,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           // If goneCount > 0, the previous item briefly disappeared — this is a
           // new item. Reset and classify immediately without waiting for cooldown.
           if (goneCountRef.current > 0 && roiHasFg) {
+            console.log(`[result-debug] ⚠️ RE-CLASSIFY triggered: goneCount=${goneCountRef.current} fgRatio=${analysis.roiForegroundRatio.toFixed(4)} blobRatio=${analysis.roiLargestBlobRatio.toFixed(4)}`);
             setStableResults([]); setResultRequestIds([]);
             setError(null);
             goneCountRef.current = 0;
@@ -595,10 +607,14 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
             triggerClassification(analysis);
             return;
           }
+          if (goneCountRef.current > 0) {
+            console.log(`[result-debug] gone reset: goneCount was ${goneCountRef.current}, resultHasFg=true but roiHasFg=false`);
+          }
           goneCountRef.current = 0;
 
           // Persistent-leftover escape hatch
           if (Date.now() - resultEnterTimeRef.current >= RESULT_TIMEOUT_MS) {
+            console.log(`[result-debug] timeout (${RESULT_TIMEOUT_MS}ms) → cooldown`);
             setStableResults([]); setResultRequestIds([]);
             goneCountRef.current = 0;
             analyzer.boostBackgroundAdaptation();

@@ -65,7 +65,7 @@ export function computeThresholds(
   const RESULT_FG_THRESHOLD = ROI_FG_THRESHOLD * 0.73;
   const RESULT_BLOB_THRESHOLD = ROI_BLOB_THRESHOLD * 0.8;
   const ROI_BLOB_DIAGONAL_THRESHOLD = lerp(0.45, 0.30, s);
-  const YOLO_FALLBACK_THRESHOLD = lerp(0.85, 0.65, s);
+  const YOLO_FALLBACK_THRESHOLD = lerp(0.70, 0.50, s);
   const FG_PERSIST_FRAMES = s > 0.7 ? 2 : 3;
   const OBJECT_GONE_FRAMES = s > 0.7 ? 2 : 3;
 

@@ -113,7 +113,7 @@ class OnnxBackend implements InferenceBackend {
     video: HTMLVideoElement,
     _roiMargin = 0,
     minBoxArea = 1500,
-    confidenceThreshold = 0.50,
+    confidenceThreshold = 0.40,
   ): Promise<YoloDetection[]> {
     if (!this.yolo) return [];
     return this.yolo.runYoloInference(video, _roiMargin, minBoxArea, confidenceThreshold);
@@ -146,7 +146,7 @@ class HttpBackend implements InferenceBackend {
     video: HTMLVideoElement,
     _roiMargin = 0,
     minBoxArea = 1500,
-    confidenceThreshold = 0.50,
+    confidenceThreshold = 0.40,
   ): Promise<YoloDetection[]> {
     if (!this.ready) return [];
 

@@ -67,10 +67,15 @@ const CLASSIFYING_TIMEOUT_MS = 20_000;
 const FRAME_STALE_ESCALATION_MS = 700;
 /** Mean pixel diff threshold for "frame has changed significantly" (0–255 scale). */
 const FRAME_CHANGE_THRESHOLD = 8;
-/** Frame-change YOLO cycles a tracked item must be absent before removing from results. */
-const YOLO_GONE_CYCLES = 3;
+/** Frame-change YOLO cycles a tracked item must be absent before removing from results.
+ *  Higher = more stable display (items don't flicker when YOLO misses a few frames).
+ *  At ~30fps YOLO loop rate, 10 cycles ≈ 300ms of continuous absence. */
+const YOLO_GONE_CYCLES = 10;
+/** Frame-change cycles a new detection must persist in result state before being added.
+ *  Prevents flicker from transient YOLO false positives or shifted bboxes. */
+const NEW_ITEM_PERSIST_CYCLES = 3;
 /** Frame-change cycles an unresolved new item persists before API escalation from result state. */
-const UNRESOLVED_ESCALATION_CYCLES = 3;
+const UNRESOLVED_ESCALATION_CYCLES = 5;
 
 // ── Background adaptation rates (passed to FrameAnalyzer per pipeline state) ──
 // idle / cooldown: full rate — continuously absorb drift and persistent leftovers
@@ -861,8 +866,13 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       // ── CLASSIFYING STATE ──
       // ═══════════════════════════════════════
       if (state === "classifying") {
-        if (hasResults) {
-          // ── YOLO race: cancel in-flight API if YOLO wins ──
+        // Blob-vs-detection check: if CV sees more blobs than YOLO detected,
+        // there are items YOLO can't classify → don't let YOLO win the race.
+        const qualifiedBlobCount = analysis?.blobs?.filter(b => blobIsObject(b)).length ?? 0;
+        const yoloMissedItems = qualifiedBlobCount > wasteDetections.length;
+
+        if (hasResults && unresolvedDetections.length === 0 && !yoloMissedItems) {
+          // ── All items resolved, blob count matches — YOLO wins the race ──
           if (inFlightRef.current && apiAbortRef.current) {
             console.log(`[yolo-loop] YOLO won race — aborting in-flight API`);
             apiAbortRef.current.abort();
@@ -884,6 +894,13 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
 
           handleMultiClassificationResults(resolvedResults, resolvedResults.map(() => undefined));
           detectionGoneMapRef.current.clear();
+        } else if (hasResults) {
+          // ── Some resolved but unresolved items or blob mismatch — let API finish ──
+          if (yoloMissedItems) {
+            console.log(`[yolo-loop] partial: ${resolvedResults.map(r => r.itemName).join(" + ")} resolved, but ${qualifiedBlobCount} blobs vs ${wasteDetections.length} detections — waiting for API`);
+          } else {
+            console.log(`[yolo-loop] partial: ${resolvedResults.map(r => r.itemName).join(" + ")} resolved, ${unresolvedDetections.length} unresolved — waiting for API`);
+          }
         }
         // Note: API escalation for stale frames is handled in the loop itself
         // (triggerApiEscalation), not here.
@@ -937,29 +954,13 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
         }
 
         // ── Unmatched detections: new items entering scene ──
+        // All new detections (resolved or not) must persist for multiple
+        // cycles before being added to results. This prevents flicker from
+        // transient YOLO bbox shifts or single-frame false positives.
         for (const detIdx of matchResult.unmatchedDetections) {
           const det = wasteDetections[detIdx];
           if (!det) continue;
 
-          // Try YOLO rule resolution first
-          if (det.confidence >= th.YOLO_FALLBACK_THRESHOLD) {
-            const resolved = resolveYoloDetection(det, siteConfigRef.current!, localeRef.current);
-            if (resolved) {
-              // New YOLO-resolved item → add as locked TrackedResult
-              const newTracked: TrackedResult = {
-                ...resolved,
-                _trackBbox: det.bbox,
-                _trackId: nextTrackIdRef.current++,
-                _locked: true,
-              };
-              displayedResults.push(newTracked);
-              needsUpdate = true;
-              console.log(`[yolo-loop] new item added: ${resolved.itemName}`);
-              continue;
-            }
-          }
-
-          // Unresolved new item → track for API escalation
           const key = `${Math.round(det.bbox[0])}_${Math.round(det.bbox[1])}`;
           const entry = unresolvedNewItemsRef.current.get(key);
           if (entry) {
@@ -967,10 +968,32 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
             if (iou > 0.3) {
               entry.count++;
               entry.bbox = det.bbox;
-              if (entry.count >= UNRESOLVED_ESCALATION_CYCLES && !inFlightRef.current) {
+
+              if (entry.count >= NEW_ITEM_PERSIST_CYCLES) {
                 unresolvedNewItemsRef.current.delete(key);
-                console.log(`[yolo-loop] unresolved item persisted ${UNRESOLVED_ESCALATION_CYCLES} cycles → API escalation`);
-                triggerApiEscalationFromResult(video, analysis, det);
+
+                // Try YOLO rule resolution
+                if (det.confidence >= th.YOLO_FALLBACK_THRESHOLD) {
+                  const resolved = resolveYoloDetection(det, siteConfigRef.current!, localeRef.current);
+                  if (resolved) {
+                    const newTracked: TrackedResult = {
+                      ...resolved,
+                      _trackBbox: det.bbox,
+                      _trackId: nextTrackIdRef.current++,
+                      _locked: true,
+                    };
+                    displayedResults.push(newTracked);
+                    needsUpdate = true;
+                    console.log(`[yolo-loop] new item added after ${NEW_ITEM_PERSIST_CYCLES} cycles: ${resolved.itemName}`);
+                    continue;
+                  }
+                }
+
+                // Unresolved → API escalation
+                if (!inFlightRef.current) {
+                  console.log(`[yolo-loop] unresolved item persisted ${NEW_ITEM_PERSIST_CYCLES} cycles → API escalation`);
+                  triggerApiEscalationFromResult(video, analysis, det);
+                }
               }
             }
           } else {
@@ -1125,8 +1148,17 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
             unresolvedCount++;
           }
 
-          // All items resolved locally → instant result
-          if (resolvedResults.length > 0 && unresolvedCount === 0) {
+          // Blob-vs-detection reconciliation: if CV sees more qualified
+          // blobs than YOLO detected, there are items YOLO missed
+          // (e.g. item class not in YOLO's vocabulary).
+          const qualifiedBlobCount = blobs.filter(b => blobIsObject(b)).length;
+          const yoloMissedItems = qualifiedBlobCount > wasteDetections.length;
+          if (yoloMissedItems) {
+            console.log(`[tier1] blob-detection mismatch: ${qualifiedBlobCount} blobs vs ${wasteDetections.length} YOLO detections — escalating to API`);
+          }
+
+          // All items resolved locally AND no missed blobs → instant result
+          if (resolvedResults.length > 0 && unresolvedCount === 0 && !yoloMissedItems) {
             resolvedResults.sort((a, b) => {
               const aCx = (a._bbox?.[0] ?? 0) + (a._bbox?.[2] ?? 0) / 2;
               const bCx = (b._bbox?.[0] ?? 0) + (b._bbox?.[2] ?? 0) / 2;

@@ -216,7 +216,7 @@ describe("Tiered fallback thresholds", () => {
     } = require("@/lib/inference-backend");
     /* eslint-enable @typescript-eslint/no-require-imports */
 
-    // Default sensitivity (0.5): lerp(0.85, 0.65, 0.5) = 0.75
-    expect(YOLO_FALLBACK_THRESHOLD).toBeCloseTo(0.75, 4);
+    // Default sensitivity (0.5): lerp(0.70, 0.50, 0.5) = 0.60
+    expect(YOLO_FALLBACK_THRESHOLD).toBeCloseTo(0.60, 4);
   });
 });

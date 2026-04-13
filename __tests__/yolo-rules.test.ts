@@ -2,7 +2,7 @@
  * Tests for YOLO → waste stream resolution (Tier 1 + Tier 2).
  *
  * Verifies that:
- * 1. YOLO26m (COCO-80) detections resolve to the correct waste stream
+ * 1. YOLO 39-class detections resolve to the correct waste stream
  * 2. YOLO World (recycling-specific) detections resolve correctly
  * 3. Unknown classes return null (trigger API fallback)
  * 4. Site overrides are applied on top of YOLO rules
@@ -67,43 +67,58 @@ afterAll(() => {
 });
 
 // ═══════════════════════════════════════════════════════════════════
-// Tier 1: YOLO26m (COCO-80) → waste stream
+// Tier 1: YOLO 39-class custom model → waste stream
 // ═══════════════════════════════════════════════════════════════════
 
-describe("Tier 1: YOLO26m detection → waste stream", () => {
+describe("Tier 1: YOLO 39-class detection → waste stream", () => {
   const config = makeSiteConfig();
 
   describe("recycling items", () => {
     it.each([
-      ["book", "recycling"],
+      ["plastic_bottle", "recycling"],
+      ["can", "recycling"],
+      ["glass_bottle", "recycling"],
+      ["cardboard", "recycling"],
+      ["paper", "recycling"],
+      ["paper_bag", "recycling"],
+      ["tetra_pak", "recycling"],
     ])("%s → %s", (className, expectedStream) => {
       const result = resolveYoloDetection(makeDetection(className), config);
       expect(result).not.toBeNull();
       expect(result!.wasteStream).toBe(expectedStream);
       expect(result!.modelUsed).toBe("yolo-local");
     });
-
-    // Sub-classification classes always route to material identification
-    it.each([
-      "bottle", "wine glass",
-    ])("%s → null (routes to sub-classification at any confidence)", (className) => {
-      const result = resolveYoloDetection(makeDetection(className, 0.75), config);
-      expect(result).toBeNull();
-    });
   });
 
-  describe("compost items", () => {
+  describe("compost items (food waste)", () => {
     it.each([
-      ["banana", "compost"],
-      ["apple", "compost"],
+      ["bone", "compost"],
+      ["vegetable", "compost"],
+      ["egg_shell", "compost"],
       ["orange", "compost"],
-      ["broccoli", "compost"],
+      ["orange_peel", "compost"],
+      ["apple_peel", "compost"],
+      ["apple", "compost"],
+      ["pear", "compost"],
+      ["meat", "compost"],
+      ["bread", "compost"],
+      ["rice", "compost"],
+      ["egg_yolk", "compost"],
+      ["apple_core", "compost"],
+      ["bone_fish", "compost"],
+      ["noodle", "compost"],
+      ["pear_peel", "compost"],
+      ["pastry", "compost"],
+      ["tomato", "compost"],
+      ["fish", "compost"],
+      ["cucumber", "compost"],
       ["carrot", "compost"],
-      ["sandwich", "compost"],
+      ["banana", "compost"],
+      ["chicken", "compost"],
+      ["potato", "compost"],
       ["pizza", "compost"],
-      ["donut", "compost"],
       ["cake", "compost"],
-      ["hot dog", "compost"],
+      ["hamburger", "compost"],
     ])("%s → %s", (className, expectedStream) => {
       const result = resolveYoloDetection(makeDetection(className), config);
       expect(result).not.toBeNull();
@@ -113,29 +128,10 @@ describe("Tier 1: YOLO26m detection → waste stream", () => {
 
   describe("landfill items", () => {
     it.each([
-      ["toothbrush", "landfill"],
-    ])("%s → %s", (className, expectedStream) => {
-      const result = resolveYoloDetection(makeDetection(className), config);
-      expect(result).not.toBeNull();
-      expect(result!.wasteStream).toBe(expectedStream);
-    });
-
-    // Sub-classification classes always route to material identification
-    it.each([
-      "cup", "fork", "knife", "spoon", "bowl",
-    ])("%s → null (routes to sub-classification at any confidence)", (className) => {
-      const result = resolveYoloDetection(makeDetection(className, 0.75), config);
-      expect(result).toBeNull();
-    });
-  });
-
-  describe("special/e-waste items", () => {
-    it.each([
-      ["cell phone", "special"],
-      ["remote", "special"],
-      ["keyboard", "special"],
-      ["mouse", "special"],
-      ["laptop", "special"],
+      ["paper_cup", "landfill"],
+      ["plastic_cup", "landfill"],
+      ["plastic_bag", "landfill"],
+      ["styrofoam", "landfill"],
     ])("%s → %s", (className, expectedStream) => {
       const result = resolveYoloDetection(makeDetection(className), config);
       expect(result).not.toBeNull();
@@ -143,89 +139,29 @@ describe("Tier 1: YOLO26m detection → waste stream", () => {
     });
   });
 
-  describe("non-waste COCO classes return nothing_detected (instant rejection)", () => {
-    it.each([
-      "person", "car", "dog", "cat", "chair", "couch",
-      "bed", "dining table",
-    ])("%s → nothing_detected", (className) => {
-      const result = resolveYoloDetection(makeDetection(className), config);
+  describe("special disposal items", () => {
+    it("battery → special", () => {
+      const result = resolveYoloDetection(makeDetection("battery"), config);
       expect(result).not.toBeNull();
-      expect(result!.itemName).toBe("nothing_detected");
-      expect(result!.modelUsed).toBe("yolo-local");
-    });
-  });
-
-  describe("electronics/appliances COCO classes resolve to special", () => {
-    it.each([
-      ["tv", "special"],
-      ["microwave", "special"],
-      ["toaster", "special"],
-      ["hair drier", "special"],
-      ["clock", "special"],
-    ])("%s → %s", (className, expectedStream) => {
-      const result = resolveYoloDetection(makeDetection(className), config);
-      expect(result).not.toBeNull();
-      expect(result!.wasteStream).toBe(expectedStream);
-    });
-  });
-
-  describe("newly added COCO items resolve correctly", () => {
-    it.each([
-      ["backpack", "landfill"],
-      ["umbrella", "landfill"],
-      ["scissors", "landfill"],
-      ["teddy bear", "landfill"],
-      ["vase", "landfill"],
-    ])("%s → %s", (className, expectedStream) => {
-      const result = resolveYoloDetection(makeDetection(className), config);
-      expect(result).not.toBeNull();
-      expect(result!.wasteStream).toBe(expectedStream);
+      expect(result!.wasteStream).toBe("special");
     });
   });
 
   it("includes preAction when defined in rules", () => {
-    // Use "book" which has preAction but no needsSubclassification
-    const result = resolveYoloDetection(makeDetection("book", 0.85), config);
+    const result = resolveYoloDetection(makeDetection("plastic_bottle", 0.85), config);
     expect(result).not.toBeNull();
-    expect(result!.preAction).toBe("Remove plastic covers if present");
+    expect(result!.preAction).toBe("Empty and rinse before recycling");
   });
 
   it("preserves detection confidence in result", () => {
-    const result = resolveYoloDetection(makeDetection("book", 0.75), config);
+    const result = resolveYoloDetection(makeDetection("cardboard", 0.75), config);
     expect(result).not.toBeNull();
     expect(result!.confidence).toBe(0.75);
   });
 
-  describe("sub-classification routing (≥ 0.80 → material vocab, < 0.80 → general T2)", () => {
-    it.each([
-      "bottle", "cup", "fork", "knife", "spoon", "bowl", "wine glass",
-    ])("%s ≥ 0.80 → returns null (legacy call routes to fallback)", (className) => {
-      const result = resolveYoloDetection(makeDetection(className, 0.85), config);
-      expect(result).toBeNull();
-    });
-
-    it.each([
-      "bottle", "cup", "fork", "knife", "spoon", "bowl", "wine glass",
-    ])("%s ≥ 0.80 → needsSubclassification with returnResolution", (className) => {
-      const resolution = resolveYoloDetection(makeDetection(className, 0.85), config, "en", true);
-      expect(resolution).not.toBeNull();
-      expect(resolution!.needsSubclassification).toBe(true);
-      if (resolution!.needsSubclassification) {
-        expect(resolution!.subclassContext.className).toBe(className);
-        expect(resolution!.subclassContext.confidence).toBe(0.85);
-      }
-    });
-
-    it.each([
-      "bottle", "cup", "fork", "knife", "spoon", "bowl", "wine glass",
-    ])("%s < 0.80 → null (skip T1 rules, general T2/T3 escalation)", (className) => {
-      // Below threshold: T1 rules skipped entirely, routes to general YOLO World → GPT mini
-      const result = resolveYoloDetection(makeDetection(className, 0.75), config);
-      expect(result).toBeNull();
-      // returnResolution also returns null (not needsSubclassification)
-      const resolution = resolveYoloDetection(makeDetection(className, 0.75), config, "en", true);
-      expect(resolution).toBeNull();
-    });
+  it("returns null for unknown class names", () => {
+    const result = resolveYoloDetection(makeDetection("spaceship"), config);
+    expect(result).toBeNull();
   });
 });
 
@@ -236,7 +172,7 @@ describe("Tier 1: YOLO26m detection → waste stream", () => {
 describe("Tier 2: YOLO World detection → waste stream", () => {
   const config = makeSiteConfig();
 
-  describe("recycling items (not in COCO-80)", () => {
+  describe("recycling items", () => {
     it.each([
       ["aluminium beverage can", "recycling"],
       ["steel food can", "recycling"],
@@ -337,7 +273,7 @@ describe("Tier 2: YOLO World detection → waste stream", () => {
 // ═══════════════════════════════════════════════════════════════════
 
 describe("Site overrides applied to YOLO results", () => {
-  it("site override changes pizza from compost to special stream", () => {
+  it("site override changes pizza from compost to landfill", () => {
     const config = makeSiteConfig({
       streams: [
         { id: "recycling", label: "Recycling", color: "#2563EB", description: "" },
@@ -370,8 +306,8 @@ describe("Site overrides applied to YOLO results", () => {
 // ═══════════════════════════════════════════════════════════════════
 
 describe("Rules JSON integrity", () => {
-  it("YOLO rules covers all 80 COCO classes", () => {
-    expect(Object.keys(yoloRules.rules)).toHaveLength(80);
+  it("YOLO rules covers all 39 custom classes", () => {
+    expect(Object.keys(yoloRules.rules)).toHaveLength(39);
   });
 
   it("YOLO World rules has all 53 recycling classes", () => {
@@ -379,7 +315,7 @@ describe("Rules JSON integrity", () => {
   });
 
   it("every YOLO rule has required fields", () => {
-    for (const [className, rule] of Object.entries(yoloRules.rules)) {
+    for (const [, rule] of Object.entries(yoloRules.rules)) {
       expect(rule.itemName).toBeTruthy();
       expect(rule.wasteStream).toBeTruthy();
       expect(rule.reasoning).toBeTruthy();
@@ -387,18 +323,11 @@ describe("Rules JSON integrity", () => {
   });
 
   it("every YOLO World rule has required fields", () => {
-    for (const [className, rule] of Object.entries(worldRules.rules)) {
+    for (const [, rule] of Object.entries(worldRules.rules)) {
       expect(rule.itemName).toBeTruthy();
       expect(rule.wasteStream).toBeTruthy();
       expect(rule.reasoning).toBeTruthy();
     }
-  });
-
-  it("no overlap between YOLO and YOLO World class names", () => {
-    const yoloClasses = new Set(Object.keys(yoloRules.rules));
-    const worldClasses = new Set(Object.keys(worldRules.rules));
-    const overlap = [...yoloClasses].filter((c) => worldClasses.has(c));
-    expect(overlap).toEqual([]);
   });
 
   it("all waste streams in rules are valid", () => {
@@ -522,10 +451,10 @@ describe("Tiered fallback thresholds", () => {
     } = require("@/lib/inference-backend");
     /* eslint-enable @typescript-eslint/no-require-imports */
 
-    // Default sensitivity (0.5) yields these values: lerp(0.85, 0.65, 0.5) = 0.75
+    // Default sensitivity (0.5): lerp(0.85, 0.65, 0.5) = 0.75, lerp(0.80, 0.60, 0.5) = 0.70
     expect(YOLO_FALLBACK_THRESHOLD).toBeCloseTo(0.75, 4);
     expect(YOLO_API_PARALLEL_THRESHOLD).toBe(0.3);
-    expect(YOLO_WORLD_ACCEPT_THRESHOLD).toBeCloseTo(0.75, 4);
+    expect(YOLO_WORLD_ACCEPT_THRESHOLD).toBeCloseTo(0.70, 4);
 
     // Tier ordering: API parallel < World accept <= YOLO fallback
     expect(YOLO_API_PARALLEL_THRESHOLD).toBeLessThan(YOLO_WORLD_ACCEPT_THRESHOLD);

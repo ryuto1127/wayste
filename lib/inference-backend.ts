@@ -1,11 +1,11 @@
 /**
  * Inference backend abstraction layer — Tiered Detection Pipeline.
  *
- *   1. **YOLO26m (8-class custom)** — All detections are waste items.
+ *   1. **YOLO (39-class custom)** — Packaging + granular food waste.
  *      High confidence + rule match → instant result.
  *
  *   2. **YOLO World (fallback)** — Open-vocabulary detector for items
- *      not in the 8-class model or low-confidence T1 detections.
+ *      not in the 39-class model or low-confidence T1 detections.
  *
  *   3. **OpenAI API (last resort)** — Handled in KioskDisplay.tsx.
  *
@@ -144,7 +144,7 @@ class OnnxBackend implements InferenceBackend {
     video: HTMLVideoElement,
     _roiMargin = 0,
     minBoxArea = 1500,
-    confidenceThreshold = 0.65,
+    confidenceThreshold = 0.50,
   ): Promise<YoloDetection[]> {
     if (!this.yolo) return [];
     return this.yolo.runYoloInference(video, _roiMargin, minBoxArea, confidenceThreshold);
@@ -212,7 +212,7 @@ class HttpBackend implements InferenceBackend {
     video: HTMLVideoElement,
     _roiMargin = 0,
     minBoxArea = 1500,
-    confidenceThreshold = 0.65,
+    confidenceThreshold = 0.50,
   ): Promise<YoloDetection[]> {
     if (!this.ready) return [];
 

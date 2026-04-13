@@ -36,11 +36,6 @@
       "reasoning": "Cardboard is recyclable. Flatten before recycling.",
       "preAction": "Flatten and remove tape if possible"
     },
-    "food_waste": {
-      "itemName": "Food Waste",
-      "wasteStream": "compost",
-      "reasoning": "Food scraps and leftovers are compostable."
-    },
     "paper": {
       "itemName": "Paper",
       "wasteStream": "recycling",
@@ -51,11 +46,10 @@
       "wasteStream": "landfill",
       "reasoning": "Plastic bags jam sorting machinery. Some grocery stores accept them for separate recycling."
     },
-    "plastic_container": {
-      "itemName": "Plastic Container",
+    "paper_bag": {
+      "itemName": "Paper Bag",
       "wasteStream": "recycling",
-      "reasoning": "Most rigid plastic containers (#1-#5) are recyclable. Rinse before recycling.",
-      "preAction": "Empty and rinse before recycling"
+      "reasoning": "Paper bags are recyclable."
     },
     "battery": {
       "itemName": "Battery",
@@ -67,6 +61,147 @@
       "itemName": "Styrofoam",
       "wasteStream": "landfill",
       "reasoning": "Expanded polystyrene is not accepted in most recycling programs."
+    },
+    "tetra_pak": {
+      "itemName": "Tetra Pak Carton",
+      "wasteStream": "recycling",
+      "reasoning": "Tetra Pak cartons are recyclable in many programs. Empty and rinse before recycling.",
+      "preAction": "Empty and rinse before recycling"
+    },
+    "bone": {
+      "itemName": "Bone",
+      "wasteStream": "compost",
+      "reasoning": "Bones are compostable in municipal composting facilities."
+    },
+    "vegetable": {
+      "itemName": "Vegetable",
+      "wasteStream": "compost",
+      "reasoning": "Vegetables and vegetable scraps are compostable."
+    },
+    "egg_shell": {
+      "itemName": "Egg Shell",
+      "wasteStream": "compost",
+      "reasoning": "Egg shells are compostable and add calcium to compost."
+    },
+    "orange": {
+      "itemName": "Orange",
+      "wasteStream": "compost",
+      "reasoning": "Whole fruit and fruit scraps are compostable."
+    },
+    "orange_peel": {
+      "itemName": "Orange Peel",
+      "wasteStream": "compost",
+      "reasoning": "Citrus peels are compostable."
+    },
+    "apple_peel": {
+      "itemName": "Apple Peel",
+      "wasteStream": "compost",
+      "reasoning": "Fruit peels are compostable."
+    },
+    "apple": {
+      "itemName": "Apple",
+      "wasteStream": "compost",
+      "reasoning": "Whole fruit and fruit scraps are compostable."
+    },
+    "pear": {
+      "itemName": "Pear",
+      "wasteStream": "compost",
+      "reasoning": "Whole fruit and fruit scraps are compostable."
+    },
+    "meat": {
+      "itemName": "Meat",
+      "wasteStream": "compost",
+      "reasoning": "Meat scraps are accepted in municipal composting programs."
+    },
+    "bread": {
+      "itemName": "Bread",
+      "wasteStream": "compost",
+      "reasoning": "Bread and baked goods are compostable."
+    },
+    "rice": {
+      "itemName": "Rice",
+      "wasteStream": "compost",
+      "reasoning": "Cooked and uncooked rice is compostable."
+    },
+    "egg_yolk": {
+      "itemName": "Egg Yolk",
+      "wasteStream": "compost",
+      "reasoning": "Egg waste is compostable."
+    },
+    "apple_core": {
+      "itemName": "Apple Core",
+      "wasteStream": "compost",
+      "reasoning": "Fruit cores and scraps are compostable."
+    },
+    "bone_fish": {
+      "itemName": "Fish Bone",
+      "wasteStream": "compost",
+      "reasoning": "Fish bones are compostable in municipal composting facilities."
+    },
+    "noodle": {
+      "itemName": "Noodle",
+      "wasteStream": "compost",
+      "reasoning": "Cooked noodles and pasta are compostable."
+    },
+    "pear_peel": {
+      "itemName": "Pear Peel",
+      "wasteStream": "compost",
+      "reasoning": "Fruit peels are compostable."
+    },
+    "pastry": {
+      "itemName": "Pastry",
+      "wasteStream": "compost",
+      "reasoning": "Baked goods and pastries are compostable."
+    },
+    "tomato": {
+      "itemName": "Tomato",
+      "wasteStream": "compost",
+      "reasoning": "Vegetables and vegetable scraps are compostable."
+    },
+    "fish": {
+      "itemName": "Fish",
+      "wasteStream": "compost",
+      "reasoning": "Fish scraps are accepted in municipal composting programs."
+    },
+    "cucumber": {
+      "itemName": "Cucumber",
+      "wasteStream": "compost",
+      "reasoning": "Vegetables and vegetable scraps are compostable."
+    },
+    "carrot": {
+      "itemName": "Carrot",
+      "wasteStream": "compost",
+      "reasoning": "Vegetables and vegetable scraps are compostable."
+    },
+    "banana": {
+      "itemName": "Banana",
+      "wasteStream": "compost",
+      "reasoning": "Whole fruit, fruit scraps, and peels are compostable."
+    },
+    "chicken": {
+      "itemName": "Chicken",
+      "wasteStream": "compost",
+      "reasoning": "Meat scraps are accepted in municipal composting programs."
+    },
+    "potato": {
+      "itemName": "Potato",
+      "wasteStream": "compost",
+      "reasoning": "Vegetables and vegetable scraps are compostable."
+    },
+    "pizza": {
+      "itemName": "Pizza",
+      "wasteStream": "compost",
+      "reasoning": "Food waste including pizza is compostable."
+    },
+    "cake": {
+      "itemName": "Cake",
+      "wasteStream": "compost",
+      "reasoning": "Baked goods and food waste are compostable."
+    },
+    "hamburger": {
+      "itemName": "Hamburger",
+      "wasteStream": "compost",
+      "reasoning": "Food waste including prepared foods is compostable."
     }
   }
 }

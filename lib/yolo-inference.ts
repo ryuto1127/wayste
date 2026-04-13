@@ -1,11 +1,13 @@
 /**
- * YOLO26m edge inference using ONNX Runtime Web (FP16).
+ * YOLO edge inference using ONNX Runtime Web (FP16).
  *
- * Custom 8-class waste detection model (12-class ID space, 8 trained on
- * clean open data). All classes are waste items — no not_waste filtering
- * needed. Each detection maps directly to a disposal stream.
+ * Custom 39-class waste detection model trained on clean open data.
+ * Covers packaging (bottles, cans, cups, bags) and granular food waste
+ * (fruit peels, bones, vegetables, cooked items). All classes are waste
+ * items — no not_waste filtering needed. Each detection maps directly
+ * to a disposal stream.
  *
- * The model uses YOLO26's one-to-one head which produces end-to-end
+ * The model uses YOLO's one-to-one head which produces end-to-end
  * detections without NMS — output shape (1, 300, 6) = [x1, y1, x2, y2,
  * confidence, class_id]. This eliminates an entire post-processing stage.
  *
@@ -27,20 +29,47 @@ let activeProvider: string = "unknown";
 /** Input size expected by the YOLO model. */
 const MODEL_INPUT_SIZE = 640;
 
-/** Custom 12-class waste detection (8 trained, 4 reserved with no data). */
+/** Custom 39-class waste detection model. */
 const WASTE_CLASSES = [
-  "plastic_bottle",    // 0
-  "can",               // 1
-  "paper_cup",         // 2  (no training data)
-  "plastic_cup",       // 3  (no training data)
-  "glass_bottle",      // 4
-  "cardboard",         // 5
-  "food_waste",        // 6
-  "paper",             // 7
-  "plastic_bag",       // 8
-  "plastic_container", // 9  (no training data)
-  "battery",           // 10
-  "styrofoam",         // 11 (no training data)
+  "plastic_bottle",  // 0
+  "can",             // 1
+  "paper_cup",       // 2
+  "plastic_cup",     // 3
+  "glass_bottle",    // 4
+  "cardboard",       // 5
+  "paper",           // 6
+  "plastic_bag",     // 7
+  "paper_bag",       // 8
+  "battery",         // 9
+  "styrofoam",       // 10
+  "tetra_pak",       // 11
+  "bone",            // 12
+  "vegetable",       // 13
+  "egg_shell",       // 14
+  "orange",          // 15
+  "orange_peel",     // 16
+  "apple_peel",      // 17
+  "apple",           // 18
+  "pear",            // 19
+  "meat",            // 20
+  "bread",           // 21
+  "rice",            // 22
+  "egg_yolk",        // 23
+  "apple_core",      // 24
+  "bone_fish",       // 25
+  "noodle",          // 26
+  "pear_peel",       // 27
+  "pastry",          // 28
+  "tomato",          // 29
+  "fish",            // 30
+  "cucumber",        // 31
+  "carrot",          // 32
+  "banana",          // 33
+  "chicken",         // 34
+  "potato",          // 35
+  "pizza",           // 36
+  "cake",            // 37
+  "hamburger",       // 38
 ];
 
 /**
@@ -48,7 +77,7 @@ const WASTE_CLASSES = [
  * return the same promise. If the model file is missing or ONNX fails to load,
  * resolves to `false` and all subsequent `runYoloInference()` calls return [].
  */
-export function initYolo(modelUrl = "/models/yolo26m.onnx"): Promise<boolean> {
+export function initYolo(modelUrl = "/models/39class-v1.onnx"): Promise<boolean> {
   if (loading) return loading;
 
   loading = (async () => {

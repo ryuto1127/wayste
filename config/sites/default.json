@@ -152,12 +152,14 @@
   ],
   "staffHandlingItems": [],
   "canonicalNames": [
-    "coffee cup", "paper cup", "plastic bottle", "water bottle", "aluminum can",
-    "glass bottle", "cardboard", "pizza box", "plastic bag", "plastic wrap",
-    "styrofoam", "chip bag", "food wrapper", "takeout container",
-    "napkin", "paper towel", "straw", "utensil",
-    "banana peel", "apple core", "food scraps",
-    "battery", "light bulb"
+    "plastic bottle", "aluminum can", "glass bottle", "cardboard", "paper",
+    "paper cup", "plastic cup", "plastic bag", "paper bag", "styrofoam",
+    "tetra pak", "battery",
+    "bone", "vegetable", "egg shell", "orange", "orange peel", "apple peel",
+    "apple", "pear", "meat", "bread", "rice", "egg yolk", "apple core",
+    "fish bone", "noodle", "pear peel", "pastry", "tomato", "fish",
+    "cucumber", "carrot", "banana", "chicken", "potato", "pizza", "cake",
+    "hamburger", "food scraps"
   ],
   "defaultStream": "landfill",
   "tips": [

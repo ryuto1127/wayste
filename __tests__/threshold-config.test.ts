@@ -35,10 +35,6 @@ describe("computeThresholds", () => {
       expect(th.YOLO_FALLBACK_THRESHOLD).toBeCloseTo(0.85, 4);
     });
 
-    it("derives strict YOLO_WORLD_ACCEPT_THRESHOLD", () => {
-      expect(th.YOLO_WORLD_ACCEPT_THRESHOLD).toBeCloseTo(0.85, 4);
-    });
-
     it("uses 3 FG_PERSIST_FRAMES for strict sensitivity", () => {
       expect(th.FG_PERSIST_FRAMES).toBe(3);
     });
@@ -63,10 +59,6 @@ describe("computeThresholds", () => {
       expect(th.YOLO_FALLBACK_THRESHOLD).toBeCloseTo(0.75, 4);
     });
 
-    it("derives default YOLO_WORLD_ACCEPT_THRESHOLD (0.75)", () => {
-      expect(th.YOLO_WORLD_ACCEPT_THRESHOLD).toBeCloseTo(0.75, 4);
-    });
-
     it("uses 3 FG_PERSIST_FRAMES at default sensitivity", () => {
       expect(th.FG_PERSIST_FRAMES).toBe(3);
     });
@@ -89,10 +81,6 @@ describe("computeThresholds", () => {
 
     it("derives sensitive YOLO_FALLBACK_THRESHOLD", () => {
       expect(th.YOLO_FALLBACK_THRESHOLD).toBeCloseTo(0.65, 4);
-    });
-
-    it("derives sensitive YOLO_WORLD_ACCEPT_THRESHOLD", () => {
-      expect(th.YOLO_WORLD_ACCEPT_THRESHOLD).toBeCloseTo(0.65, 4);
     });
 
     it("uses 2 FG_PERSIST_FRAMES for high sensitivity", () => {
@@ -125,22 +113,17 @@ describe("computeThresholds", () => {
 
     it("does not affect non-ROI thresholds", () => {
       const th = computeThresholds(0.5, calibration);
-      // YOLO thresholds still depend on sensitivity, not calibration
       expect(th.YOLO_FALLBACK_THRESHOLD).toBeCloseTo(0.75, 4);
       expect(th.ROI_BLOB_DIAGONAL_THRESHOLD).toBeCloseTo(0.375, 4);
     });
 
     it("clamps calibrated ROI_FG_THRESHOLD to [0.02, 0.08]", () => {
-      // Very noisy calibration → clamped to 0.08
       const noisy: Calibration = { noiseFgMean: 0.05, noiseFgStd: 0.02, noiseBlobMean: 0.01 };
       const thNoisy = computeThresholds(0.5, noisy);
-      // 0.05 + 3 * 0.02 = 0.11 → clamped to 0.08
       expect(thNoisy.ROI_FG_THRESHOLD).toBe(0.08);
 
-      // Very clean calibration → clamped to 0.02
       const clean: Calibration = { noiseFgMean: 0.001, noiseFgStd: 0.001, noiseBlobMean: 0.0 };
       const thClean = computeThresholds(0.5, clean);
-      // 0.001 + 3 * 0.001 = 0.004 → clamped to 0.02
       expect(thClean.ROI_FG_THRESHOLD).toBe(0.02);
     });
   });
@@ -162,13 +145,6 @@ describe("computeThresholds", () => {
       const th = computeThresholds();
       const th05 = computeThresholds(0.5);
       expect(th.ROI_FG_THRESHOLD).toBeCloseTo(th05.ROI_FG_THRESHOLD, 6);
-    });
-
-    it("maintains tier ordering: YOLO_WORLD_ACCEPT <= YOLO_FALLBACK", () => {
-      for (const s of [0.0, 0.25, 0.5, 0.75, 1.0]) {
-        const th = computeThresholds(s);
-        expect(th.YOLO_WORLD_ACCEPT_THRESHOLD).toBeLessThanOrEqual(th.YOLO_FALLBACK_THRESHOLD);
-      }
     });
   });
 });

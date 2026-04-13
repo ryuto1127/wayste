@@ -26,19 +26,15 @@ const BACKEND = (typeof window !== "undefined"
 const INFERENCE_URL = process.env.NEXT_PUBLIC_INFERENCE_URL ?? "http://localhost:8000/detect";
 
 // ── Confidence thresholds for tiered fallback ──
-// YOLO_FALLBACK_THRESHOLD and YOLO_WORLD_ACCEPT_THRESHOLD are now derived
-// from the master sensitivity parameter via computeThresholds() in
-// threshold-config.ts. These re-exports provide default-sensitivity values
-// for consumers that don't have access to site config (e.g. tests, scripts).
+// YOLO_FALLBACK_THRESHOLD is derived from the master sensitivity parameter
+// via computeThresholds() in threshold-config.ts. This re-export provides
+// the default-sensitivity value for consumers that don't have access to
+// site config (e.g. tests, scripts).
 import { computeThresholds } from "./threshold-config";
 export { computeThresholds, type ThresholdConfig, type Calibration } from "./threshold-config";
 const _defaults = computeThresholds(0.5);
 /** @deprecated Use computeThresholds(sensitivity).YOLO_FALLBACK_THRESHOLD */
 export const YOLO_FALLBACK_THRESHOLD: number = _defaults.YOLO_FALLBACK_THRESHOLD;
-/** YOLO26m confidence below this fires API in parallel with YOLO World. */
-export const YOLO_API_PARALLEL_THRESHOLD = 0.3;
-/** @deprecated Use computeThresholds(sensitivity).YOLO_WORLD_ACCEPT_THRESHOLD */
-export const YOLO_WORLD_ACCEPT_THRESHOLD: number = _defaults.YOLO_WORLD_ACCEPT_THRESHOLD;
 
 // ── System status (observable by UI components) ──
 export type ModelStatus = "loading" | "ready" | "error";

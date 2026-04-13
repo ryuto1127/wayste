@@ -1,0 +1,151 @@
+/**
+ * Bounding-box utilities for spatial tracking and frame-change detection.
+ *
+ * Pure functions — no React, no refs, no side effects.
+ * All bboxes are in YOLO pixel space: [x, y, width, height] within 640×640.
+ */
+
+export type Bbox = [x: number, y: number, w: number, h: number];
+
+// ── IoU ──
+
+/** Compute Intersection-over-Union for two [x, y, w, h] bboxes. */
+export function computeIoU(a: Bbox, b: Bbox): number {
+  const ax1 = a[0], ay1 = a[1], ax2 = a[0] + a[2], ay2 = a[1] + a[3];
+  const bx1 = b[0], by1 = b[1], bx2 = b[0] + b[2], by2 = b[1] + b[3];
+
+  const ix1 = Math.max(ax1, bx1);
+  const iy1 = Math.max(ay1, by1);
+  const ix2 = Math.min(ax2, bx2);
+  const iy2 = Math.min(ay2, by2);
+
+  const iw = Math.max(0, ix2 - ix1);
+  const ih = Math.max(0, iy2 - iy1);
+  const intersection = iw * ih;
+
+  if (intersection === 0) return 0;
+
+  const aArea = a[2] * a[3];
+  const bArea = b[2] * b[3];
+  const union = aArea + bArea - intersection;
+
+  return union > 0 ? intersection / union : 0;
+}
+
+// ── Greedy IoU Matching ──
+
+export interface TrackableItem {
+  id: number;
+  bbox: Bbox;
+}
+
+export interface DetectionItem {
+  bbox: Bbox;
+  index: number;
+}
+
+export interface MatchResult {
+  matched: { trackedId: number; detectionIndex: number; iou: number }[];
+  unmatchedTracked: number[];
+  unmatchedDetections: number[];
+}
+
+/**
+ * Greedy IoU matching between tracked items and new detections.
+ *
+ * Builds an NxM IoU matrix, then greedily assigns pairs in descending
+ * IoU order. Both sides can only be assigned once. Pairs below minIoU
+ * are left unmatched.
+ */
+export function greedyIoUMatch(
+  tracked: TrackableItem[],
+  detections: DetectionItem[],
+  minIoU = 0.3,
+): MatchResult {
+  if (tracked.length === 0 || detections.length === 0) {
+    return {
+      matched: [],
+      unmatchedTracked: tracked.map((t) => t.id),
+      unmatchedDetections: detections.map((d) => d.index),
+    };
+  }
+
+  // Build IoU matrix + flat list for sorting
+  const pairs: { ti: number; di: number; iou: number }[] = [];
+  for (let ti = 0; ti < tracked.length; ti++) {
+    for (let di = 0; di < detections.length; di++) {
+      const iou = computeIoU(tracked[ti].bbox, detections[di].bbox);
+      if (iou >= minIoU) {
+        pairs.push({ ti, di, iou });
+      }
+    }
+  }
+
+  // Sort descending by IoU — greedy best-first
+  pairs.sort((a, b) => b.iou - a.iou);
+
+  const usedTracked = new Set<number>();
+  const usedDetections = new Set<number>();
+  const matched: MatchResult["matched"] = [];
+
+  for (const { ti, di, iou } of pairs) {
+    if (usedTracked.has(ti) || usedDetections.has(di)) continue;
+    usedTracked.add(ti);
+    usedDetections.add(di);
+    matched.push({
+      trackedId: tracked[ti].id,
+      detectionIndex: detections[di].index,
+      iou,
+    });
+  }
+
+  const unmatchedTracked = tracked
+    .filter((_, i) => !usedTracked.has(i))
+    .map((t) => t.id);
+  const unmatchedDetections = detections
+    .filter((_, i) => !usedDetections.has(i))
+    .map((d) => d.index);
+
+  return { matched, unmatchedTracked, unmatchedDetections };
+}
+
+// ── Frame Fingerprinting ──
+
+/**
+ * Compute a 32×32 grayscale fingerprint of the current video frame.
+ * Uses the same center-square crop as YOLO (short-side based).
+ *
+ * @param video Source video element
+ * @param canvas Reusable 32×32 OffscreenCanvas (caller owns lifecycle)
+ */
+export function computeFrameFingerprint(
+  video: HTMLVideoElement,
+  canvas: OffscreenCanvas,
+): Uint8Array {
+  const ctx = canvas.getContext("2d") as OffscreenCanvasRenderingContext2D;
+  const vw = video.videoWidth;
+  const vh = video.videoHeight;
+  const side = Math.min(vw, vh);
+  const sx = Math.round((vw - side) / 2);
+  const sy = Math.round((vh - side) / 2);
+
+  ctx.drawImage(video, sx, sy, side, side, 0, 0, 32, 32);
+  const { data } = ctx.getImageData(0, 0, 32, 32);
+
+  const gray = new Uint8Array(1024);
+  for (let i = 0; i < 1024; i++) {
+    const o = i * 4;
+    gray[i] = (0.299 * data[o] + 0.587 * data[o + 1] + 0.114 * data[o + 2]) | 0;
+  }
+  return gray;
+}
+
+/** Mean absolute pixel difference between two fingerprints (0–255 scale). */
+export function frameDiff(a: Uint8Array, b: Uint8Array): number {
+  if (a.length !== b.length || a.length === 0) return 255;
+  let sum = 0;
+  for (let i = 0; i < a.length; i++) {
+    sum += Math.abs(a[i] - b[i]);
+  }
+  return sum / a.length;
+}

@@ -167,6 +167,17 @@ export interface ClassificationResponse {
   imageUrl?: string;  // Vercel Blob URL of the captured frame
 }
 
+// ── Tracked result (spatial tracking in result state) ──
+
+export interface TrackedResult extends ClassificationResponse {
+  /** Tracking bbox in YOLO pixel space [x, y, w, h] (640×640). Updated each YOLO cycle. */
+  _trackBbox: [number, number, number, number];
+  /** Stable tracking ID (monotonically increasing per session). */
+  _trackId: number;
+  /** Whether this result's classification is locked (never reclassified). */
+  _locked: boolean;
+}
+
 // ── YOLO edge inference types ──
 
 export interface YoloDetection {

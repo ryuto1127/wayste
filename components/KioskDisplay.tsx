@@ -3,6 +3,7 @@
 import { useRef, useEffect, useCallback, useState } from "react";
 import type {
   ClassificationResponse,
+  TrackedResult,
   PipelineState,
   FrameAnalysis,
   ClassifyMeta,
@@ -27,6 +28,13 @@ import {
 import { computeThresholds, type ThresholdConfig, type Calibration } from "@/lib/threshold-config";
 import { perfMonitor } from "@/lib/perf-monitor";
 import { loadYoloRules, resolveYoloDetection, isYoloClassNotWaste } from "@/lib/yolo-rules";
+import {
+  computeFrameFingerprint,
+  frameDiff,
+  greedyIoUMatch,
+  computeIoU,
+  type Bbox,
+} from "@/lib/bbox-utils";
 // kioskAuthHeaders replaced by session token (server-generated, HMAC-signed)
 import CameraFeed, { type CameraFeedHandle } from "./CameraFeed";
 import IdleScreen from "./IdleScreen";
@@ -55,10 +63,14 @@ const API_TIMEOUT_MS = 15_000;
 const RATE_LIMIT_RETRY_MS = 1_200;
 /** Max time in "classifying" state before forcing a timeout recovery. */
 const CLASSIFYING_TIMEOUT_MS = 20_000;
-/** YOLO cycles with no waste detections (but FG present) before escalating to API. */
-const API_ESCALATION_CYCLES = 5;
-/** YOLO cycles a previously-seen detection must be absent before removing it from results. */
+/** Time without meaningful frame changes before escalating to API (ms). */
+const FRAME_STALE_ESCALATION_MS = 700;
+/** Mean pixel diff threshold for "frame has changed significantly" (0–255 scale). */
+const FRAME_CHANGE_THRESHOLD = 8;
+/** Frame-change YOLO cycles a tracked item must be absent before removing from results. */
 const YOLO_GONE_CYCLES = 3;
+/** Frame-change cycles an unresolved new item persists before API escalation from result state. */
+const UNRESOLVED_ESCALATION_CYCLES = 3;
 
 // ── Background adaptation rates (passed to FrameAnalyzer per pipeline state) ──
 // idle / cooldown: full rate — continuously absorb drift and persistent leftovers
@@ -113,7 +125,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
   const [mounted, setMounted] = useState(false);
   const [pipelineState, setPipelineState] = useState<PipelineState>("idle");
   const [stableResults, setStableResults] =
-    useState<ClassificationResponse[]>([]);
+    useState<TrackedResult[]>([]);
   const [resultRequestIds, setResultRequestIds] = useState<(string | undefined)[]>([]);
   /** Stream definitions from site config — passed to ResultScreen for bin position display. */
   const [siteStreams, setSiteStreams] = useState<import("@/lib/types").StreamDefinition[]>([]);
@@ -151,14 +163,24 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
   const nothingDetectedCountRef = useRef(0);
   const cooldownStartRef = useRef(0);
   const inFlightRef = useRef(false);
-  // ── YOLO continuous loop refs ──
+  // ── YOLO loop refs ──
   const yoloRunningRef = useRef(false);
-  /** Consecutive YOLO cycles with no waste detections (while FG present). */
-  const yoloEmptyCyclesRef = useRef(0);
-  /** Per-className gone counter — tracks how many YOLO cycles each shown result has been absent. */
-  const detectionGoneMapRef = useRef<Map<string, number>>(new Map());
+  /** Per-trackId gone counter — tracks how many frame-change YOLO cycles each tracked result has been absent. */
+  const detectionGoneMapRef = useRef<Map<number, number>>(new Map());
+  /** Monotonically increasing tracking ID counter. */
+  const nextTrackIdRef = useRef(1);
+  /** 32x32 reusable canvas for frame fingerprinting. */
+  const fingerprintCanvasRef = useRef<OffscreenCanvas | null>(null);
+  /** Grayscale fingerprint of the last frame that YOLO actually processed. */
+  const lastYoloFingerprintRef = useRef<Uint8Array | null>(null);
+  /** Timestamp of the last YOLO run. */
+  const lastYoloRunTimeRef = useRef(0);
+  /** AbortController for in-flight API call (enables YOLO race cancellation). */
+  const apiAbortRef = useRef<AbortController | null>(null);
+  /** Tracks unresolved new bboxes in result state for API escalation. */
+  const unresolvedNewItemsRef = useRef<Map<string, { bbox: Bbox; count: number }>>(new Map());
   /** Mirror of stableResults for stale-closure-safe reads in the YOLO loop. */
-  const stableResultsRef = useRef<ClassificationResponse[]>([]);
+  const stableResultsRef = useRef<TrackedResult[]>([]);
   const lastAnalysisRef = useRef<FrameAnalysis | null>(null);
   const lastCachedRef = useRef("");
   const errorSetAtRef = useRef(0);
@@ -528,8 +550,9 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           if (fgPersistRef.current >= FG_TRIGGER_FRAMES) {
             fgPersistRef.current = 0;
             goneCountRef.current = 0;
-            yoloEmptyCyclesRef.current = 0;
             detectionGoneMapRef.current.clear();
+            unresolvedNewItemsRef.current.clear();
+            lastYoloFingerprintRef.current = null;
             classifyStartRef.current = Date.now();
             transition("classifying");
             startYoloLoop(analyzer);
@@ -613,8 +636,9 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           pendingItemRef.current = false;
           fgPersistRef.current = 0;
           goneCountRef.current = 0;
-          yoloEmptyCyclesRef.current = 0;
           detectionGoneMapRef.current.clear();
+          unresolvedNewItemsRef.current.clear();
+          lastYoloFingerprintRef.current = null;
           if (roiHasFg) {
             classifyStartRef.current = Date.now();
             transition("classifying");
@@ -640,23 +664,53 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       yoloRunningRef.current = false; // stop YOLO loop on unmount
     };
 
-    // ── YOLO continuous loop ──
-    // Runs back-to-back inference as fast as the model allows (~7-10fps for
-    // medium models on WebGPU). Started when FG detects an approaching hand,
-    // continues through classifying and result states, stopped when everything
-    // leaves the frame.
+    // ── YOLO frame-change-triggered loop ──
+    // Fires YOLO only when the frame has changed significantly since the last
+    // run. This avoids wasting GPU cycles on identical frames and gives each
+    // retry a genuinely different view (angle/position). In result state YOLO
+    // continues for spatial tracking (bbox IoU) — classifications are locked.
 
     function startYoloLoop(currentAnalyzer: FrameAnalyzer) {
       if (yoloRunningRef.current) return;
       const backend = inferenceRef.current;
       if (!backend?.isReady() || !siteConfigRef.current) return;
       yoloRunningRef.current = true;
+      lastYoloFingerprintRef.current = null; // first run always fires
+      lastYoloRunTimeRef.current = Date.now();
       console.log(`[yolo-loop] started`);
-      // Fire-and-forget async loop
       (async () => {
         while (yoloRunningRef.current) {
           const video = cameraRef.current?.getVideo();
           if (!video) { await new Promise(r => setTimeout(r, 50)); continue; }
+
+          // ── Frame-change gate ──
+          if (!fingerprintCanvasRef.current) {
+            fingerprintCanvasRef.current = new OffscreenCanvas(32, 32);
+          }
+          const fp = computeFrameFingerprint(video, fingerprintCanvasRef.current);
+          const isFirstRun = !lastYoloFingerprintRef.current;
+          let shouldRunYolo = isFirstRun;
+          if (!isFirstRun) {
+            const diff = frameDiff(lastYoloFingerprintRef.current!, fp);
+            shouldRunYolo = diff >= FRAME_CHANGE_THRESHOLD;
+          }
+
+          if (!shouldRunYolo) {
+            // Frame hasn't changed — check stale escalation (classifying only)
+            const staleDuration = Date.now() - lastYoloRunTimeRef.current;
+            if (staleDuration >= FRAME_STALE_ESCALATION_MS
+                && stateRef.current === "classifying"
+                && !inFlightRef.current) {
+              const analysis = lastAnalysisRef.current;
+              triggerApiEscalation(video, analysis);
+            }
+            await new Promise(r => setTimeout(r, 30));
+            continue;
+          }
+
+          // Frame changed → run YOLO
+          lastYoloFingerprintRef.current = fp;
+          lastYoloRunTimeRef.current = Date.now();
 
           const yoloStart = Date.now();
           let detections: YoloDetection[];
@@ -668,9 +722,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           const yoloMs = Date.now() - yoloStart;
           perfMonitor.recordYoloInference(yoloMs);
 
-          // Read latest FG analysis from the CV loop
           const analysis = lastAnalysisRef.current;
-
           handleYoloCycleResult(detections, yoloMs, video, analysis, currentAnalyzer);
         }
         console.log(`[yolo-loop] stopped`);
@@ -679,42 +731,150 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
 
     function stopYoloLoop() {
       yoloRunningRef.current = false;
+      // Abort any in-flight API call when stopping the loop
+      if (apiAbortRef.current) {
+        apiAbortRef.current.abort();
+        apiAbortRef.current = null;
+      }
     }
 
-    /** Process one YOLO cycle result — drive state transitions + update displayed results. */
+    /** Escalate to API when YOLO can't resolve after frame stale timeout. */
+    function triggerApiEscalation(
+      video: HTMLVideoElement,
+      analysis: FrameAnalysis | null,
+    ) {
+      if (!analysis || imageQualityBand(analysis) !== "good" || inFlightRef.current) return;
+      console.log(`[yolo-loop] Frame stale for ${FRAME_STALE_ESCALATION_MS}ms → escalating to API`);
+      inFlightRef.current = true;
+      const controller = new AbortController();
+      apiAbortRef.current = controller;
+
+      const wasteDetections: YoloDetection[] = []; // no detections to hint
+      const tier1Hints = wasteDetections
+        .map(d => ({ itemName: d.className, confidence: d.confidence }))
+        .sort((a, b) => b.confidence - a.confidence).slice(0, 5);
+
+      classifyViaApiAsync(video, analysis, controller.signal, undefined, true, { tier1: tier1Hints })
+        .then(({ result: r, requestId, multiResults }) => {
+          apiAbortRef.current = null;
+          const apiResults = multiResults ?? (r ? [r] : []);
+          if (apiResults.length > 0) {
+            handleMultiClassificationResults(apiResults, apiResults.map(() => requestId));
+          } else {
+            nothingDetectedCountRef.current++;
+            cooldownStartRef.current = Date.now();
+            transition("cooldown");
+            stopYoloLoop();
+          }
+          inFlightRef.current = false;
+        })
+        .catch((err) => {
+          if (err instanceof DOMException && err.name === "AbortError") {
+            // YOLO won the race — silently ignore
+            return;
+          }
+          apiAbortRef.current = null;
+          nothingDetectedCountRef.current++;
+          cooldownStartRef.current = Date.now();
+          transition("cooldown");
+          stopYoloLoop();
+          inFlightRef.current = false;
+        });
+    }
+
+    /** Escalate a new unresolved item to API from result state. */
+    function triggerApiEscalationFromResult(
+      video: HTMLVideoElement,
+      analysis: FrameAnalysis | null,
+      triggeringDetection: YoloDetection,
+    ) {
+      if (!analysis || inFlightRef.current) return;
+      inFlightRef.current = true;
+      const controller = new AbortController();
+      apiAbortRef.current = controller;
+
+      classifyViaApiAsync(video, analysis, controller.signal, undefined, true, {
+        tier1: [{ itemName: triggeringDetection.className, confidence: triggeringDetection.confidence }],
+      })
+        .then(({ result: r, requestId, multiResults }) => {
+          apiAbortRef.current = null;
+          const apiResults = multiResults ?? (r ? [r] : []);
+          if (apiResults.length > 0 && stateRef.current === "result") {
+            // Merge API results into existing locked results
+            const newTracked: TrackedResult[] = apiResults.map(apiR => ({
+              ...apiR,
+              _trackBbox: triggeringDetection.bbox,
+              _trackId: nextTrackIdRef.current++,
+              _locked: true,
+            }));
+            setStableResults(prev => {
+              const merged = [...prev, ...newTracked].slice(0, 4);
+              // Sort by bbox center-x for consistent L→R display
+              merged.sort((a, b) => {
+                const aCx = a._trackBbox[0] + a._trackBbox[2] / 2;
+                const bCx = b._trackBbox[0] + b._trackBbox[2] / 2;
+                return aCx - bCx;
+              });
+              return merged;
+            });
+            setResultRequestIds(prev => [...prev, ...newTracked.map(() => requestId)]);
+          }
+          inFlightRef.current = false;
+        })
+        .catch((err) => {
+          if (err instanceof DOMException && err.name === "AbortError") return;
+          apiAbortRef.current = null;
+          inFlightRef.current = false;
+        });
+    }
+
+    /** Process one YOLO cycle result — drive state transitions + spatial tracking. */
     function handleYoloCycleResult(
       detections: YoloDetection[],
       yoloMs: number,
       video: HTMLVideoElement,
       analysis: FrameAnalysis | null,
-      currentAnalyzer: FrameAnalyzer,
+      _currentAnalyzer: FrameAnalyzer,
     ) {
       const state = stateRef.current;
       const th = thresholdsRef.current;
       const wasteDetections = detections.filter(d => !isYoloClassNotWaste(d.className));
 
       // ── Resolve detections via YOLO rules ──
-      const resolvedResults: (ClassificationResponse & { _bboxX?: number })[] = [];
-      let unresolvedCount = 0;
+      const resolvedResults: (ClassificationResponse & { _bbox?: Bbox })[] = [];
+      const unresolvedDetections: YoloDetection[] = [];
       for (const det of wasteDetections.slice(0, 4)) {
-        const bboxX = det.bbox[0] + det.bbox[2] / 2;
         if (det.confidence >= th.YOLO_FALLBACK_THRESHOLD) {
           const r = resolveYoloDetection(det, siteConfigRef.current!, localeRef.current);
           if (r) {
-            (r as ClassificationResponse & { _bboxX?: number })._bboxX = bboxX;
-            resolvedResults.push(r as ClassificationResponse & { _bboxX?: number });
+            (r as ClassificationResponse & { _bbox?: Bbox })._bbox = det.bbox;
+            resolvedResults.push(r as ClassificationResponse & { _bbox?: Bbox });
             continue;
           }
         }
-        unresolvedCount++;
+        unresolvedDetections.push(det);
       }
 
       const hasResults = resolvedResults.length > 0;
 
+      // ═══════════════════════════════════════
+      // ── CLASSIFYING STATE ──
+      // ═══════════════════════════════════════
       if (state === "classifying") {
         if (hasResults) {
-          // YOLO found items → show result immediately
-          resolvedResults.sort((a, b) => (a._bboxX ?? 0) - (b._bboxX ?? 0));
+          // ── YOLO race: cancel in-flight API if YOLO wins ──
+          if (inFlightRef.current && apiAbortRef.current) {
+            console.log(`[yolo-loop] YOLO won race — aborting in-flight API`);
+            apiAbortRef.current.abort();
+            apiAbortRef.current = null;
+            inFlightRef.current = false;
+          }
+
+          resolvedResults.sort((a, b) => {
+            const aCx = (a._bbox?.[0] ?? 0) + (a._bbox?.[2] ?? 0) / 2;
+            const bCx = (b._bbox?.[0] ?? 0) + (b._bbox?.[2] ?? 0) / 2;
+            return aCx - bCx;
+          });
           console.log(`[yolo-loop] HIT: ${resolvedResults.map(r => r.itemName).join(" + ")} in ${yoloMs}ms`);
 
           if (analysis) {
@@ -723,93 +883,113 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           }
 
           handleMultiClassificationResults(resolvedResults, resolvedResults.map(() => undefined));
-          yoloEmptyCyclesRef.current = 0;
           detectionGoneMapRef.current.clear();
-        } else {
-          // No YOLO results this cycle
-          yoloEmptyCyclesRef.current++;
-
-          // API escalation: YOLO can't find anything but FG says something is there
-          if (yoloEmptyCyclesRef.current >= API_ESCALATION_CYCLES
-              && analysis && imageQualityBand(analysis) === "good"
-              && !inFlightRef.current) {
-            console.log(`[yolo-loop] ${API_ESCALATION_CYCLES} empty cycles → escalating to API`);
-            inFlightRef.current = true;
-            const tier1Hints = wasteDetections
-              .map(d => ({ itemName: d.className, confidence: d.confidence }))
-              .sort((a, b) => b.confidence - a.confidence).slice(0, 5);
-            classifyViaApiAsync(video, analysis, new AbortController().signal, undefined, true, { tier1: tier1Hints })
-              .then(({ result: r, requestId, multiResults }) => {
-                const apiResults = multiResults ?? (r ? [r] : []);
-                if (apiResults.length > 0) {
-                  handleMultiClassificationResults(apiResults, apiResults.map(() => requestId));
-                } else {
-                  nothingDetectedCountRef.current++;
-                  cooldownStartRef.current = Date.now();
-                  transition("cooldown");
-                  stopYoloLoop();
-                }
-                inFlightRef.current = false;
-              })
-              .catch(() => {
-                nothingDetectedCountRef.current++;
-                cooldownStartRef.current = Date.now();
-                transition("cooldown");
-                stopYoloLoop();
-                inFlightRef.current = false;
-              });
-          }
         }
+        // Note: API escalation for stale frames is handled in the loop itself
+        // (triggerApiEscalation), not here.
         return;
       }
 
+      // ═══════════════════════════════════════
+      // ── RESULT STATE (locked + bbox IoU tracking) ──
+      // ═══════════════════════════════════════
       if (state === "result") {
-        // ── Dynamic result updates ──
-        // Track which displayed items YOLO still sees vs which have disappeared.
-        const currentClasses = new Set(resolvedResults.map(r => r.itemName));
-        const goneMap = detectionGoneMapRef.current;
-
-        // Update gone counters for displayed results
         const displayedResults = stableResultsRef.current;
-        for (const displayed of displayedResults) {
-          if (currentClasses.has(displayed.itemName)) {
-            // Still visible — reset gone counter
-            goneMap.delete(displayed.itemName);
-          } else {
-            // Not seen this cycle
-            goneMap.set(displayed.itemName, (goneMap.get(displayed.itemName) ?? 0) + 1);
+        if (displayedResults.length === 0) return;
+
+        // Build trackable + detection arrays for IoU matching
+        const tracked = displayedResults.map(r => ({
+          id: r._trackId,
+          bbox: r._trackBbox,
+        }));
+        // ALL waste detections (not just resolved) participate in spatial matching
+        const detectionItems = wasteDetections.slice(0, 8).map((det, i) => ({
+          bbox: det.bbox as Bbox,
+          index: i,
+        }));
+
+        const matchResult = greedyIoUMatch(tracked, detectionItems, 0.3);
+        const goneMap = detectionGoneMapRef.current;
+        let needsUpdate = false;
+
+        // ── Matched: update spatial position only (classification locked) ──
+        for (const match of matchResult.matched) {
+          const trackedItem = displayedResults.find(r => r._trackId === match.trackedId);
+          if (trackedItem) {
+            trackedItem._trackBbox = wasteDetections[match.detectionIndex].bbox;
           }
+          goneMap.delete(match.trackedId);
         }
 
-        // Remove items that have been gone for YOLO_GONE_CYCLES
-        const toRemove = new Set<string>();
-        for (const [name, count] of goneMap) {
+        // ── Unmatched tracked: increment gone counter ──
+        for (const trackedId of matchResult.unmatchedTracked) {
+          goneMap.set(trackedId, (goneMap.get(trackedId) ?? 0) + 1);
+        }
+
+        // ── Remove items gone for YOLO_GONE_CYCLES ──
+        const toRemoveIds = new Set<number>();
+        for (const [trackId, count] of goneMap) {
           if (count >= YOLO_GONE_CYCLES) {
-            toRemove.add(name);
-            goneMap.delete(name);
+            toRemoveIds.add(trackId);
+            goneMap.delete(trackId);
+            needsUpdate = true;
           }
         }
 
-        // Add new items that weren't in existing results
-        const existingClasses = new Set(displayedResults.map(r => r.itemName));
-        const newResults = resolvedResults.filter(r => !existingClasses.has(r.itemName));
+        // ── Unmatched detections: new items entering scene ──
+        for (const detIdx of matchResult.unmatchedDetections) {
+          const det = wasteDetections[detIdx];
+          if (!det) continue;
 
-        if (toRemove.size > 0 || newResults.length > 0) {
-          const updated = [
-            ...displayedResults.filter(r => !toRemove.has(r.itemName)),
-            ...newResults,
-          ].slice(0, 4);
+          // Try YOLO rule resolution first
+          if (det.confidence >= th.YOLO_FALLBACK_THRESHOLD) {
+            const resolved = resolveYoloDetection(det, siteConfigRef.current!, localeRef.current);
+            if (resolved) {
+              // New YOLO-resolved item → add as locked TrackedResult
+              const newTracked: TrackedResult = {
+                ...resolved,
+                _trackBbox: det.bbox,
+                _trackId: nextTrackIdRef.current++,
+                _locked: true,
+              };
+              displayedResults.push(newTracked);
+              needsUpdate = true;
+              console.log(`[yolo-loop] new item added: ${resolved.itemName}`);
+              continue;
+            }
+          }
 
-          if (toRemove.size > 0) console.log(`[yolo-loop] removed: ${[...toRemove].join(", ")}`);
-          if (newResults.length > 0) console.log(`[yolo-loop] added: ${newResults.map(r => r.itemName).join(", ")}`);
-
-          if (updated.length === 0) {
-            // All items removed by YOLO — but wait for FG to confirm exit
-            // (handled by the FG-based gone detection in the main CV loop)
+          // Unresolved new item → track for API escalation
+          const key = `${Math.round(det.bbox[0])}_${Math.round(det.bbox[1])}`;
+          const entry = unresolvedNewItemsRef.current.get(key);
+          if (entry) {
+            const iou = computeIoU(entry.bbox, det.bbox);
+            if (iou > 0.3) {
+              entry.count++;
+              entry.bbox = det.bbox;
+              if (entry.count >= UNRESOLVED_ESCALATION_CYCLES && !inFlightRef.current) {
+                unresolvedNewItemsRef.current.delete(key);
+                console.log(`[yolo-loop] unresolved item persisted ${UNRESOLVED_ESCALATION_CYCLES} cycles → API escalation`);
+                triggerApiEscalationFromResult(video, analysis, det);
+              }
+            }
           } else {
-            setStableResults(updated);
+            unresolvedNewItemsRef.current.set(key, { bbox: det.bbox, count: 1 });
+          }
+        }
+
+        if (needsUpdate) {
+          const updated = displayedResults
+            .filter(r => !toRemoveIds.has(r._trackId))
+            .slice(0, 4);
+          if (toRemoveIds.size > 0) {
+            console.log(`[yolo-loop] removed trackIds: ${[...toRemoveIds].join(", ")}`);
+          }
+          if (updated.length > 0) {
+            setStableResults([...updated]); // spread to trigger re-render
             setResultRequestIds(updated.map(() => undefined));
           }
+          // If all items removed, wait for FG-based exit (handled in main CV loop)
         }
         return;
       }
@@ -930,16 +1110,15 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           const wasteDetections = detections.filter(d => !isYoloClassNotWaste(d.className));
 
           // ── Detection routing ──
-          const resolvedResults: (ClassificationResponse & { _bboxX?: number })[] = [];
+          const resolvedResults: (ClassificationResponse & { _bbox?: Bbox })[] = [];
           let unresolvedCount = 0;
 
           for (const detection of wasteDetections.slice(0, 4)) {
-            const bboxX = detection.bbox[0] + detection.bbox[2] / 2; // center-x
             if (detection.confidence >= thresholdsRef.current.YOLO_FALLBACK_THRESHOLD) {
               const r = resolveYoloDetection(detection, siteConfigRef.current!, localeRef.current);
               if (r) {
-                (r as ClassificationResponse & { _bboxX?: number })._bboxX = bboxX;
-                resolvedResults.push(r as ClassificationResponse & { _bboxX?: number });
+                (r as ClassificationResponse & { _bbox?: Bbox })._bbox = detection.bbox;
+                resolvedResults.push(r as ClassificationResponse & { _bbox?: Bbox });
                 continue;
               }
             }
@@ -948,7 +1127,11 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
 
           // All items resolved locally → instant result
           if (resolvedResults.length > 0 && unresolvedCount === 0) {
-            resolvedResults.sort((a, b) => (a._bboxX ?? 0) - (b._bboxX ?? 0));
+            resolvedResults.sort((a, b) => {
+              const aCx = (a._bbox?.[0] ?? 0) + (a._bbox?.[2] ?? 0) / 2;
+              const bCx = (b._bbox?.[0] ?? 0) + (b._bbox?.[2] ?? 0) / 2;
+              return aCx - bCx;
+            });
             console.log(`[tier1] YOLO HIT: ${resolvedResults.map((r) => r.itemName).join(" + ")} in ${yoloMs}ms`);
             logYoloOnlyResult(video, resolvedResults[0], detections, yoloMs, analysis, "T1", undefined, undefined,
               { tier1: wasteDetections.map(d => ({ itemName: d.className, confidence: d.confidence })).sort((a, b) => b.confidence - a.confidence).slice(0, 5) });
@@ -1001,13 +1184,18 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
     function escalateToApi(
       yoloBest: { className: string; confidence: number } | null,
       apiPromise: (multi?: boolean, tierResults?: { tier1?: { itemName: string; confidence: number }[] }) => Promise<{ result: (ClassificationResponse & { requestId?: string }) | null; requestId?: string; multiResults?: ClassificationResponse[] }>,
-      tier1Results: (ClassificationResponse & { _bboxX?: number })[],
+      tier1Results: (ClassificationResponse & { _bbox?: Bbox })[],
       tier1Hints: { itemName: string; confidence: number }[],
     ) {
       // Show optimistic T1 results while waiting for API
       if (tier1Results.length > 0) {
-        tier1Results.sort((a, b) => (a._bboxX ?? 0) - (b._bboxX ?? 0));
-        setStableResults(tier1Results);
+        tier1Results.sort((a, b) => {
+          const aCx = (a._bbox?.[0] ?? 0) + (a._bbox?.[2] ?? 0) / 2;
+          const bCx = (b._bbox?.[0] ?? 0) + (b._bbox?.[2] ?? 0) / 2;
+          return aCx - bCx;
+        });
+        setStableResults(tier1Results.map(r => toTrackedResult(r)));
+
         resultEnterTimeRef.current = Date.now();
       }
 
@@ -1103,8 +1291,18 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       handleMultiClassificationResults([result], [requestId ?? result.requestId]);
     }
 
+    /** Convert a ClassificationResponse (possibly with _bbox) to a TrackedResult. */
+    function toTrackedResult(r: ClassificationResponse & { _bbox?: Bbox; requestId?: string }): TrackedResult {
+      return {
+        ...r,
+        _trackBbox: r._bbox ?? [0, 0, 640, 640], // full frame fallback
+        _trackId: nextTrackIdRef.current++,
+        _locked: true,
+      };
+    }
+
     function handleMultiClassificationResults(
-      results: (ClassificationResponse & { requestId?: string })[],
+      results: (ClassificationResponse & { requestId?: string; _bbox?: Bbox })[],
       requestIds: (string | undefined)[],
     ) {
       // Filter out "nothing detected" results
@@ -1114,7 +1312,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
 
       if (valid.length === 0) {
         nothingDetectedCountRef.current++;
-        setStableResults([{
+        setStableResults([toTrackedResult({
           itemName: "nothing_detected",
           wasteStream: "landfill",
           confidence: 0,
@@ -1123,7 +1321,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           binLabel: "",
           needsReview: false,
           isCompound: false,
-        }]);
+        })]);
         setResultRequestIds([]);
         setError(null);
         goneCountRef.current = 0;
@@ -1135,7 +1333,8 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
 
       // Successful classification — reset the nothing-detected counter
       nothingDetectedCountRef.current = 0;
-      setStableResults(valid);
+      const tracked = valid.map(r => toTrackedResult(r));
+      setStableResults(tracked);
       setResultRequestIds(
         valid.map((r) => requestIds[results.indexOf(r)] ?? r.requestId)
       );

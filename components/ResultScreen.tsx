@@ -253,8 +253,8 @@ function FullscreenResult({
   const directionArrow = position ? T(positionArrowKey[position]) : null;
 
   // Collect notes to display
-  const noteText = result.preAction || result.specialInstructions;
-  const secondaryNote = result.preAction && result.specialInstructions ? result.specialInstructions : null;
+  const noteText = result.specialInstructions || result.preAction;
+  const secondaryNote = null;
 
   return (
     <div

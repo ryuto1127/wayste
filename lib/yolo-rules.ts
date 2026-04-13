@@ -196,13 +196,14 @@ export function resolveYoloDetection(
   }
 
   // Run through the same override/site-rule pipeline as the API route
+  const ja = locale === "ja";
   const result = buildClassificationResult(
     {
-      itemName: rule.itemName,
+      itemName: (ja && rule.itemName_ja) ? rule.itemName_ja : rule.itemName,
       wasteStream: rule.wasteStream,
       confidence: detection.confidence,
       reasoning: rule.reasoning,
-      preAction: rule.preAction,
+      preAction: (ja && rule.preAction_ja) ? rule.preAction_ja : rule.preAction,
     },
     siteConfig,
     locale,
@@ -226,13 +227,14 @@ export function resolveYoloWorldDetection(
   const rule = worldRulesCache.rules[detection.className];
   if (!rule) return null;
 
+  const ja = locale === "ja";
   const result = buildClassificationResult(
     {
-      itemName: rule.itemName,
+      itemName: (ja && rule.itemName_ja) ? rule.itemName_ja : rule.itemName,
       wasteStream: rule.wasteStream,
       confidence: detection.confidence,
       reasoning: rule.reasoning,
-      preAction: rule.preAction,
+      preAction: (ja && rule.preAction_ja) ? rule.preAction_ja : rule.preAction,
     },
     siteConfig,
     locale,

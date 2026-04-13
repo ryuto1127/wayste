@@ -181,9 +181,11 @@ export interface YoloDetection {
 
 export interface YoloClassRule {
   itemName: string;
+  itemName_ja?: string;
   wasteStream: WasteStream;
   reasoning: string;
   preAction?: string;
+  preAction_ja?: string;
   /**
    * When true, this COCO-80 class requires material sub-classification
    * (e.g., "bottle" → PET / glass / aluminium). If Tier 1 confidence ≥ 0.80,

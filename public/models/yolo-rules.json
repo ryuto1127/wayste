@@ -1,417 +1,72 @@
 {
-  "confidence_threshold": 0.65,
-  "min_box_area": 5000,
+  "confidence_threshold": 0.55,
+  "min_box_area": 3000,
   "rules": {
-    "person": {
-      "itemName": "Not Waste",
-      "wasteStream": "not_waste",
-      "reasoning": "This is a person, not a waste item."
-    },
-    "bicycle": {
-      "itemName": "Not Waste",
-      "wasteStream": "not_waste",
-      "reasoning": "This is a bicycle, not a waste item."
-    },
-    "car": {
-      "itemName": "Not Waste",
-      "wasteStream": "not_waste",
-      "reasoning": "This is a vehicle, not a waste item."
-    },
-    "motorcycle": {
-      "itemName": "Not Waste",
-      "wasteStream": "not_waste",
-      "reasoning": "This is a vehicle, not a waste item."
-    },
-    "airplane": {
-      "itemName": "Not Waste",
-      "wasteStream": "not_waste",
-      "reasoning": "This is a vehicle, not a waste item."
-    },
-    "bus": {
-      "itemName": "Not Waste",
-      "wasteStream": "not_waste",
-      "reasoning": "This is a vehicle, not a waste item."
-    },
-    "train": {
-      "itemName": "Not Waste",
-      "wasteStream": "not_waste",
-      "reasoning": "This is a vehicle, not a waste item."
-    },
-    "truck": {
-      "itemName": "Not Waste",
-      "wasteStream": "not_waste",
-      "reasoning": "This is a vehicle, not a waste item."
-    },
-    "boat": {
-      "itemName": "Not Waste",
-      "wasteStream": "not_waste",
-      "reasoning": "This is a vehicle, not a waste item."
-    },
-    "traffic light": {
-      "itemName": "Not Waste",
-      "wasteStream": "not_waste",
-      "reasoning": "This is infrastructure, not a waste item."
-    },
-    "fire hydrant": {
-      "itemName": "Not Waste",
-      "wasteStream": "not_waste",
-      "reasoning": "This is infrastructure, not a waste item."
-    },
-    "stop sign": {
-      "itemName": "Not Waste",
-      "wasteStream": "not_waste",
-      "reasoning": "This is infrastructure, not a waste item."
-    },
-    "parking meter": {
-      "itemName": "Not Waste",
-      "wasteStream": "not_waste",
-      "reasoning": "This is infrastructure, not a waste item."
-    },
-    "bench": {
-      "itemName": "Not Waste",
-      "wasteStream": "not_waste",
-      "reasoning": "This is furniture, not a waste item."
-    },
-    "bird": {
-      "itemName": "Not Waste",
-      "wasteStream": "not_waste",
-      "reasoning": "This is an animal, not a waste item."
-    },
-    "cat": {
-      "itemName": "Not Waste",
-      "wasteStream": "not_waste",
-      "reasoning": "This is an animal, not a waste item."
-    },
-    "dog": {
-      "itemName": "Not Waste",
-      "wasteStream": "not_waste",
-      "reasoning": "This is an animal, not a waste item."
-    },
-    "horse": {
-      "itemName": "Not Waste",
-      "wasteStream": "not_waste",
-      "reasoning": "This is an animal, not a waste item."
-    },
-    "sheep": {
-      "itemName": "Not Waste",
-      "wasteStream": "not_waste",
-      "reasoning": "This is an animal, not a waste item."
-    },
-    "cow": {
-      "itemName": "Not Waste",
-      "wasteStream": "not_waste",
-      "reasoning": "This is an animal, not a waste item."
-    },
-    "elephant": {
-      "itemName": "Not Waste",
-      "wasteStream": "not_waste",
-      "reasoning": "This is an animal, not a waste item."
-    },
-    "bear": {
-      "itemName": "Not Waste",
-      "wasteStream": "not_waste",
-      "reasoning": "This is an animal, not a waste item."
-    },
-    "zebra": {
-      "itemName": "Not Waste",
-      "wasteStream": "not_waste",
-      "reasoning": "This is an animal, not a waste item."
-    },
-    "giraffe": {
-      "itemName": "Not Waste",
-      "wasteStream": "not_waste",
-      "reasoning": "This is an animal, not a waste item."
-    },
-    "backpack": {
-      "itemName": "Backpack",
-      "wasteStream": "landfill",
-      "reasoning": "Mixed-material bags are generally not recyclable. Consider donating if still usable."
-    },
-    "umbrella": {
-      "itemName": "Umbrella",
-      "wasteStream": "landfill",
-      "reasoning": "Mixed materials (metal + fabric) — not recyclable in most programs."
-    },
-    "handbag": {
-      "itemName": "Handbag",
-      "wasteStream": "landfill",
-      "reasoning": "Mixed-material bags are generally not recyclable. Consider donating if still usable."
-    },
-    "tie": {
-      "itemName": "Tie",
-      "wasteStream": "landfill",
-      "reasoning": "Textiles are not recyclable in standard programs. Consider donating."
-    },
-    "suitcase": {
-      "itemName": "Suitcase",
-      "wasteStream": "landfill",
-      "reasoning": "Mixed materials — not recyclable. Consider donating if still usable."
-    },
-    "frisbee": {
-      "itemName": "Frisbee",
-      "wasteStream": "landfill",
-      "reasoning": "Hard plastic toys are not recyclable in most programs."
-    },
-    "skis": {
-      "itemName": "Skis",
-      "wasteStream": "special",
-      "reasoning": "Large sporting equipment requires special disposal or donation."
-    },
-    "snowboard": {
-      "itemName": "Snowboard",
-      "wasteStream": "special",
-      "reasoning": "Large sporting equipment requires special disposal or donation."
-    },
-    "sports ball": {
-      "itemName": "Sports Ball",
-      "wasteStream": "landfill",
-      "reasoning": "Rubber/leather balls are not recyclable. Consider donating if still usable."
-    },
-    "kite": {
-      "itemName": "Kite",
-      "wasteStream": "landfill",
-      "reasoning": "Mixed materials (nylon + plastic) — not recyclable."
-    },
-    "baseball bat": {
-      "itemName": "Baseball Bat",
-      "wasteStream": "landfill",
-      "reasoning": "Consider donating if still usable. Not recyclable in standard programs."
-    },
-    "baseball glove": {
-      "itemName": "Baseball Glove",
-      "wasteStream": "landfill",
-      "reasoning": "Leather goods are not recyclable. Consider donating."
-    },
-    "skateboard": {
-      "itemName": "Skateboard",
-      "wasteStream": "landfill",
-      "reasoning": "Mixed materials — not recyclable. Consider donating if still usable."
-    },
-    "surfboard": {
-      "itemName": "Surfboard",
-      "wasteStream": "special",
-      "reasoning": "Large fiberglass items require special disposal."
-    },
-    "tennis racket": {
-      "itemName": "Tennis Racket",
-      "wasteStream": "landfill",
-      "reasoning": "Mixed materials — not recyclable. Consider donating if still usable."
-    },
-    "bottle": {
-      "itemName": "Bottle",
+    "plastic_bottle": {
+      "itemName": "Plastic Bottle",
       "wasteStream": "recycling",
-      "reasoning": "Bottles are recyclable — empty and rinse before disposing.",
-      "preAction": "Empty and rinse before recycling",
-      "needsSubclassification": true
+      "reasoning": "PET/HDPE plastic bottles are recyclable. Empty and rinse before recycling.",
+      "preAction": "Empty and rinse before recycling"
     },
-    "wine glass": {
-      "itemName": "Glass",
+    "can": {
+      "itemName": "Aluminum Can",
       "wasteStream": "recycling",
-      "reasoning": "Glass is recyclable.",
-      "needsSubclassification": true
+      "reasoning": "Aluminum and steel cans are recyclable. Rinse before recycling.",
+      "preAction": "Rinse before recycling"
     },
-    "cup": {
-      "itemName": "Cup",
+    "paper_cup": {
+      "itemName": "Paper Cup",
       "wasteStream": "landfill",
-      "reasoning": "Most disposable cups have a plastic lining and are not recyclable.",
-      "needsSubclassification": true
+      "reasoning": "Most paper cups have a plastic lining and cannot be recycled."
     },
-    "fork": {
-      "itemName": "Fork",
+    "plastic_cup": {
+      "itemName": "Plastic Cup",
       "wasteStream": "landfill",
-      "reasoning": "Plastic utensils are not recyclable.",
-      "needsSubclassification": true
+      "reasoning": "Disposable plastic cups are generally not recyclable."
     },
-    "knife": {
-      "itemName": "Knife (utensil)",
-      "wasteStream": "landfill",
-      "reasoning": "Plastic utensils are not recyclable.",
-      "needsSubclassification": true
-    },
-    "spoon": {
-      "itemName": "Spoon",
-      "wasteStream": "landfill",
-      "reasoning": "Plastic utensils are not recyclable.",
-      "needsSubclassification": true
-    },
-    "bowl": {
-      "itemName": "Bowl",
-      "wasteStream": "landfill",
-      "reasoning": "Disposable bowls are typically not recyclable.",
-      "needsSubclassification": true
-    },
-    "banana": {
-      "itemName": "Banana",
-      "wasteStream": "compost",
-      "reasoning": "Banana peels and scraps are compostable."
-    },
-    "apple": {
-      "itemName": "Apple",
-      "wasteStream": "compost",
-      "reasoning": "Apple cores and scraps are compostable."
-    },
-    "orange": {
-      "itemName": "Orange",
-      "wasteStream": "compost",
-      "reasoning": "Orange peels and scraps are compostable."
-    },
-    "broccoli": {
-      "itemName": "Broccoli",
-      "wasteStream": "compost",
-      "reasoning": "Vegetable scraps are compostable."
-    },
-    "carrot": {
-      "itemName": "Carrot",
-      "wasteStream": "compost",
-      "reasoning": "Vegetable scraps are compostable."
-    },
-    "sandwich": {
-      "itemName": "Sandwich",
-      "wasteStream": "compost",
-      "reasoning": "Food waste is compostable."
-    },
-    "cake": {
-      "itemName": "Cake",
-      "wasteStream": "compost",
-      "reasoning": "Food waste is compostable."
-    },
-    "donut": {
-      "itemName": "Donut",
-      "wasteStream": "compost",
-      "reasoning": "Food waste is compostable."
-    },
-    "pizza": {
-      "itemName": "Pizza",
-      "wasteStream": "compost",
-      "reasoning": "Food waste is compostable."
-    },
-    "hot dog": {
-      "itemName": "Hot Dog",
-      "wasteStream": "compost",
-      "reasoning": "Food waste is compostable."
-    },
-    "chair": {
-      "itemName": "Not Waste",
-      "wasteStream": "not_waste",
-      "reasoning": "This is furniture, not a waste item."
-    },
-    "couch": {
-      "itemName": "Not Waste",
-      "wasteStream": "not_waste",
-      "reasoning": "This is furniture, not a waste item."
-    },
-    "potted plant": {
-      "itemName": "Not Waste",
-      "wasteStream": "not_waste",
-      "reasoning": "This is a plant, not a waste item."
-    },
-    "bed": {
-      "itemName": "Not Waste",
-      "wasteStream": "not_waste",
-      "reasoning": "This is furniture, not a waste item."
-    },
-    "dining table": {
-      "itemName": "Not Waste",
-      "wasteStream": "not_waste",
-      "reasoning": "This is furniture, not a waste item."
-    },
-    "toilet": {
-      "itemName": "Not Waste",
-      "wasteStream": "not_waste",
-      "reasoning": "This is a fixture, not a waste item."
-    },
-    "tv": {
-      "itemName": "TV",
-      "wasteStream": "special",
-      "reasoning": "Electronics require special e-waste disposal."
-    },
-    "laptop": {
-      "itemName": "Laptop",
-      "wasteStream": "special",
-      "reasoning": "Electronics require special e-waste disposal."
-    },
-    "mouse": {
-      "itemName": "Mouse",
-      "wasteStream": "special",
-      "reasoning": "Electronics require special e-waste disposal."
-    },
-    "remote": {
-      "itemName": "Remote Control",
-      "wasteStream": "special",
-      "reasoning": "Electronics with batteries require special disposal.",
-      "preAction": "Remove batteries before disposing"
-    },
-    "keyboard": {
-      "itemName": "Keyboard",
-      "wasteStream": "special",
-      "reasoning": "Electronics require special e-waste disposal."
-    },
-    "cell phone": {
-      "itemName": "Cell Phone",
-      "wasteStream": "special",
-      "reasoning": "Electronics require special disposal."
-    },
-    "microwave": {
-      "itemName": "Microwave",
-      "wasteStream": "special",
-      "reasoning": "Appliances require special e-waste disposal."
-    },
-    "oven": {
-      "itemName": "Oven",
-      "wasteStream": "special",
-      "reasoning": "Large appliances require special disposal."
-    },
-    "toaster": {
-      "itemName": "Toaster",
-      "wasteStream": "special",
-      "reasoning": "Small appliances require special e-waste disposal."
-    },
-    "sink": {
-      "itemName": "Not Waste",
-      "wasteStream": "not_waste",
-      "reasoning": "This is a fixture, not a waste item."
-    },
-    "refrigerator": {
-      "itemName": "Not Waste",
-      "wasteStream": "not_waste",
-      "reasoning": "This is a large appliance/fixture, not a portable waste item."
-    },
-    "book": {
-      "itemName": "Book",
+    "glass_bottle": {
+      "itemName": "Glass Bottle",
       "wasteStream": "recycling",
-      "reasoning": "Paper products are recyclable.",
-      "preAction": "Remove plastic covers if present"
+      "reasoning": "Glass bottles are recyclable. Rinse before recycling.",
+      "preAction": "Rinse and remove cap if different material"
     },
-    "clock": {
-      "itemName": "Clock",
+    "cardboard": {
+      "itemName": "Cardboard",
+      "wasteStream": "recycling",
+      "reasoning": "Cardboard is recyclable. Flatten before recycling.",
+      "preAction": "Flatten and remove tape if possible"
+    },
+    "food_waste": {
+      "itemName": "Food Waste",
+      "wasteStream": "compost",
+      "reasoning": "Food scraps and leftovers are compostable."
+    },
+    "paper": {
+      "itemName": "Paper",
+      "wasteStream": "recycling",
+      "reasoning": "Clean paper is recyclable."
+    },
+    "plastic_bag": {
+      "itemName": "Plastic Bag",
+      "wasteStream": "landfill",
+      "reasoning": "Plastic bags jam sorting machinery. Some grocery stores accept them for separate recycling."
+    },
+    "plastic_container": {
+      "itemName": "Plastic Container",
+      "wasteStream": "recycling",
+      "reasoning": "Most rigid plastic containers (#1-#5) are recyclable. Rinse before recycling.",
+      "preAction": "Empty and rinse before recycling"
+    },
+    "battery": {
+      "itemName": "Battery",
       "wasteStream": "special",
-      "reasoning": "Clocks may contain batteries and electronics — special disposal.",
-      "preAction": "Remove batteries before disposing"
+      "reasoning": "Batteries contain hazardous materials and require special disposal.",
+      "preAction": "Take to a battery collection point"
     },
-    "vase": {
-      "itemName": "Vase",
+    "styrofoam": {
+      "itemName": "Styrofoam",
       "wasteStream": "landfill",
-      "reasoning": "Ceramic/decorative glass is not recyclable in standard programs."
-    },
-    "scissors": {
-      "itemName": "Scissors",
-      "wasteStream": "landfill",
-      "reasoning": "Metal/plastic mixed items — wrap blades before disposing for safety."
-    },
-    "teddy bear": {
-      "itemName": "Teddy Bear",
-      "wasteStream": "landfill",
-      "reasoning": "Stuffed toys are not recyclable. Consider donating if still usable."
-    },
-    "hair drier": {
-      "itemName": "Hair Dryer",
-      "wasteStream": "special",
-      "reasoning": "Small appliances require special e-waste disposal."
-    },
-    "toothbrush": {
-      "itemName": "Toothbrush",
-      "wasteStream": "landfill",
-      "reasoning": "Plastic toothbrushes are not recyclable."
+      "reasoning": "Expanded polystyrene is not accepted in most recycling programs."
     }
   }
 }

@@ -1,9 +1,9 @@
 /**
  * YOLO26m edge inference using ONNX Runtime Web (FP16).
  *
- * Uses COCO-80 pre-trained YOLO26m with a rules file that maps all 80
- * classes to disposal streams. Non-waste detections (furniture, vehicles,
- * animals, etc.) resolve to "not_waste" for instant rejection.
+ * Custom 8-class waste detection model (12-class ID space, 8 trained on
+ * clean open data). All classes are waste items — no not_waste filtering
+ * needed. Each detection maps directly to a disposal stream.
  *
  * The model uses YOLO26's one-to-one head which produces end-to-end
  * detections without NMS — output shape (1, 300, 6) = [x1, y1, x2, y2,
@@ -27,20 +27,20 @@ let activeProvider: string = "unknown";
 /** Input size expected by the YOLO model. */
 const MODEL_INPUT_SIZE = 640;
 
-/** COCO-80 class names (standard YOLO training set). */
-const COCO_CLASSES = [
-  "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck",
-  "boat", "traffic light", "fire hydrant", "stop sign", "parking meter", "bench",
-  "bird", "cat", "dog", "horse", "sheep", "cow", "elephant", "bear", "zebra",
-  "giraffe", "backpack", "umbrella", "handbag", "tie", "suitcase", "frisbee",
-  "skis", "snowboard", "sports ball", "kite", "baseball bat", "baseball glove",
-  "skateboard", "surfboard", "tennis racket", "bottle", "wine glass", "cup",
-  "fork", "knife", "spoon", "bowl", "banana", "apple", "sandwich", "orange",
-  "broccoli", "carrot", "hot dog", "pizza", "donut", "cake", "chair", "couch",
-  "potted plant", "bed", "dining table", "toilet", "tv", "laptop", "mouse",
-  "remote", "keyboard", "cell phone", "microwave", "oven", "toaster", "sink",
-  "refrigerator", "book", "clock", "vase", "scissors", "teddy bear",
-  "hair drier", "toothbrush",
+/** Custom 12-class waste detection (8 trained, 4 reserved with no data). */
+const WASTE_CLASSES = [
+  "plastic_bottle",    // 0
+  "can",               // 1
+  "paper_cup",         // 2  (no training data)
+  "plastic_cup",       // 3  (no training data)
+  "glass_bottle",      // 4
+  "cardboard",         // 5
+  "food_waste",        // 6
+  "paper",             // 7
+  "plastic_bag",       // 8
+  "plastic_container", // 9  (no training data)
+  "battery",           // 10
+  "styrofoam",         // 11 (no training data)
 ];
 
 /**
@@ -196,7 +196,7 @@ export async function runYoloInference(
       const classId = Math.round(outputData[offset + 5]);
 
       if (confidence < confidenceThreshold) continue;
-      if (classId < 0 || classId >= COCO_CLASSES.length) continue;
+      if (classId < 0 || classId >= WASTE_CLASSES.length) continue;
 
       const bw = x2 - x1;
       const bh = y2 - y1;
@@ -204,7 +204,7 @@ export async function runYoloInference(
 
       if (confidence > debugBestConf) {
         debugBestConf = confidence;
-        debugBestClass = COCO_CLASSES[classId];
+        debugBestClass = WASTE_CLASSES[classId];
         debugBestArea = area;
       }
 
@@ -215,7 +215,7 @@ export async function runYoloInference(
 
       detections.push({
         classId,
-        className: COCO_CLASSES[classId],
+        className: WASTE_CLASSES[classId],
         confidence,
         bbox: [x1, y1, bw, bh],
       });

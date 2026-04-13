@@ -1,16 +1,13 @@
 /**
  * Inference backend abstraction layer — Tiered Detection Pipeline.
  *
- * Three tiers, each progressively heavier (all on-demand):
+ *   1. **YOLO26m (8-class custom)** — All detections are waste items.
+ *      High confidence + rule match → instant result.
  *
- *   1. **YOLO26m (on-demand)** — Runs when classification triggers.
- *      High confidence + rule match → instant result (Tier 1).
+ *   2. **YOLO World (fallback)** — Open-vocabulary detector for items
+ *      not in the 8-class model or low-confidence T1 detections.
  *
- *   2. **YOLO World (on-demand fallback)** — Open-vocabulary detector with
- *      pre-baked recycling classes. Runs when YOLO26m confidence is low or it
- *      detects no waste-relevant class. ~50-200ms on WebGPU, ~200-800ms on WASM fallback.
- *
- *   3. **OpenAI API (last resort)** — Handled in KioskDisplay.tsx, not here.
+ *   3. **OpenAI API (last resort)** — Handled in KioskDisplay.tsx.
  *
  * Two physical backends are supported:
  *   - **Browser ONNX** (default) — YOLO via ONNX Runtime Web/WASM.
@@ -131,7 +128,7 @@ class OnnxBackend implements InferenceBackend {
       provider: this.yolo.getYoloProvider() as ProviderType,
     });
 
-    // ── Step 2: YOLO World (sequential — avoids GPU/memory contention) ──
+    // ── Step 2: YOLO World (fallback for unknown items / low-confidence T1) ──
     const worldOk = await this.initYoloWorld();
     if (!worldOk) {
       console.warn("[inference] YOLO World unavailable — Tier 2 degraded");

@@ -303,12 +303,17 @@ function FullscreenResult({
         />
       </div>
 
-      {/* Notes banner — semi-transparent, only when content exists */}
+      {/* Notes banner */}
       {(noteText || secondaryNote || (result.isCompound && result.components?.length)) && (
         <div className="px-6 pb-6 space-y-2">
           {noteText && (
-            <div className="bg-black/40 border border-white/20 rounded-xl px-5 py-3">
-              <p className="text-xl font-bold text-white text-center">{noteText}</p>
+            <div className="bg-white rounded-2xl px-5 py-4 shadow-lg">
+              <p
+                className="text-2xl font-black text-center"
+                style={{ color: result.binColor }}
+              >
+                {noteText}
+              </p>
             </div>
           )}
           {secondaryNote && (
@@ -433,12 +438,15 @@ function SplitScreenCard({
           />
         </div>
 
-        {/* Notes banner — semi-transparent, only when content exists */}
+        {/* Notes banner */}
         {(result.preAction || result.specialInstructions || (result.isCompound && result.components?.length)) && (
           <div className="px-3 pb-3 space-y-1.5 shrink-0">
             {(result.preAction || result.specialInstructions) && (
-              <div className="bg-black/40 border border-white/20 rounded-lg px-3 py-2">
-                <p className="text-sm font-bold text-white text-center">
+              <div className="bg-white rounded-xl px-3 py-2.5 shadow">
+                <p
+                  className="text-sm font-black text-center"
+                  style={{ color: result.binColor }}
+                >
                   {result.preAction || result.specialInstructions}
                 </p>
               </div>

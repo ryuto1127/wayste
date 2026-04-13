@@ -1,3 +1,13 @@
+## Communication Style
+- Match the language you use (English or Japanese)
+- Avoid technical jargon; use plain, natural language
+- If technical terms or concepts come up, explain what they mean in simple terms
+
+### Kiosk End-Users (Office/Airport Workers)
+- The kiosk's UI must also use simple, non-technical language
+- Every screen, button label, and message should be clear to someone with no waste-sorting knowledge
+- Avoid ambiguity; assume users glance for ~2 seconds and move on
+
 ## Project Vision
 - AI waste sorting kiosk: fixed downward camera near bins detects items and displays the correct bin on screen in real-time
 - End goal: zero-effort sorting guidance in offices, airports, and public spaces

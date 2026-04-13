@@ -155,7 +155,7 @@ Rules:
 1. Identify ALL distinct waste items visible in the image (up to 4 items).
 2. wasteStream must be exactly one of: ${streamIds.join(", ")}. If an item does not clearly fit any stream, use "needs_review".
 3. If the image is unclear, blurry, too dark, shows no item, or shows only a person without discernible waste items, return an empty items array.
-4. Be honest about confidence. Do NOT inflate confidence when an item is ambiguous or partially occluded. When genuinely uncertain, use a low confidence value (below 0.5).
+4. Assess each item's confidence INDEPENDENTLY. If you can clearly identify an item and its material, give it high confidence (0.8+) regardless of how many other items are in the image. Only use low confidence (below 0.5) when an item is genuinely ambiguous or unidentifiable.
 5. Consider the material composition of each item, not just its name.
 6. If an item appears to be a compound object with multiple separable parts (e.g., a coffee cup with a plastic lid and cardboard sleeve), set isCompound to true and list the components with individual disposal instructions.
 

@@ -52,18 +52,11 @@ const MaterialHintSchema = z.object({
 const Tier1ContextSchema = z.object({
   className: z.string(),
   confidence: z.number(),
-  tier2Results: z.array(
-    z.object({
-      className: z.string(),
-      confidence: z.number(),
-    })
-  ),
 }).optional();
 
 // ── Intermediate tier results (for pilot-log traceability) ──
 const TierResultsSchema = z.object({
   tier1: z.array(z.object({ itemName: z.string(), confidence: z.number() })).optional(),
-  tier2: z.array(z.object({ itemName: z.string(), confidence: z.number() })).optional(),
 }).optional();
 
 // ── Request validation (single-item format — backward compatible) ──
@@ -376,7 +369,7 @@ export async function POST(request: Request) {
     yoloHint: string | null | undefined,
     itemMaterialHint: MaterialHint | undefined,
     yoloDetections: YoloDetectionLog[] | undefined,
-    tier1Ctx?: { className: string; confidence: number; tier2Results: { className: string; confidence: number }[] },
+    tier1Ctx?: { className: string; confidence: number },
   ) {
     // ── Material identification path (Tier 1 sub-classification) ──
     // When tier1Context is present, use the material-focused prompt instead
@@ -387,10 +380,10 @@ export async function POST(request: Request) {
         locale,
         tier1Ctx.className,
         tier1Ctx.confidence,
-        tier1Ctx.tier2Results,
+        [],
       );
       const raw = await callModel(openai, "gpt-5.4-mini", image, prompt);
-      const modelUsed = "mini" as const;
+      const modelUsed = "t2" as const;
       const result = buildClassificationResult(raw, siteConfig, locale);
       result.modelUsed = modelUsed;
 
@@ -428,7 +421,7 @@ export async function POST(request: Request) {
       ? prompt + "\nNo local model could identify this item. Classify from the image alone."
       : prompt;
     const raw = await callModel(openai, "gpt-5.4-mini", image, promptFinal);
-    const modelUsed = "mini" as const;
+    const modelUsed = "t2" as const;
 
     // Build result + conditional overrides
     const result = buildClassificationResult(raw, siteConfig, locale);
@@ -473,7 +466,7 @@ export async function POST(request: Request) {
       const first = batchResults[0];
       if (first) {
         const logTimestamp = new Date().toISOString();
-        const batchTierResults = data.tierResults as { tier1?: { itemName: string; confidence: number }[]; tier2?: { itemName: string; confidence: number }[] } | undefined;
+        const batchTierResults = data.tierResults as { tier1?: { itemName: string; confidence: number }[] } | undefined;
         runInBackground(
           Promise.all([
             recordCalibrationPrediction(first.result.confidence, first.modelUsed),
@@ -522,7 +515,7 @@ export async function POST(request: Request) {
 
       const multiResults = rawItems.map((raw) => {
         const result = buildClassificationResult(raw, siteConfig, locale);
-        result.modelUsed = "mini";
+        result.modelUsed = "t2";
         const overrideCheck = applyOverrides(raw.itemName, raw.wasteStream, siteConfig, locale);
         if (overrideCheck.conditionalStream && overrideCheck.condition && !overrideCheck.requiresStaff) {
           const conditionLower = overrideCheck.condition.toLowerCase();
@@ -543,20 +536,20 @@ export async function POST(request: Request) {
       // Background logging for all multi-item results
       if (multiResults.length > 0) {
         const logTimestamp = new Date().toISOString();
-        const clientTierResults = (data as z.infer<typeof SingleRequestSchema>).tierResults as { tier1?: { itemName: string; confidence: number }[]; tier2?: { itemName: string; confidence: number }[] } | undefined
+        const clientTierResults = (data as z.infer<typeof SingleRequestSchema>).tierResults as { tier1?: { itemName: string; confidence: number }[] } | undefined
           ?? (() => {
             const yd = (data as z.infer<typeof SingleRequestSchema>).yoloDetections as YoloDetectionLog[] | undefined;
             return yd?.length ? { tier1: yd.map(d => ({ itemName: d.className, confidence: d.confidence })) } : undefined;
           })();
         runInBackground(
           Promise.all([
-            recordCalibrationPrediction(multiResults[0].result.confidence, "mini"),
+            recordCalibrationPrediction(multiResults[0].result.confidence, "t2"),
             uploadFrameToBlob(image, multiResults[0].result.itemName, multiResults[0].result.wasteStream, logTimestamp),
           ]).then(([, imageUrl]) =>
             Promise.all(multiResults.map((item, i) =>
               logPilotEntry({
                 timestamp: logTimestamp,
-                modelUsed: "mini",
+                modelUsed: "t2",
                 escalated: false,
                 itemName: item.result.itemName,
                 wasteStream: item.result.wasteStream,
@@ -586,7 +579,7 @@ export async function POST(request: Request) {
       undefined,
       materialHint as MaterialHint | undefined,
       yoloDetections as YoloDetectionLog[] | undefined,
-      tier1Context as { className: string; confidence: number; tier2Results: { className: string; confidence: number }[] } | undefined,
+      tier1Context as { className: string; confidence: number } | undefined,
     );
 
     const totalServerMs = Date.now() - startMs;
@@ -600,21 +593,18 @@ export async function POST(request: Request) {
       latencyMs: totalServerMs,
     });
 
-    // Prefer client-provided tierResults (has complete T1/T2 data).
+    // Prefer client-provided tierResults (has T1 data).
     // Fall back to server-constructed from yoloDetections / tier1Context.
-    const tierResults = (singleData.tierResults as { tier1?: { itemName: string; confidence: number }[]; tier2?: { itemName: string; confidence: number }[] } | undefined) ?? (() => {
-      const tr: { tier1?: { itemName: string; confidence: number }[]; tier2?: { itemName: string; confidence: number }[] } = {};
-      const t1Ctx = tier1Context as { className: string; confidence: number; tier2Results: { className: string; confidence: number }[] } | undefined;
+    const tierResults = (singleData.tierResults as { tier1?: { itemName: string; confidence: number }[] } | undefined) ?? (() => {
+      const tr: { tier1?: { itemName: string; confidence: number }[] } = {};
+      const t1Ctx = tier1Context as { className: string; confidence: number } | undefined;
       if (t1Ctx) {
         tr.tier1 = [{ itemName: t1Ctx.className, confidence: t1Ctx.confidence }];
-        if (t1Ctx.tier2Results?.length) {
-          tr.tier2 = t1Ctx.tier2Results.map(r => ({ itemName: r.className, confidence: r.confidence }));
-        }
       } else if (yoloDetections && (yoloDetections as YoloDetectionLog[]).length > 0) {
         const wasteOnly = (yoloDetections as YoloDetectionLog[]).filter(d => !isYoloClassNotWaste(d.className));
         if (wasteOnly.length > 0) tr.tier1 = wasteOnly.map(d => ({ itemName: d.className, confidence: d.confidence }));
       }
-      return (tr.tier1 || tr.tier2) ? tr : undefined;
+      return tr.tier1 ? tr : undefined;
     })();
 
     runInBackground(

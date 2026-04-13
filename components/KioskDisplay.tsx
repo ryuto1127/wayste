@@ -353,7 +353,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
                 binLabel: "",
                 needsReview: true,
                 isCompound: false,
-                modelUsed: "mini" as const,
+                modelUsed: "t2" as const,
               };
             }
           }
@@ -712,8 +712,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
     // ── Trigger classification (Tiered Pipeline — all on-demand) ──
     //
     // Tier 1: YOLO26m (on-demand) → conf >= 0.65 + rule → instant result
-    // Tier 2: YOLO World (on-demand fallback) → ~50-200ms (WebGPU)
-    // Tier 3: OpenAI API (last resort) → ~1-3s
+    // Tier 2: OpenAI API (GPT-5.4-mini) → ~1-3s
     //
     function triggerClassification(analysis: FrameAnalysis) {
       if (inFlightRef.current) return;
@@ -729,7 +728,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       const yoloReady = backend?.isReady() && siteConfigRef.current;
       const isOffline = typeof navigator !== "undefined" && !navigator.onLine;
 
-      // If offline, use local models only (YOLO → YOLO World → offline fallback)
+      // If offline, use local YOLO only → offline fallback
       if (isOffline) {
         handleOfflineClassification(video, backend, yoloReady);
         return;
@@ -794,7 +793,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
             return;
           }
 
-          // ── Some items need further resolution via API (Tier 3) ──
+          // ── Some items need further resolution via API (Tier 2) ──
           const best = wasteDetections[0] ?? null;
           const hasBlobPresence = blobs.some(b => blobIsObject(b));
 
@@ -893,7 +892,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       return { image, cropBox: [cx, cy, cw, ch] };
     }
 
-    /** Escalate unresolved detections to the API (Tier 3: GPT mini). */
+    /** Escalate unresolved detections to the API (Tier 2). */
     function escalateToApi(
       video: HTMLVideoElement,
       yoloBest: { className: string; confidence: number } | null,

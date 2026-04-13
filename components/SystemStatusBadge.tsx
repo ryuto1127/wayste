@@ -16,7 +16,6 @@ interface SystemStatusBadgeProps {
 export default function SystemStatusBadge({ thermalWarning }: SystemStatusBadgeProps) {
   const [status, setStatus] = useState<SystemStatus>({
     yolo26m: "loading",
-    yoloWorld: "loading",
     provider: "unknown",
     overallReady: false,
   });
@@ -41,10 +40,9 @@ export default function SystemStatusBadge({ thermalWarning }: SystemStatusBadgeP
 
       <span className="text-neutral-600">|</span>
 
-      {/* Model status dots */}
-      <div className="flex items-center gap-1.5" title="YOLO26m / YOLO World">
+      {/* Model status dot */}
+      <div className="flex items-center gap-1.5" title="YOLO26m (Tier 1)">
         <StatusDot status={status.yolo26m} label="T1" />
-        <StatusDot status={status.yoloWorld} label="T2" />
       </div>
 
       {/* Thermal warning */}

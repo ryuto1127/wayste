@@ -1,11 +1,8 @@
 /**
- * Tests that OnnxBackend.init() loads models sequentially:
- * YOLO26m init → YOLO26m warmup → YOLO World init → YOLO World warmup
- *
- * Verifies no parallel/fire-and-forget loading occurs.
+ * Tests that OnnxBackend.init() loads the YOLO model correctly.
  */
 
-// Track call order across both mocked modules
+// Track call order
 const callOrder: string[] = [];
 
 // ── Mock yolo-inference ──
@@ -22,19 +19,6 @@ jest.mock("@/lib/yolo-inference", () => ({
   runYoloInference: jest.fn(async () => []),
 }));
 
-// ── Mock yolo-world-inference ──
-jest.mock("@/lib/yolo-world-inference", () => ({
-  initYoloWorld: jest.fn(async () => {
-    callOrder.push("yoloWorld:init");
-    return true;
-  }),
-  warmUpYoloWorld: jest.fn(async () => {
-    callOrder.push("yoloWorld:warmup");
-  }),
-  isYoloWorldReady: jest.fn(() => true),
-  runYoloWorldInference: jest.fn(async () => []),
-}));
-
 import {
   getInferenceBackend,
   resetInferenceBackend,
@@ -47,54 +31,27 @@ beforeEach(() => {
   resetInferenceBackend();
 });
 
-describe("Sequential model loading", () => {
-  it("loads YOLO26m before YOLO World, strictly sequential", async () => {
+describe("Model loading", () => {
+  it("loads YOLO26m with init then warmup", async () => {
     const backend = await getInferenceBackend();
 
     expect(callOrder).toEqual([
       "yolo26m:init",
       "yolo26m:warmup",
-      "yoloWorld:init",
-      "yoloWorld:warmup",
     ]);
     expect(backend.isReady()).toBe(true);
-    expect(backend.isYoloWorldReady()).toBe(true);
   });
 
-  it("returns false immediately if YOLO26m fails (skips World)", async () => {
+  it("returns false if YOLO26m fails", async () => {
     const yoloMod = await import("@/lib/yolo-inference");
     (yoloMod.initYolo as jest.Mock).mockImplementationOnce(async () => {
       callOrder.push("yolo26m:init");
       return false;
     });
 
-    const backend = await getInferenceBackend();
+    await getInferenceBackend();
 
     expect(callOrder).toEqual(["yolo26m:init"]);
-    // YOLO World never attempted — no point loading Tier 2 without Tier 1
-    expect(callOrder).not.toContain("yoloWorld:init");
-  });
-
-  it("returns true with warning if YOLO World fails", async () => {
-    const worldMod = await import("@/lib/yolo-world-inference");
-    (worldMod.initYoloWorld as jest.Mock).mockImplementationOnce(async () => {
-      callOrder.push("yoloWorld:init");
-      return false;
-    });
-    const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
-
-    const backend = await getInferenceBackend();
-
-    expect(callOrder).toEqual([
-      "yolo26m:init",
-      "yolo26m:warmup",
-      "yoloWorld:init",
-    ]);
-    expect(backend.isReady()).toBe(true);
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining("YOLO World unavailable")
-    );
-    warnSpy.mockRestore();
   });
 
   it("sets overallReady only after YOLO26m is ready", async () => {

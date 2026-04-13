@@ -7,7 +7,7 @@
  *
  * Query params (all optional):
  *   verdict       — comma-separated: correct,wrong,false_detection,unreviewed (default: all)
- *   model         — comma-separated: mini,yolo-local,yolo-world (default: all)
+ *   model         — comma-separated: t2,yolo-local (default: all)
  *   confidence_min — minimum confidence inclusive (default: 0)
  *   confidence_max — maximum confidence inclusive (default: 1)
  *   from          — start date inclusive (ISO date, e.g. 2026-01-01)

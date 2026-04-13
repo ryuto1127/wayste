@@ -81,7 +81,7 @@ export interface YoloDetectionLog {
 // ── Pilot log entry (server-side) ──
 export interface PilotLogEntry {
   timestamp: string;
-  modelUsed: "mini" | "yolo-local" | "yolo-world";
+  modelUsed: "t2" | "yolo-local";
   escalated: boolean;
   itemName: string;
   wasteStream: string;
@@ -106,11 +106,10 @@ export interface PilotLogEntry {
     refinedTo?: string;
     textureSurface?: string;
   };
-  /** Intermediate classification results from earlier pipeline tiers.
-   *  Present when final classification came from a later tier (T2 or T3). */
+  /** Intermediate classification results from Tier 1 (YOLO).
+   *  Present when final classification came from Tier 2 (API). */
   tierResults?: {
     tier1?: { itemName: string; confidence: number }[];
-    tier2?: { itemName: string; confidence: number }[];
   };
 }
 
@@ -165,7 +164,7 @@ export interface ClassificationResponse {
   needsReview: boolean;
   isCompound: boolean;
   components?: ComponentPart[];
-  modelUsed?: "mini" | "yolo-local" | "yolo-world";
+  modelUsed?: "t2" | "yolo-local";
   imageUrl?: string;  // Vercel Blob URL of the captured frame
 }
 
@@ -187,10 +186,9 @@ export interface YoloClassRule {
   preAction?: string;
   preAction_ja?: string;
   /**
-   * When true, this COCO-80 class requires material sub-classification
-   * (e.g., "bottle" → PET / glass / aluminium). If Tier 1 confidence ≥ 0.80,
-   * the pipeline skips Tier 1 resolution and routes to Tier 2 with a
-   * material-focused vocabulary instead.
+   * When true, this class requires material sub-classification
+   * (e.g., "bottle" → PET / glass / aluminium). The pipeline routes
+   * to Tier 2 (API) with a material-focused prompt.
    */
   needsSubclassification?: boolean;
 }
@@ -267,13 +265,12 @@ export interface ItemOverride {
 
 // ── Tier 1 sub-classification context ──
 /**
- * Returned by `resolveYoloDetection()` when a COCO class has
+ * Returned by `resolveYoloDetection()` when a class has
  * `needsSubclassification: true` and confidence ≥ 0.80. The pipeline
- * must NOT resolve at Tier 1 — instead it routes to Tier 2 (material-focused
- * vocabulary) and, if inconclusive, to Tier 3 (material identification prompt).
+ * routes to Tier 2 (API) with a material identification prompt.
  */
 export interface Tier1SubclassContext {
-  /** The COCO-80 class name (e.g., "bottle", "cup"). */
+  /** The class name (e.g., "bottle", "cup"). */
   className: string;
   /** Tier 1 detection confidence (≥ 0.80). */
   confidence: number;

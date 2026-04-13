@@ -439,10 +439,10 @@ function EntryCard({
         )}
       </div>
 
-      {/* Tier results (intermediate pipeline decisions) */}
+      {/* Tier 1 results (YOLO detections) */}
       {(() => {
         // Use tierResults if available; fallback to yoloDetections for older entries
-        // Show top 3 per tier, sorted by confidence descending
+        // Show top 3, sorted by confidence descending
         const NOT_WASTE = new Set(["person","bicycle","car","motorcycle","airplane","bus","train","truck","boat","traffic light","fire hydrant","stop sign","parking meter","bench","bird","cat","dog","horse","sheep","cow","elephant","bear","zebra","giraffe","chair","couch","potted plant","bed","dining table","toilet","sink","refrigerator"]);
         const top3 = (arr?: { itemName: string; confidence: number }[]) =>
           arr?.filter(r => !NOT_WASTE.has(r.itemName)).sort((a, b) => b.confidence - a.confidence).slice(0, 3);
@@ -450,41 +450,22 @@ function EntryCard({
           ?? (entry.modelUsed !== "yolo-local" && entry.yoloDetections?.length
             ? entry.yoloDetections.map(d => ({ itemName: d.className, confidence: d.confidence }))
             : undefined);
-        const rawT2 = entry.tierResults?.tier2;
         const t1 = top3(rawT1);
-        const t2 = top3(rawT2);
-        // Show section when tierResults exists (even if waste-filtered results are empty)
         const hasTierData = entry.tierResults !== undefined || rawT1 !== undefined;
         if (!hasTierData) return null;
-        // Detect when a tier ran but only found non-waste items
         const t1RanNoWaste = rawT1 && rawT1.length > 0 && (!t1 || t1.length === 0);
-        const t2Missing = entry.tierResults !== undefined && entry.tierResults.tier2 === undefined;
         return (
-          <div className="flex flex-col gap-1 text-[11px]">
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <span className="text-neutral-600 font-medium shrink-0">T1:</span>
-              {t1 && t1.length > 0 ? t1.map((r, i) => (
-                <span key={i} className="bg-neutral-800/80 text-neutral-400 px-1.5 py-0.5 rounded">
-                  {r.itemName} <span className="text-neutral-600">{Math.round(r.confidence * 100)}%</span>
-                </span>
-              )) : (
-                <span className="text-neutral-700 italic">
-                  {t1RanNoWaste ? "non-waste only" : "no detections"}
-                </span>
-              )}
-            </div>
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <span className="text-neutral-600 font-medium shrink-0">T2:</span>
-              {t2 && t2.length > 0 ? t2.map((r, i) => (
-                <span key={i} className="bg-neutral-800/80 text-neutral-400 px-1.5 py-0.5 rounded">
-                  {r.itemName} <span className="text-neutral-600">{Math.round(r.confidence * 100)}%</span>
-                </span>
-              )) : (
-                <span className="text-neutral-700 italic">
-                  {t2Missing ? "not loaded" : "no detections"}
-                </span>
-              )}
-            </div>
+          <div className="flex items-center gap-1.5 flex-wrap text-[11px]">
+            <span className="text-neutral-600 font-medium shrink-0">T1:</span>
+            {t1 && t1.length > 0 ? t1.map((r, i) => (
+              <span key={i} className="bg-neutral-800/80 text-neutral-400 px-1.5 py-0.5 rounded">
+                {r.itemName} <span className="text-neutral-600">{Math.round(r.confidence * 100)}%</span>
+              </span>
+            )) : (
+              <span className="text-neutral-700 italic">
+                {t1RanNoWaste ? "non-waste only" : "no detections"}
+              </span>
+            )}
           </div>
         );
       })()}
@@ -569,7 +550,7 @@ function EntryCard({
 // ── Analysis Export Panel ──
 
 type AnalysisVerdict = "correct" | "wrong" | "false_detection" | "unreviewed";
-type AnalysisModel = "yolo-local" | "yolo-world" | "mini";
+type AnalysisModel = "yolo-local" | "t2";
 
 function AnalysisExportPanel({ locale }: { locale: Locale }) {
   const [open, setOpen] = useState(false);
@@ -649,9 +630,8 @@ function AnalysisExportPanel({ locale }: { locale: Locale }) {
   ];
 
   const modelOptions: { value: AnalysisModel; label: string }[] = [
-    { value: "yolo-local", label: "YOLO (Tier 1)" },
-    { value: "yolo-world", label: "YOLO World (Tier 2)" },
-    { value: "mini", label: "GPT mini" },
+    { value: "yolo-local", label: "YOLO (T1)" },
+    { value: "t2", label: "GPT mini (T2)" },
   ];
 
   const streamOptions = ["recycling", "compost", "landfill", "special", "needs_review"];

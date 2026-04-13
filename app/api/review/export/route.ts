@@ -4,8 +4,8 @@
  * Exports images for entries that need retraining:
  *   - All "wrong" verdicts (model misidentified the object)
  *   - "correct" verdicts with confidence ≤ 0.80 (model was right but unsure)
- *   - "correct" verdicts from non-YOLO models (yolo-world/mini) at any
- *     confidence — YOLO couldn't classify alone, so these fill training gaps
+ *   - "correct" verdicts from T2 (API) at any confidence — YOLO couldn't
+ *     classify alone, so these fill training gaps
  *
  * Images are named by timestamp (e.g. 2026-04-04T10-23-15.jpg) and delivered
  * as a ZIP file compatible with CVAT, Roboflow, and Label Studio.
@@ -67,7 +67,7 @@ export async function GET(request: Request) {
       // Export criteria:
       //   - All "wrong" verdicts
       //   - "correct" with low confidence (model was right but unsure)
-      //   - "correct" from non-YOLO models (yolo-world/nano/mini) at any confidence
+      //   - "correct" from T2 (API) at any confidence
       //     → YOLO couldn't handle it alone, valuable for fine-tuning
       const shouldExport =
         verdict === "wrong" ||

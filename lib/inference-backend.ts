@@ -1,13 +1,10 @@
 /**
  * Inference backend abstraction layer — Tiered Detection Pipeline.
  *
- *   1. **YOLO (39-class custom)** — Packaging + granular food waste.
+ *   1. **Tier 1: YOLO (39-class custom)** — Packaging + granular food waste.
  *      High confidence + rule match → instant result.
  *
- *   2. **YOLO World (fallback)** — Open-vocabulary detector for items
- *      not in the 39-class model or low-confidence T1 detections.
- *
- *   3. **OpenAI API (last resort)** — Handled in KioskDisplay.tsx.
+ *   2. **Tier 2: OpenAI API (GPT-5.4-mini)** — Handled in KioskDisplay.tsx.
  *
  * Two physical backends are supported:
  *   - **Browser ONNX** (default) — YOLO via ONNX Runtime Web/WASM.
@@ -42,16 +39,14 @@ export type ProviderType = "webgpu" | "wasm" | "http" | "unknown";
 
 export interface SystemStatus {
   yolo26m: ModelStatus;
-  yoloWorld: ModelStatus;
   provider: ProviderType;
-  /** True when yolo26m is "ready" (yoloWorld "ready" preferred but not required). */
+  /** True when yolo26m is "ready". */
   overallReady: boolean;
 }
 
 /** Current system status — read by SystemStatusBadge. */
 let _systemStatus: SystemStatus = {
   yolo26m: "loading",
-  yoloWorld: "loading",
   provider: "unknown",
   overallReady: false,
 };
@@ -60,7 +55,6 @@ const _statusListeners: Set<(s: SystemStatus) => void> = new Set();
 
 function updateStatus(patch: Partial<SystemStatus>) {
   _systemStatus = { ..._systemStatus, ...patch };
-  // Derive overallReady: yolo26m must be ready; yoloWorld ready is preferred but not required
   _systemStatus.overallReady = _systemStatus.yolo26m === "ready";
   for (const fn of _statusListeners) fn(_systemStatus);
 }
@@ -90,28 +84,13 @@ export interface InferenceBackend {
     minBoxArea?: number,
     confidenceThreshold?: number,
   ): Promise<YoloDetection[]>;
-
-  // ── YOLO World ──
-  /** Initialize YOLO World model (lazy — only loads when first needed). */
-  initYoloWorld(): Promise<boolean>;
-  /** Check if YOLO World is ready. */
-  isYoloWorldReady(): boolean;
-  /** Run YOLO World inference (on-demand). */
-  detectWorld(
-    video: HTMLVideoElement,
-    roiMargin?: number,
-    minBoxArea?: number,
-    confidenceThreshold?: number,
-  ): Promise<YoloDetection[]>;
 }
 
 // ── Browser ONNX backend ──
 class OnnxBackend implements InferenceBackend {
   private yolo: typeof import("./yolo-inference") | null = null;
-  private yoloWorld: typeof import("./yolo-world-inference") | null = null;
 
   async init(): Promise<boolean> {
-    // ── Step 1: YOLO26m ──
     this.yolo = await import("./yolo-inference");
     const ok = await this.yolo.initYolo();
     if (!ok) {
@@ -123,12 +102,6 @@ class OnnxBackend implements InferenceBackend {
       yolo26m: "ready",
       provider: this.yolo.getYoloProvider() as ProviderType,
     });
-
-    // ── Step 2: YOLO World (fallback for unknown items / low-confidence T1) ──
-    const worldOk = await this.initYoloWorld();
-    if (!worldOk) {
-      console.warn("[inference] YOLO World unavailable — Tier 2 degraded");
-    }
     return true;
   }
 
@@ -144,41 +117,6 @@ class OnnxBackend implements InferenceBackend {
   ): Promise<YoloDetection[]> {
     if (!this.yolo) return [];
     return this.yolo.runYoloInference(video, _roiMargin, minBoxArea, confidenceThreshold);
-  }
-
-  // ── YOLO World ──
-
-  async initYoloWorld(): Promise<boolean> {
-    if (this.yoloWorld) return this.yoloWorld.isYoloWorldReady();
-    try {
-      this.yoloWorld = await import("./yolo-world-inference");
-      const ok = await this.yoloWorld.initYoloWorld();
-      if (ok) {
-        await this.yoloWorld.warmUpYoloWorld();
-        updateStatus({ yoloWorld: "ready" });
-      } else {
-        updateStatus({ yoloWorld: "error" });
-      }
-      return ok;
-    } catch (err) {
-      console.warn("[inference] YOLO World init failed:", err);
-      updateStatus({ yoloWorld: "error" });
-      return false;
-    }
-  }
-
-  isYoloWorldReady(): boolean {
-    return this.yoloWorld?.isYoloWorldReady() ?? false;
-  }
-
-  async detectWorld(
-    video: HTMLVideoElement,
-    _roiMargin = 0,
-    minBoxArea = 1500,
-    confidenceThreshold = 0.50,
-  ): Promise<YoloDetection[]> {
-    if (!this.yoloWorld) return [];
-    return this.yoloWorld.runYoloWorldInference(video, _roiMargin, minBoxArea, confidenceThreshold);
   }
 }
 
@@ -249,10 +187,6 @@ class HttpBackend implements InferenceBackend {
     }
   }
 
-  // HTTP backend doesn't support YOLO World
-  async initYoloWorld(): Promise<boolean> { return false; }
-  isYoloWorldReady(): boolean { return false; }
-  async detectWorld(): Promise<YoloDetection[]> { return []; }
 }
 
 // ── Factory ──
@@ -284,7 +218,6 @@ export function resetInferenceBackend(): void {
   _backend = null;
   _systemStatus = {
     yolo26m: "loading",
-    yoloWorld: "loading",
     provider: "unknown",
     overallReady: false,
   };

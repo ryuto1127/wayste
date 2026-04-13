@@ -4,8 +4,8 @@
  * Collects all entries that qualify for model retraining:
  *   - "wrong" verdict (model misidentified the object)
  *   - "correct" verdict with confidence ≤ 0.80 (right but uncertain)
- *   - "correct" verdict from non-YOLO models (yolo-world/mini) at any
- *     confidence — YOLO couldn't classify alone, valuable for fine-tuning
+ *   - "correct" verdict from T2 (API) at any confidence — YOLO couldn't
+ *     classify alone, valuable for fine-tuning
  *
  * Downloads their images from Vercel Blob, packages them as a ZIP,
  * and saves the ZIP to archives/finetuning/YYYY-MM-DD.zip in Vercel Blob.

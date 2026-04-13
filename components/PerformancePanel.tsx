@@ -17,7 +17,6 @@ const PLOT_H = CHART_H - PADDING.top - PADDING.bottom - THERMAL_STRIP_H - THERMA
 const CV_COLOR = "#38bdf8";      // sky-400
 const FPS_COLOR = "#a78bfa";     // violet-400
 const YOLO_COLOR = "#fb923c";    // orange-400
-const WORLD_COLOR = "#f472b6";   // pink-400
 const GRID_COLOR = "#333";
 const TEXT_COLOR = "#999";
 const THROTTLE_BG = "rgba(239, 68, 68, 0.08)";
@@ -113,7 +112,6 @@ export function PerformancePanel() {
                 <LegendItem color={CV_COLOR} label="CV analysis (ms)" />
                 <LegendItem color={FPS_COLOR} label="Frame rate (fps)" />
                 <LegendItem color={YOLO_COLOR} label="YOLO T1 (ms)" dot />
-                <LegendItem color={WORLD_COLOR} label="YOLO World T2 (ms)" dot />
                 <div className="flex items-center gap-1.5 text-neutral-400">
                   <span className="w-4 h-2 rounded-sm" style={{ background: "linear-gradient(to right, #065f46, #fbbf24, #f87171)" }} />
                   Thermal ratio
@@ -140,9 +138,6 @@ export function PerformancePanel() {
                   <StatsRow label="Frame rate (fps)" stats={stats.fps} color={FPS_COLOR} />
                   {stats.yolo.count > 0 && (
                     <StatsRow label="YOLO T1 (ms)" stats={stats.yolo} color={YOLO_COLOR} />
-                  )}
-                  {stats.world.count > 0 && (
-                    <StatsRow label="YOLO World T2 (ms)" stats={stats.world} color={WORLD_COLOR} />
                   )}
                 </tbody>
               </table>
@@ -367,12 +362,6 @@ function drawChart(ctx: CanvasRenderingContext2D, samples: PerfSample[], scale: 
       ctx.fillStyle = YOLO_COLOR;
       ctx.beginPath();
       ctx.arc(toX(i), toCvY(samples[i].yoloMs!), 3, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    if (samples[i].worldMs !== null) {
-      ctx.fillStyle = WORLD_COLOR;
-      ctx.beginPath();
-      ctx.arc(toX(i), toCvY(samples[i].worldMs!), 3, 0, Math.PI * 2);
       ctx.fill();
     }
   }

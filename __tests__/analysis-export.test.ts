@@ -22,7 +22,7 @@ import type { PilotLogEntry } from "@/lib/types";
 function makeEntry(overrides: Partial<PilotLogEntry> = {}): PilotLogEntry {
   return {
     timestamp: "2026-04-05T10:00:00.000Z",
-    modelUsed: "yolo-local",
+    modelUsed: "T1",
     escalated: false,
     itemName: "plastic bottle",
     wasteStream: "recycling",
@@ -44,9 +44,9 @@ function makeRequest(params: Record<string, string> = {}): Request {
 }
 
 const pilotEntries: PilotLogEntry[] = [
-  makeEntry({ requestId: "aaa11111", modelUsed: "yolo-local", confidence: 0.90, itemName: "plastic bottle", wasteStream: "recycling" }),
+  makeEntry({ requestId: "aaa11111", modelUsed: "T1", confidence: 0.90, itemName: "plastic bottle", wasteStream: "recycling" }),
   makeEntry({ requestId: "bbb22222", modelUsed: "t2", confidence: 0.70, itemName: "coffee cup", wasteStream: "landfill", escalated: true }),
-  makeEntry({ requestId: "ccc33333", modelUsed: "yolo-local", confidence: 0.45, itemName: "banana peel", wasteStream: "compost" }),
+  makeEntry({ requestId: "ccc33333", modelUsed: "T1", confidence: 0.45, itemName: "banana peel", wasteStream: "compost" }),
   makeEntry({ requestId: "ddd44444", modelUsed: "t2", confidence: 0.55, itemName: "aluminum can", wasteStream: "recycling", timestamp: "2026-03-01T08:00:00.000Z" }),
   makeEntry({ requestId: "eee55555", modelUsed: "t2", confidence: 0.30, itemName: "styrofoam box", wasteStream: "landfill" }),
 ];
@@ -104,11 +104,11 @@ describe("GET /api/review/export/analysis", () => {
   });
 
   it("filters by model", async () => {
-    const res = await GET(makeRequest({ model: "yolo-local" }));
+    const res = await GET(makeRequest({ model: "T1" }));
     const data = await res.json();
 
     expect(data.entries).toHaveLength(2);
-    expect(data.entries.every((e: { modelUsed: string }) => e.modelUsed === "yolo-local")).toBe(true);
+    expect(data.entries.every((e: { modelUsed: string }) => e.modelUsed === "T1")).toBe(true);
   });
 
   it("filters by confidence range", async () => {
@@ -152,7 +152,7 @@ describe("GET /api/review/export/analysis", () => {
   });
 
   it("combines multiple filters", async () => {
-    const res = await GET(makeRequest({ verdict: "correct", model: "yolo-local" }));
+    const res = await GET(makeRequest({ verdict: "correct", model: "T1" }));
     const data = await res.json();
 
     expect(data.entries).toHaveLength(2);
@@ -162,8 +162,8 @@ describe("GET /api/review/export/analysis", () => {
     const res = await GET(makeRequest());
     const data = await res.json();
 
-    // yolo-local: 2 reviewed (aaa correct, ccc correct) → 1.0
-    expect(data.summary.accuracyByModel["yolo-local"]).toBe(1.0);
+    // T1: 2 reviewed (aaa correct, ccc correct) → 1.0
+    expect(data.summary.accuracyByModel["T1"]).toBe(1.0);
     // t2: 1 reviewed (bbb wrong) → 0.0
     expect(data.summary.accuracyByModel["t2"]).toBe(0);
   });

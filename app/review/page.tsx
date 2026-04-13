@@ -447,7 +447,7 @@ function EntryCard({
         const top3 = (arr?: { itemName: string; confidence: number }[]) =>
           arr?.filter(r => !NOT_WASTE.has(r.itemName)).sort((a, b) => b.confidence - a.confidence).slice(0, 3);
         const rawT1 = entry.tierResults?.tier1
-          ?? (entry.modelUsed !== "yolo-local" && entry.yoloDetections?.length
+          ?? (entry.modelUsed !== "T1" && entry.yoloDetections?.length
             ? entry.yoloDetections.map(d => ({ itemName: d.className, confidence: d.confidence }))
             : undefined);
         const t1 = top3(rawT1);
@@ -550,7 +550,7 @@ function EntryCard({
 // ── Analysis Export Panel ──
 
 type AnalysisVerdict = "correct" | "wrong" | "false_detection" | "unreviewed";
-type AnalysisModel = "yolo-local" | "t2";
+type AnalysisModel = "T1" | "t2";
 
 function AnalysisExportPanel({ locale }: { locale: Locale }) {
   const [open, setOpen] = useState(false);
@@ -630,7 +630,7 @@ function AnalysisExportPanel({ locale }: { locale: Locale }) {
   ];
 
   const modelOptions: { value: AnalysisModel; label: string }[] = [
-    { value: "yolo-local", label: "YOLO" },
+    { value: "T1", label: "YOLO" },
     { value: "t2", label: "GPT mini" },
   ];
 

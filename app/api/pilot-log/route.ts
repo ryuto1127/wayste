@@ -66,7 +66,7 @@ export async function POST(request: Request) {
       }
       await logPilotEntry({
         timestamp,
-        modelUsed: entry.modelUsed ?? "yolo-local",
+        modelUsed: entry.modelUsed ?? "T1",
         escalated: false,
         itemName: entry.itemName ?? "unknown",
         wasteStream: entry.wasteStream ?? "unknown",

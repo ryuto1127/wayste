@@ -62,6 +62,11 @@ export default function ResultScreen({
   const firstResult = displayResults[0];
   const isNothingDetected = firstResult.itemName === "nothing_detected";
 
+  // Camera faces the user, so camera-left = user's right.
+  // Reverse multi-item order so physical left appears on the left card
+  // and physical right appears on the right card.
+  const orderedResults = isMulti ? [...displayResults].reverse() : displayResults;
+
   // ── Voice announcement via Web Speech API ──
   const announcedRef = React.useRef(false);
   React.useEffect(() => {
@@ -184,28 +189,28 @@ export default function ResultScreen({
         <div
           className="flex-1 grid h-full pt-12"
           style={{
-            gridTemplateColumns: displayResults.length === 4
+            gridTemplateColumns: orderedResults.length === 4
               ? "repeat(2, 1fr)"
-              : `repeat(${displayResults.length}, 1fr)`,
-            gridTemplateRows: displayResults.length === 4
+              : `repeat(${orderedResults.length}, 1fr)`,
+            gridTemplateRows: orderedResults.length === 4
               ? "repeat(2, 1fr)"
               : "1fr",
           }}
         >
-          {displayResults.map((result, idx) => (
+          {orderedResults.map((result, idx) => (
             <SplitScreenCard
               key={`${result.itemName}::${result.wasteStream}::${idx}`}
               result={result}
               locale={locale}
               streams={streams}
               isLast={
-                displayResults.length === 4
+                orderedResults.length === 4
                   ? idx === 1 || idx === 3 // right column has no right border
-                  : idx === displayResults.length - 1
+                  : idx === orderedResults.length - 1
               }
-              isBottomRow={displayResults.length === 4 && idx >= 2}
+              isBottomRow={orderedResults.length === 4 && idx >= 2}
               animationDelay={idx * 50}
-              fontScale={displayResults.length >= 3 ? 0.7 : displayResults.length === 2 ? 0.85 : 1}
+              fontScale={orderedResults.length >= 3 ? 0.7 : orderedResults.length === 2 ? 0.85 : 1}
             />
           ))}
         </div>
@@ -302,8 +307,8 @@ function FullscreenResult({
       {(noteText || secondaryNote || (result.isCompound && result.components?.length)) && (
         <div className="px-6 pb-6 space-y-2">
           {noteText && (
-            <div className="bg-black/20 rounded-xl px-5 py-3">
-              <p className="text-xl font-semibold text-white/90 text-center">{noteText}</p>
+            <div className="bg-black/40 border border-white/20 rounded-xl px-5 py-3">
+              <p className="text-xl font-bold text-white text-center">{noteText}</p>
             </div>
           )}
           {secondaryNote && (
@@ -312,7 +317,7 @@ function FullscreenResult({
             </div>
           )}
           {result.isCompound && result.components && result.components.length > 0 && (
-            <div className="bg-black/20 rounded-xl px-5 py-3">
+            <div className="bg-black/40 border border-white/20 rounded-xl px-5 py-3">
               <CompoundBreakdown components={result.components} locale={locale} />
             </div>
           )}
@@ -432,8 +437,8 @@ function SplitScreenCard({
         {(result.preAction || result.specialInstructions || (result.isCompound && result.components?.length)) && (
           <div className="px-3 pb-3 space-y-1.5 shrink-0">
             {(result.preAction || result.specialInstructions) && (
-              <div className="bg-black/20 rounded-lg px-3 py-2">
-                <p className="text-sm font-semibold text-white/90 text-center">
+              <div className="bg-black/40 border border-white/20 rounded-lg px-3 py-2">
+                <p className="text-sm font-bold text-white text-center">
                   {result.preAction || result.specialInstructions}
                 </p>
               </div>
@@ -444,7 +449,7 @@ function SplitScreenCard({
               </div>
             )}
             {result.isCompound && result.components && result.components.length > 0 && (
-              <div className="bg-black/20 rounded-lg px-3 py-2">
+              <div className="bg-black/40 border border-white/20 rounded-lg px-3 py-2">
                 <SplitScreenCompoundBreakdown components={result.components} locale={locale} />
               </div>
             )}
@@ -473,29 +478,29 @@ function SplitScreenCompoundBreakdown({
 
   return (
     <div>
-      <div className="text-[10px] font-semibold uppercase tracking-widest text-amber-400 mb-1.5">
+      <div className="text-xs font-bold uppercase tracking-widest text-amber-300 mb-2">
         {T("separateInto")}
       </div>
       <div className="space-y-1.5">
         {components.map((c, i) => (
           <div
             key={i}
-            className="flex items-start gap-2 bg-neutral-800/60 rounded-lg px-2.5 py-1.5"
+            className="flex items-start gap-2 bg-neutral-900/70 rounded-lg px-2.5 py-1.5"
           >
-            <span className="text-[10px] font-bold text-amber-400 mt-0.5 shrink-0">
+            <span className="text-xs font-bold text-amber-300 mt-0.5 shrink-0">
               {T("separationStep").replace("{n}", String(i + 1))}
             </span>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-1.5 flex-wrap">
                 <StreamBadge stream={c.wasteStream} />
-                <span className="text-xs font-medium text-neutral-200 truncate">
+                <span className="text-xs font-semibold text-white truncate">
                   {c.partName}
                 </span>
                 {c.optional && (
-                  <span className="text-[9px] text-neutral-500 italic">{T("ifPresent")}</span>
+                  <span className="text-[10px] text-neutral-400 italic">{T("ifPresent")}</span>
                 )}
               </div>
-              <div className="text-[10px] text-neutral-400 mt-0.5">{c.instruction}</div>
+              <div className="text-xs text-neutral-300 mt-0.5">{c.instruction}</div>
             </div>
           </div>
         ))}
@@ -616,24 +621,24 @@ function CompoundBreakdown({
 
   return (
     <div>
-      <div className="text-xs font-semibold uppercase tracking-widest text-neutral-400 mb-1.5">
+      <div className="text-xs font-bold uppercase tracking-widest text-amber-300 mb-2">
         {T("multiplePartsTitle")}
       </div>
       <div className="space-y-1.5">
         {components.map((c, i) => (
           <div
             key={i}
-            className="flex items-start gap-2 bg-neutral-800/60 rounded-lg px-3 py-2"
+            className="flex items-start gap-2 bg-neutral-900/70 rounded-lg px-3 py-2"
           >
             <StreamBadge stream={c.wasteStream} />
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-sm font-medium text-neutral-200">{c.partName}</span>
+                <span className="text-sm font-semibold text-white">{c.partName}</span>
                 {c.optional && (
-                  <span className="text-xs text-neutral-500 italic">{T("ifPresent")}</span>
+                  <span className="text-xs text-neutral-400 italic">{T("ifPresent")}</span>
                 )}
               </div>
-              <div className="text-xs text-neutral-400">{c.instruction}</div>
+              <div className="text-xs text-neutral-300">{c.instruction}</div>
             </div>
           </div>
         ))}

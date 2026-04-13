@@ -77,7 +77,7 @@ describe("Tier 1: YOLO 39-class detection → waste stream", () => {
       const result = resolveYoloDetection(makeDetection(className), config);
       expect(result).not.toBeNull();
       expect(result!.wasteStream).toBe(expectedStream);
-      expect(result!.modelUsed).toBe("yolo-local");
+      expect(result!.modelUsed).toBe("T1");
     });
   });
 

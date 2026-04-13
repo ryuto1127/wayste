@@ -122,5 +122,5 @@ When working on this project, proactively suggest updates when you observe:
 When suggesting an update:
 1. Identify which existing section it belongs to, or propose a new section if none fits
 2. Show the exact diff against the current content
-3. Ask: "Should I add this to AGENTS.md?"
+3. Ask: "Should I add this to CLAUDE.md?"
 4. Only write after explicit confirmation

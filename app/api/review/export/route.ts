@@ -73,7 +73,7 @@ export async function GET(request: Request) {
         verdict === "wrong" ||
         (verdict === "correct" &&
           (entry.confidence <= CORRECT_CONFIDENCE_THRESHOLD ||
-            entry.modelUsed !== "yolo-local"));
+            entry.modelUsed !== "T1"));
 
       if (!shouldExport) continue;
 

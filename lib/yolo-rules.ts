@@ -87,7 +87,7 @@ export function resolveYoloDetection(
       binLabel: "",
       needsReview: false,
       isCompound: false,
-      modelUsed: "yolo-local",
+      modelUsed: "T1",
     };
   }
 
@@ -105,6 +105,6 @@ export function resolveYoloDetection(
     locale,
   );
 
-  result.modelUsed = "yolo-local";
+  result.modelUsed = "T1";
   return result;
 }

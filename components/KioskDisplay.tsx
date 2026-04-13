@@ -38,19 +38,9 @@ import SystemStatusBadge from "./SystemStatusBadge";
 const ANALYSIS_INTERVAL_MS = 30;  // ~33 fps local CV
 const COOLDOWN_MS = 1500; // pause before re-scanning (BG model recovery)
 const RESULT_GONE_FRAMES = 5;     // result state exit window (~150ms at 33fps) — balanced against flicker risk
-/**
- * Consecutive frames in idle with both foreground presence AND acceptable
- * image quality (not "poor") required to trigger classification.
- * Combines the old FG_PERSIST + SHARP_FRAMES gates into a single overlapped check.
- */
-const SHARP_FG_FRAMES_REQUIRED = 3;
-/**
- * Maximum relative change in roiForegroundRatio between consecutive frames
- * for the scene to be considered "settled". While a hand is entering the frame,
- * FG area grows rapidly (delta >> threshold) so classification is deferred
- * until the hand stops and all items are fully visible.
- */
-const FG_SETTLE_THRESHOLD = 0.15;
+/** FG frames required to start the YOLO continuous loop. Kept low — YOLO
+ *  handles its own quality; FG is just the "someone is approaching" trigger. */
+const FG_TRIGGER_FRAMES = 2;
 /**
  * Escape hatch: if the result state persists for this long with the object
  * still visible (e.g., a tissue leftover that never leaves), force a transition
@@ -65,6 +55,10 @@ const API_TIMEOUT_MS = 15_000;
 const RATE_LIMIT_RETRY_MS = 1_200;
 /** Max time in "classifying" state before forcing a timeout recovery. */
 const CLASSIFYING_TIMEOUT_MS = 20_000;
+/** YOLO cycles with no waste detections (but FG present) before escalating to API. */
+const API_ESCALATION_CYCLES = 5;
+/** YOLO cycles a previously-seen detection must be absent before removing it from results. */
+const YOLO_GONE_CYCLES = 3;
 
 // ── Background adaptation rates (passed to FrameAnalyzer per pipeline state) ──
 // idle / cooldown: full rate — continuously absorb drift and persistent leftovers
@@ -75,10 +69,12 @@ const BG_RATE_RESULT = 0;
 // classifying: frozen — never absorb the held object
 const BG_RATE_FROZEN = 0;
 
-// ── Detection ROI margin (fraction of the short-side square capture crop) ──
-// frame-analyzer crops the same center square as YOLO (e.g. 720×720 from
-// 1280×720), then applies this inset → detection ROI = center 80% (576×576).
-const DETECTION_ROI_MARGIN = 0.10;
+// ── ROI margins (fractions of the short-side square capture crop) ──
+// frame-analyzer crops center 720×720 from 1280×720 for FG detection.
+// DETECTION_ROI_MARGIN: outer FG detection area (nearly full 720×720).
+// YOLO_TARGET_INSET: inner YOLO analysis zone (640×640 = 89% of 720).
+const DETECTION_ROI_MARGIN = 0.02;
+const YOLO_TARGET_INSET = (1 - 640 / 720) / 2; // ~0.0556
 
 const ROI_BLOB_DIAGONAL_MIN_AREA = 0.01;
 
@@ -123,6 +119,9 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
   const [siteStreams, setSiteStreams] = useState<import("@/lib/types").StreamDefinition[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [locale, setLocale] = useState<Locale>(defaultLocale ?? "en");
+  // Keep stableResultsRef in sync for stale-closure-safe reads in YOLO loop
+  useEffect(() => { stableResultsRef.current = stableResults; }, [stableResults]);
+
   /** Track whether the user has manually toggled the language. */
   const userHasToggledRef = useRef(false);
   /** Incremented each time the pipeline returns to idle after a classification.
@@ -152,7 +151,14 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
   const nothingDetectedCountRef = useRef(0);
   const cooldownStartRef = useRef(0);
   const inFlightRef = useRef(false);
-  const prevFgRatioRef = useRef(0);
+  // ── YOLO continuous loop refs ──
+  const yoloRunningRef = useRef(false);
+  /** Consecutive YOLO cycles with no waste detections (while FG present). */
+  const yoloEmptyCyclesRef = useRef(0);
+  /** Per-className gone counter — tracks how many YOLO cycles each shown result has been absent. */
+  const detectionGoneMapRef = useRef<Map<string, number>>(new Map());
+  /** Mirror of stableResults for stale-closure-safe reads in the YOLO loop. */
+  const stableResultsRef = useRef<ClassificationResponse[]>([]);
   const lastAnalysisRef = useRef<FrameAnalysis | null>(null);
   const lastCachedRef = useRef("");
   const errorSetAtRef = useRef(0);
@@ -404,16 +410,11 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
         return; // effectively ~15fps during idle when throttling
       }
 
-      // During classifying, skip all heavy work — only check timeout.
+      // During classifying, still run FG analysis but skip the heavy parts.
+      // YOLO loop runs independently — here we just monitor FG presence and timeout.
       if (stateRef.current === "classifying") {
-        if (Date.now() - classifyStartRef.current >= CLASSIFYING_TIMEOUT_MS) {
-          console.error("[classify] Timed out in classifying state — forcing recovery");
-          analyzer.boostBackgroundAdaptation();
-          inFlightRef.current = false;
-          cooldownStartRef.current = Date.now();
-          transition("cooldown");
-        }
-        return;
+        // Continue with frame analysis below so FG detection stays active
+        // (needed to detect hand leaving during YOLO scanning).
       }
 
       // Set BG adaptation rate based on pipeline state.
@@ -518,32 +519,23 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       // ── State machine transitions ──
 
       if (state === "idle") {
-        // ── Overlapped FG + sharpness + scene-settled check ──
-        // Require foreground, good image quality, AND stable FG area.
-        // While a hand enters the frame FG area grows rapidly, so
-        // classification is deferred until the hand stops moving.
-        const currFg = analysis.roiForegroundRatio;
-        const prevFg = prevFgRatioRef.current;
-        const fgDelta = prevFg > 0.001
-          ? Math.abs(currFg - prevFg) / prevFg
-          : (currFg > 0.001 ? 1 : 0);
-        const sceneSettled = fgDelta < FG_SETTLE_THRESHOLD;
-        prevFgRatioRef.current = currFg;
-
-        if (roiHasFg && imageQualityBand(analysis) === "good" && sceneSettled) {
+        // FG detection is the "early warning" sensor. When something enters
+        // the wide detection ROI (larger than YOLO's 640×640 zone), start the
+        // YOLO continuous loop so it's already running by the time the hand
+        // reaches the center. No quality or stability gate — YOLO handles that.
+        if (roiHasFg) {
           fgPersistRef.current++;
-          if (fgPersistRef.current >= SHARP_FG_FRAMES_REQUIRED) {
+          if (fgPersistRef.current >= FG_TRIGGER_FRAMES) {
             fgPersistRef.current = 0;
             goneCountRef.current = 0;
-            triggerClassification(analysis);
+            yoloEmptyCyclesRef.current = 0;
+            detectionGoneMapRef.current.clear();
+            classifyStartRef.current = Date.now();
+            transition("classifying");
+            startYoloLoop(analyzer);
           }
-        } else if (roiHasFg) {
-          // FG present but scene not yet settled or not sharp enough — reset count
-          fgPersistRef.current = 0;
         } else {
           fgPersistRef.current = 0;
-          prevFgRatioRef.current = 0;
-          // Scene cleared — reset nothing-detected suppression
           if (nothingDetectedCountRef.current > 0) {
             nothingDetectedCountRef.current = 0;
           }
@@ -551,84 +543,82 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
         return;
       }
 
-      // classifying state is handled above (before frame analysis)
-      // to avoid blocking the main thread during API calls.
-
-      if (state === "result") {
-        // Result stays on screen until item is removed — no minimum display time.
-        // Uses lenient resultHasFg so distant/small items don't prematurely dismiss.
-
-        // DEBUG: log foreground values every ~1s during result state
-        const resultElapsed = Date.now() - resultEnterTimeRef.current;
-        if (Math.floor(resultElapsed / 1000) !== Math.floor((resultElapsed - ANALYSIS_INTERVAL_MS) / 1000)) {
-          console.log(`[result-debug] t=${(resultElapsed/1000).toFixed(0)}s resultHasFg=${resultHasFg} roiHasFg=${roiHasFg} fgRatio=${analysis.roiForegroundRatio.toFixed(4)} blobRatio=${analysis.roiLargestBlobRatio.toFixed(4)} thFg=${th.RESULT_FG_THRESHOLD.toFixed(4)} thBlob=${th.RESULT_BLOB_THRESHOLD.toFixed(4)} goneCount=${goneCountRef.current}`);
-        }
-
-        if (!resultHasFg) {
+      // classifying: YOLO loop is running, waiting for detections.
+      // The loop itself handles result transitions via handleYoloCycleResult.
+      // Here we only handle FG disappearing (hand left) and timeout.
+      if (state === "classifying") {
+        if (!roiHasFg) {
           goneCountRef.current++;
-          if (goneCountRef.current === 1) {
-            console.log(`[result-debug] gone started: fgRatio=${analysis.roiForegroundRatio.toFixed(4)} blobRatio=${analysis.roiLargestBlobRatio.toFixed(4)}`);
-          }
           if (goneCountRef.current >= RESULT_GONE_FRAMES) {
-            console.log(`[result-debug] gone confirmed (${RESULT_GONE_FRAMES} frames) → cooldown`);
-            // Item removed — boost BG adaptation so the
-            // model rapidly absorbs the current scene (was frozen during result).
+            console.log(`[classifying] FG gone → idle`);
+            stopYoloLoop();
+            goneCountRef.current = 0;
+            nothingDetectedCountRef.current++;
             analyzer.boostBackgroundAdaptation();
             cooldownStartRef.current = Date.now();
             transition("cooldown");
           }
         } else {
-          // If goneCount > 0, the previous item briefly disappeared — this is a
-          // new item. Reset and classify immediately without waiting for cooldown.
-          if (goneCountRef.current >= 2 && roiHasFg) {
-            console.log(`[result-debug] ⚠️ RE-CLASSIFY triggered: goneCount=${goneCountRef.current} fgRatio=${analysis.roiForegroundRatio.toFixed(4)} blobRatio=${analysis.roiLargestBlobRatio.toFixed(4)}`);
-            setStableResults([]); setResultRequestIds([]);
-            setError(null);
-            goneCountRef.current = 0;
-            fgPersistRef.current = 0;
-            analyzer.boostBackgroundAdaptation();
-            triggerClassification(analysis);
-            return;
-          }
-          if (goneCountRef.current > 0) {
-            console.log(`[result-debug] gone reset: goneCount was ${goneCountRef.current}, resultHasFg=true but roiHasFg=false`);
-          }
           goneCountRef.current = 0;
+        }
+        // Timeout escape hatch
+        if (Date.now() - classifyStartRef.current >= CLASSIFYING_TIMEOUT_MS) {
+          console.log(`[classifying] timeout → cooldown`);
+          stopYoloLoop();
+          analyzer.boostBackgroundAdaptation();
+          cooldownStartRef.current = Date.now();
+          transition("cooldown");
+        }
+        return;
+      }
 
-          // Persistent-leftover escape hatch
-          if (Date.now() - resultEnterTimeRef.current >= RESULT_TIMEOUT_MS) {
-            console.log(`[result-debug] timeout (${RESULT_TIMEOUT_MS}ms) → cooldown`);
-            setStableResults([]); setResultRequestIds([]);
-            goneCountRef.current = 0;
+      if (state === "result") {
+        // YOLO loop is still running — it updates results dynamically.
+        // FG analysis provides the "everything gone" exit signal.
+        if (!resultHasFg) {
+          goneCountRef.current++;
+          if (goneCountRef.current >= RESULT_GONE_FRAMES) {
+            console.log(`[result] FG gone → cooldown`);
+            stopYoloLoop();
             analyzer.boostBackgroundAdaptation();
             cooldownStartRef.current = Date.now();
             transition("cooldown");
-            return;
+          }
+        } else {
+          goneCountRef.current = 0;
+          // Persistent-leftover escape hatch
+          if (Date.now() - resultEnterTimeRef.current >= RESULT_TIMEOUT_MS) {
+            console.log(`[result] timeout → cooldown`);
+            stopYoloLoop();
+            setStableResults([]); setResultRequestIds([]);
+            analyzer.boostBackgroundAdaptation();
+            cooldownStartRef.current = Date.now();
+            transition("cooldown");
           }
         }
         return;
       }
 
       if (state === "cooldown") {
-        // After repeated "nothing detected", use progressively longer cooldowns
-        // to let the background model absorb persistent non-waste objects.
         const effectiveCooldown = nothingDetectedCountRef.current > 1
           ? Math.min(COOLDOWN_MS * nothingDetectedCountRef.current, 2_500)
           : COOLDOWN_MS;
         const cooldownElapsed = Date.now() - cooldownStartRef.current >= effectiveCooldown;
         const errorHeld = !errorRef.current || (Date.now() - errorSetAtRef.current >= ERROR_HOLD_MS);
 
-        // If a new item is pending, skip cooldown wait
+        // If a new item is pending, start YOLO loop immediately
         if (pendingItemRef.current && errorHeld) {
           setStableResults([]); setResultRequestIds([]);
           setError(null);
           pendingItemRef.current = false;
           fgPersistRef.current = 0;
           goneCountRef.current = 0;
-
-          // Classify immediately if frame is sharp and scene settled, otherwise return to idle
-          if (roiHasFg && imageQualityBand(analysis) === "good") {
-            triggerClassification(analysis);
+          yoloEmptyCyclesRef.current = 0;
+          detectionGoneMapRef.current.clear();
+          if (roiHasFg) {
+            classifyStartRef.current = Date.now();
+            transition("classifying");
+            startYoloLoop(analyzer);
           } else {
             transition("idle");
           }
@@ -647,7 +637,183 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
 
     return () => {
       clearInterval(interval);
+      yoloRunningRef.current = false; // stop YOLO loop on unmount
     };
+
+    // ── YOLO continuous loop ──
+    // Runs back-to-back inference as fast as the model allows (~7-10fps for
+    // medium models on WebGPU). Started when FG detects an approaching hand,
+    // continues through classifying and result states, stopped when everything
+    // leaves the frame.
+
+    function startYoloLoop(currentAnalyzer: FrameAnalyzer) {
+      if (yoloRunningRef.current) return;
+      const backend = inferenceRef.current;
+      if (!backend?.isReady() || !siteConfigRef.current) return;
+      yoloRunningRef.current = true;
+      console.log(`[yolo-loop] started`);
+      // Fire-and-forget async loop
+      (async () => {
+        while (yoloRunningRef.current) {
+          const video = cameraRef.current?.getVideo();
+          if (!video) { await new Promise(r => setTimeout(r, 50)); continue; }
+
+          const yoloStart = Date.now();
+          let detections: YoloDetection[];
+          try {
+            detections = await backend.detect(video);
+          } catch {
+            detections = [];
+          }
+          const yoloMs = Date.now() - yoloStart;
+          perfMonitor.recordYoloInference(yoloMs);
+
+          // Read latest FG analysis from the CV loop
+          const analysis = lastAnalysisRef.current;
+
+          handleYoloCycleResult(detections, yoloMs, video, analysis, currentAnalyzer);
+        }
+        console.log(`[yolo-loop] stopped`);
+      })();
+    }
+
+    function stopYoloLoop() {
+      yoloRunningRef.current = false;
+    }
+
+    /** Process one YOLO cycle result — drive state transitions + update displayed results. */
+    function handleYoloCycleResult(
+      detections: YoloDetection[],
+      yoloMs: number,
+      video: HTMLVideoElement,
+      analysis: FrameAnalysis | null,
+      currentAnalyzer: FrameAnalyzer,
+    ) {
+      const state = stateRef.current;
+      const th = thresholdsRef.current;
+      const wasteDetections = detections.filter(d => !isYoloClassNotWaste(d.className));
+
+      // ── Resolve detections via YOLO rules ──
+      const resolvedResults: (ClassificationResponse & { _bboxX?: number })[] = [];
+      let unresolvedCount = 0;
+      for (const det of wasteDetections.slice(0, 4)) {
+        const bboxX = det.bbox[0] + det.bbox[2] / 2;
+        if (det.confidence >= th.YOLO_FALLBACK_THRESHOLD) {
+          const r = resolveYoloDetection(det, siteConfigRef.current!, localeRef.current);
+          if (r) {
+            (r as ClassificationResponse & { _bboxX?: number })._bboxX = bboxX;
+            resolvedResults.push(r as ClassificationResponse & { _bboxX?: number });
+            continue;
+          }
+        }
+        unresolvedCount++;
+      }
+
+      const hasResults = resolvedResults.length > 0;
+
+      if (state === "classifying") {
+        if (hasResults) {
+          // YOLO found items → show result immediately
+          resolvedResults.sort((a, b) => (a._bboxX ?? 0) - (b._bboxX ?? 0));
+          console.log(`[yolo-loop] HIT: ${resolvedResults.map(r => r.itemName).join(" + ")} in ${yoloMs}ms`);
+
+          if (analysis) {
+            logYoloOnlyResult(video, resolvedResults[0], detections, yoloMs, analysis, "T1", undefined, undefined,
+              { tier1: wasteDetections.map(d => ({ itemName: d.className, confidence: d.confidence })).sort((a, b) => b.confidence - a.confidence).slice(0, 5) });
+          }
+
+          handleMultiClassificationResults(resolvedResults, resolvedResults.map(() => undefined));
+          yoloEmptyCyclesRef.current = 0;
+          detectionGoneMapRef.current.clear();
+        } else {
+          // No YOLO results this cycle
+          yoloEmptyCyclesRef.current++;
+
+          // API escalation: YOLO can't find anything but FG says something is there
+          if (yoloEmptyCyclesRef.current >= API_ESCALATION_CYCLES
+              && analysis && imageQualityBand(analysis) === "good"
+              && !inFlightRef.current) {
+            console.log(`[yolo-loop] ${API_ESCALATION_CYCLES} empty cycles → escalating to API`);
+            inFlightRef.current = true;
+            const tier1Hints = wasteDetections
+              .map(d => ({ itemName: d.className, confidence: d.confidence }))
+              .sort((a, b) => b.confidence - a.confidence).slice(0, 5);
+            classifyViaApiAsync(video, analysis, new AbortController().signal, undefined, true, { tier1: tier1Hints })
+              .then(({ result: r, requestId, multiResults }) => {
+                const apiResults = multiResults ?? (r ? [r] : []);
+                if (apiResults.length > 0) {
+                  handleMultiClassificationResults(apiResults, apiResults.map(() => requestId));
+                } else {
+                  nothingDetectedCountRef.current++;
+                  cooldownStartRef.current = Date.now();
+                  transition("cooldown");
+                  stopYoloLoop();
+                }
+                inFlightRef.current = false;
+              })
+              .catch(() => {
+                nothingDetectedCountRef.current++;
+                cooldownStartRef.current = Date.now();
+                transition("cooldown");
+                stopYoloLoop();
+                inFlightRef.current = false;
+              });
+          }
+        }
+        return;
+      }
+
+      if (state === "result") {
+        // ── Dynamic result updates ──
+        // Track which displayed items YOLO still sees vs which have disappeared.
+        const currentClasses = new Set(resolvedResults.map(r => r.itemName));
+        const goneMap = detectionGoneMapRef.current;
+
+        // Update gone counters for displayed results
+        const displayedResults = stableResultsRef.current;
+        for (const displayed of displayedResults) {
+          if (currentClasses.has(displayed.itemName)) {
+            // Still visible — reset gone counter
+            goneMap.delete(displayed.itemName);
+          } else {
+            // Not seen this cycle
+            goneMap.set(displayed.itemName, (goneMap.get(displayed.itemName) ?? 0) + 1);
+          }
+        }
+
+        // Remove items that have been gone for YOLO_GONE_CYCLES
+        const toRemove = new Set<string>();
+        for (const [name, count] of goneMap) {
+          if (count >= YOLO_GONE_CYCLES) {
+            toRemove.add(name);
+            goneMap.delete(name);
+          }
+        }
+
+        // Add new items that weren't in existing results
+        const existingClasses = new Set(displayedResults.map(r => r.itemName));
+        const newResults = resolvedResults.filter(r => !existingClasses.has(r.itemName));
+
+        if (toRemove.size > 0 || newResults.length > 0) {
+          const updated = [
+            ...displayedResults.filter(r => !toRemove.has(r.itemName)),
+            ...newResults,
+          ].slice(0, 4);
+
+          if (toRemove.size > 0) console.log(`[yolo-loop] removed: ${[...toRemove].join(", ")}`);
+          if (newResults.length > 0) console.log(`[yolo-loop] added: ${newResults.map(r => r.itemName).join(", ")}`);
+
+          if (updated.length === 0) {
+            // All items removed by YOLO — but wait for FG to confirm exit
+            // (handled by the FG-based gone detection in the main CV loop)
+          } else {
+            setStableResults(updated);
+            setResultRequestIds(updated.map(() => undefined));
+          }
+        }
+        return;
+      }
+    }
 
     /** Log a YOLO-only classification to the server (fire-and-forget).
      *  Needed because YOLO wins skip the /api/classify route entirely. */
@@ -657,7 +823,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       detections: YoloDetection[],
       latencyMs: number,
       analysis: FrameAnalysis,
-      modelUsed: "yolo-local" = "yolo-local",
+      modelUsed: "T1" = "T1",
       _hint?: unknown,
       _refinedFrom?: unknown,
       tierResults?: { tier1?: { itemName: string; confidence: number }[] },
@@ -784,7 +950,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           if (resolvedResults.length > 0 && unresolvedCount === 0) {
             resolvedResults.sort((a, b) => (a._bboxX ?? 0) - (b._bboxX ?? 0));
             console.log(`[tier1] YOLO HIT: ${resolvedResults.map((r) => r.itemName).join(" + ")} in ${yoloMs}ms`);
-            logYoloOnlyResult(video, resolvedResults[0], detections, yoloMs, analysis, "yolo-local", undefined, undefined,
+            logYoloOnlyResult(video, resolvedResults[0], detections, yoloMs, analysis, "T1", undefined, undefined,
               { tier1: wasteDetections.map(d => ({ itemName: d.className, confidence: d.confidence })).sort((a, b) => b.confidence - a.confidence).slice(0, 5) });
             handleMultiClassificationResults(resolvedResults, resolvedResults.map(() => undefined));
             return;
@@ -926,7 +1092,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
         binLabel: reviewStream?.label ?? "Needs Verification",
         needsReview: true,
         isCompound: false,
-        modelUsed: "yolo-local",
+        modelUsed: "T1",
       };
     }
 
@@ -1127,6 +1293,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           voiceEnabled={voiceEnabled}
           onToggleVoice={toggleVoice}
           detectionRoiMargin={DETECTION_ROI_MARGIN}
+          yoloTargetInset={YOLO_TARGET_INSET}
         />
       )}
 
@@ -1135,6 +1302,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           pipelineState={pipelineState}
           locale={locale}
           detectionRoiMargin={DETECTION_ROI_MARGIN}
+          yoloTargetInset={YOLO_TARGET_INSET}
         />
       )}
 

@@ -9,12 +9,14 @@ interface CameraScreenProps {
   pipelineState: PipelineState;
   locale: Locale;
   detectionRoiMargin: number;
+  yoloTargetInset: number;
 }
 
 export default function CameraScreen({
   pipelineState,
   locale,
-  detectionRoiMargin,
+  detectionRoiMargin: _detectionRoiMargin,
+  yoloTargetInset,
 }: CameraScreenProps) {
   const T = useCallback(
     (key: TranslationKey) => t(locale, key),
@@ -34,7 +36,7 @@ export default function CameraScreen({
   // For 1280×720: center square = 720×720 → starts at x=280 (21.875% of 1280)
   // Inner ROI at 20% inset of 720 = 144px inset → starts at x=424 (33.125% of 1280)
   // Using CSS calc with aspect-ratio-aware percentages:
-  const verticalInset = `${detectionRoiMargin * 100}%`;
+  const verticalInset = `${yoloTargetInset * 100}%`;
   // horizontalInset = (frameW - frameH) / (2 * frameW) + detectionRoiMargin * (frameH / frameW)
   // For 16:9: = (16-9)/(2*16) + margin * (9/16) = 0.21875 + margin * 0.5625
   // We use a CSS-friendly approximation: the square's edge + inner margin

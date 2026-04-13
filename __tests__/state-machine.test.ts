@@ -11,8 +11,7 @@ import { computeThresholds } from "@/lib/threshold-config";
 const { ROI_FG_THRESHOLD } = computeThresholds(0.5);
 
 // Constants matching KioskDisplay.tsx
-const SHARP_FG_FRAMES_REQUIRED = 3;
-const FG_SETTLE_THRESHOLD = 0.15;
+const FG_TRIGGER_FRAMES = 2;
 const FG_PERSIST_FRAMES = 2;
 const RESULT_TIMEOUT_MS = 20_000;
 const RESULT_GONE_FRAMES = 5;
@@ -42,15 +41,12 @@ class StateMachineSimulator {
   classifyTriggered = false;
   pendingItem = false;
   nothingDetectedCount = 0;
-  prevFgRatio = 0;
-
   tick(analysis: FrameAnalysis): void {
     if (!analysis.isSettled) return;
 
     const roiHasFg =
       analysis.roiForegroundRatio >= ROI_FG_THRESHOLD &&
       analysis.roiLargestBlobRatio >= ROI_BLOB_THRESHOLD;
-    const isGood = analysis.sharpnessScore > 1500;
 
     // Pending-item queue (non-idle states only)
     if (this.state !== "idle") {
@@ -66,28 +62,18 @@ class StateMachineSimulator {
     }
 
     if (this.state === "idle") {
-      const currFg = analysis.roiForegroundRatio;
-      const prevFg = this.prevFgRatio;
-      const fgDelta = prevFg > 0.001
-        ? Math.abs(currFg - prevFg) / prevFg
-        : (currFg > 0.001 ? 1 : 0);
-      const sceneSettled = fgDelta < FG_SETTLE_THRESHOLD;
-      this.prevFgRatio = currFg;
-
-      if (roiHasFg && isGood && sceneSettled) {
+      // Simple FG trigger — no quality or stabilization gate.
+      // YOLO handles its own quality; FG is just the "someone is approaching" signal.
+      if (roiHasFg) {
         this.fgPersist++;
-        if (this.fgPersist >= SHARP_FG_FRAMES_REQUIRED) {
+        if (this.fgPersist >= FG_TRIGGER_FRAMES) {
           this.fgPersist = 0;
           this.goneCount = 0;
           this.classifyTriggered = true;
           this.state = "classifying";
         }
-      } else if (roiHasFg) {
-        // FG present but not settled or not sharp — reset count
-        this.fgPersist = 0;
       } else {
         this.fgPersist = 0;
-        this.prevFgRatio = 0;
         this.nothingDetectedCount = 0;
       }
       return;
@@ -134,7 +120,7 @@ class StateMachineSimulator {
         this.pendingItem = false;
         this.fgPersist = 0;
         this.goneCount = 0;
-        if (roiHasFg && isGood) {
+        if (roiHasFg) {
           this.classifyTriggered = true;
           this.state = "classifying";
         } else {
@@ -158,47 +144,29 @@ class StateMachineSimulator {
 }
 
 describe("State machine", () => {
-  it("idle -> classifying after scene settled + SHARP_FG_FRAMES_REQUIRED", () => {
+  it("idle -> classifying after FG_TRIGGER_FRAMES of foreground", () => {
     const sim = new StateMachineSimulator();
     expect(sim.state).toBe("idle");
 
-    const stableFrame = makeAnalysis(); // sharpness 2000, fgRatio 0.15
+    const objectFrame = makeAnalysis();
 
-    // Frame 1: FG appears (prevFgRatio=0 → delta=1 → not settled) — no count
-    sim.tick(stableFrame);
-    expect(sim.state).toBe("idle");
-    expect(sim.fgPersist).toBe(0);
-
-    // Frames 2–4: FG stable (delta≈0 → settled) — counts 1,2,3 → trigger
-    for (let i = 0; i < SHARP_FG_FRAMES_REQUIRED; i++) {
-      sim.tick(stableFrame);
+    for (let i = 0; i < FG_TRIGGER_FRAMES; i++) {
+      sim.tick(objectFrame);
     }
 
     expect(sim.state).toBe("classifying");
     expect(sim.classifyTriggered).toBe(true);
   });
 
-  it("idle defers trigger while FG area is growing (hand entering frame)", () => {
+  it("idle triggers regardless of image quality (YOLO handles quality)", () => {
     const sim = new StateMachineSimulator();
+    const blurryFrame = makeAnalysis({ sharpnessScore: 50 });
 
-    // Simulate hand entering: FG area grows each frame
-    const growingFrames = [0.03, 0.06, 0.10, 0.15, 0.18].map(fg =>
-      makeAnalysis({ roiForegroundRatio: fg, roiLargestBlobRatio: fg * 0.8 }),
-    );
-
-    for (const frame of growingFrames) {
-      sim.tick(frame);
+    // Blurry frames with FG present — should still trigger (YOLO decides quality)
+    for (let i = 0; i < FG_TRIGGER_FRAMES; i++) {
+      sim.tick(blurryFrame);
     }
 
-    // Still idle — FG was growing rapidly each frame
-    expect(sim.state).toBe("idle");
-    expect(sim.fgPersist).toBe(0);
-
-    // Now hand stops — stable FG
-    const settled = makeAnalysis({ roiForegroundRatio: 0.18, roiLargestBlobRatio: 0.14 });
-    for (let i = 0; i < SHARP_FG_FRAMES_REQUIRED; i++) {
-      sim.tick(settled);
-    }
     expect(sim.state).toBe("classifying");
   });
 
@@ -210,37 +178,8 @@ describe("State machine", () => {
       roiLargestBlobRatio: 0,
     });
 
-    // Seed prevFgRatio, then count 1 settled frame, then object disappears
-    sim.tick(objectFrame); // delta=1, not settled
-    sim.tick(objectFrame); // settled, fgPersist=1
-    sim.tick(emptyFrame);  // gone
-
-    expect(sim.state).toBe("idle");
-    expect(sim.fgPersist).toBe(0);
-  });
-
-  it("idle ignores blurry frames for classification trigger", () => {
-    const sim = new StateMachineSimulator();
-    const blurryFrame = makeAnalysis({ sharpnessScore: 50 });
-
-    // Many blurry frames — should NOT trigger classification (quality != good)
-    for (let i = 0; i < 10; i++) {
-      sim.tick(blurryFrame);
-    }
-
-    expect(sim.state).toBe("idle");
-  });
-
-  it("idle requires 'good' quality — 'fair' frames do not count", () => {
-    const sim = new StateMachineSimulator();
-    const fairFrame = makeAnalysis({ sharpnessScore: 1200 }); // fair, not good
-
-    // Seed prevFgRatio
-    sim.tick(fairFrame);
-    // Fair frames: settled but not good quality — no count
-    for (let i = 0; i < 10; i++) {
-      sim.tick(fairFrame);
-    }
+    sim.tick(objectFrame); // fgPersist=1
+    sim.tick(emptyFrame);  // gone, fgPersist=0
 
     expect(sim.state).toBe("idle");
     expect(sim.fgPersist).toBe(0);
@@ -325,14 +264,14 @@ describe("State machine", () => {
     expect(sim.pendingItem).toBe(false);
   });
 
-  it("cooldown with pendingItem + blurry frame transitions to idle", () => {
+  it("cooldown with pendingItem + no FG transitions to idle", () => {
     const sim = new StateMachineSimulator();
     sim.state = "cooldown";
     sim.cooldownStart = Date.now();
     sim.pendingItem = true;
 
-    const blurryFrame = makeAnalysis({ sharpnessScore: 50 });
-    sim.tick(blurryFrame);
+    const emptyFrame = makeAnalysis({ roiForegroundRatio: 0, roiLargestBlobRatio: 0 });
+    sim.tick(emptyFrame);
 
     expect(sim.state).toBe("idle");
     expect(sim.pendingItem).toBe(false);

@@ -12,8 +12,10 @@ interface IdleScreenProps {
   statsVersion: number;
   voiceEnabled: boolean;
   onToggleVoice: () => void;
-  /** Detection ROI margin (fraction, e.g. 0.20 = 20% inset of center square). */
+  /** Detection ROI margin (fraction, e.g. 0.02 = 2% inset of center square). */
   detectionRoiMargin: number;
+  /** YOLO target inset (fraction, e.g. 0.0556 = inner 89% where YOLO analyzes). */
+  yoloTargetInset: number;
 }
 
 export default function IdleScreen({
@@ -23,6 +25,7 @@ export default function IdleScreen({
   voiceEnabled,
   onToggleVoice,
   detectionRoiMargin,
+  yoloTargetInset,
 }: IdleScreenProps) {
   const T = useCallback(
     (key: TranslationKey) => t(locale, key),
@@ -50,10 +53,11 @@ export default function IdleScreen({
   const hasData = stats !== null && stats.totalClassifications > 0;
   const successPct = stats ? Math.round(stats.successRate * 100) : 0;
 
-  // The camera preview shows the center square of the frame (matching YOLO crop).
-  // The ROI guide is inset by detectionRoiMargin within that square.
-  // Outer region gets a dark overlay to draw the eye toward the ROI.
-  const roiInsetPct = `${detectionRoiMargin * 100}%`;
+  // Three-zone vignette: outer (dark) → middle (slightly dark) → inner (clear).
+  // The viewfinder square represents the FG detection area (720×720).
+  // The YOLO target zone (640×640) is inset within it.
+  const _roiInsetPct = `${detectionRoiMargin * 100}%`; // ~2% — detection edge
+  const yoloInsetPct = `${yoloTargetInset * 100}%`;    // ~5.56% — YOLO target
 
   return (
     <div className="absolute inset-0 z-20 flex flex-col items-center justify-center px-6 py-8 select-none animate-[fadeIn_0.3s_ease-out]">
@@ -157,55 +161,54 @@ export default function IdleScreen({
         style={{ boxShadow: "0 0 0 9999px rgba(10, 10, 10, 0.50)" }}
       >
 
-        {/* Dark vignette overlay outside the ROI — outer zone is dimmed so
-            the user can see their hand/item but attention is drawn to the
-            brighter ROI center. */}
+        {/* Middle zone vignette — region between viewfinder edge and YOLO target.
+            Slightly dimmed so the YOLO target zone stands out as the brightest area. */}
         <div className="absolute inset-0 pointer-events-none">
           {/* Top strip */}
           <div
-            className="absolute top-0 left-0 right-0 bg-neutral-950/20"
-            style={{ height: roiInsetPct }}
+            className="absolute top-0 left-0 right-0 bg-neutral-950/15"
+            style={{ height: yoloInsetPct }}
           />
           {/* Bottom strip */}
           <div
-            className="absolute bottom-0 left-0 right-0 bg-neutral-950/20"
-            style={{ height: roiInsetPct }}
+            className="absolute bottom-0 left-0 right-0 bg-neutral-950/15"
+            style={{ height: yoloInsetPct }}
           />
           {/* Left strip (between top and bottom) */}
           <div
-            className="absolute bg-neutral-950/20"
+            className="absolute bg-neutral-950/15"
             style={{
-              top: roiInsetPct,
-              bottom: roiInsetPct,
+              top: yoloInsetPct,
+              bottom: yoloInsetPct,
               left: 0,
-              width: roiInsetPct,
+              width: yoloInsetPct,
             }}
           />
           {/* Right strip (between top and bottom) */}
           <div
-            className="absolute bg-neutral-950/20"
+            className="absolute bg-neutral-950/15"
             style={{
-              top: roiInsetPct,
-              bottom: roiInsetPct,
+              top: yoloInsetPct,
+              bottom: yoloInsetPct,
               right: 0,
-              width: roiInsetPct,
+              width: yoloInsetPct,
             }}
           />
         </div>
 
-        {/* ROI boundary — thin continuous border + glow pulse */}
+        {/* YOLO target boundary — thin continuous border + glow pulse */}
         <div
           className="absolute pointer-events-none rounded-xl border border-white/20"
           style={{
-            inset: roiInsetPct,
+            inset: yoloInsetPct,
             animation: "roiGlow 3s ease-in-out infinite",
           }}
         />
 
-        {/* ROI corner brackets — larger and bolder for visibility */}
+        {/* YOLO target corner brackets — guide users to hold items here */}
         <div
           className="absolute pointer-events-none"
-          style={{ inset: roiInsetPct }}
+          style={{ inset: yoloInsetPct }}
         >
           <div className="absolute top-0 left-0 w-10 h-10 border-t-[3px] border-l-[3px] rounded-tl-xl border-white/70" />
           <div className="absolute top-0 right-0 w-10 h-10 border-t-[3px] border-r-[3px] rounded-tr-xl border-white/70" />

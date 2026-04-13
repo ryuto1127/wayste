@@ -37,17 +37,19 @@ const AW = 120;
 const AH = 120;
 const PIXEL_COUNT = AW * AH;
 
-// ── Central ROI: center 80% × 80% of the analysis canvas ──
-// Only foreground within this zone is used for idle→object_detected decisions.
-// Edge noise, vibration, and peripheral lighting changes are ignored.
-// 80% = 576×576 of the 720×720 capture crop (10% inset on each side).
-const ROI_X0 = Math.round(AW * 0.10); // 12
-const ROI_X1 = Math.round(AW * 0.90); // 108
-const ROI_Y0 = Math.round(AH * 0.10); // 12
-const ROI_Y1 = Math.round(AH * 0.90); // 108
-const ROI_W = ROI_X1 - ROI_X0;        // 72
-const ROI_H = ROI_Y1 - ROI_Y0;        // 72
-const ROI_PIXEL_COUNT = ROI_W * ROI_H; // 5184
+// ── Central ROI: center 96% × 96% of the analysis canvas ──
+// Nearly the full 720×720 center-square crop. This wide ROI acts as an
+// "early warning" sensor — it detects hands approaching BEFORE they reach
+// the YOLO analysis zone (640×640 = inner 89%). 2% edge margin filters
+// out camera edge noise and vibration.
+const ROI_INSET = 0.02;
+const ROI_X0 = Math.round(AW * ROI_INSET);        // 2
+const ROI_X1 = Math.round(AW * (1 - ROI_INSET));  // 118
+const ROI_Y0 = Math.round(AH * ROI_INSET);        // 2
+const ROI_Y1 = Math.round(AH * (1 - ROI_INSET));  // 118
+const ROI_W = ROI_X1 - ROI_X0;        // 116
+const ROI_H = ROI_Y1 - ROI_Y0;        // 116
+const ROI_PIXEL_COUNT = ROI_W * ROI_H; // 13456
 
 // ── Background subtraction ──
 const BG_LEARN_RATE = 0.015; // absorbs camera drift in ~10s; BG continues during confirm window to erode noise

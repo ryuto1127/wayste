@@ -53,7 +53,10 @@ training/
 # YOLO / PyTorch model weights (large binary files)
 *.pt
 *.pth
+# ONNX models in public/models/ are tracked (needed for Vercel deployment)
+# Other .onnx files are ignored
 *.onnx
+!public/models/*.onnx
 
 # Training datasets (large, not for deployment)
 datasets/

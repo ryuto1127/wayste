@@ -483,8 +483,8 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           const avg = thermal.durations.reduce((a, b) => a + b, 0) / thermal.durations.length;
           const ratio = avg / thermal.baseline;
           const wasThrottling = thermal.throttling;
-          // Trigger at 2× baseline, recover at 1.5× baseline (hysteresis)
-          if (avg > thermal.baseline * 2) {
+          // Trigger at 4× baseline, recover at 1.5× baseline (hysteresis)
+          if (avg > thermal.baseline * 4) {
             thermal.throttling = true;
           } else if (avg < thermal.baseline * 1.5) {
             thermal.throttling = false;

@@ -177,12 +177,12 @@ export function PerformancePanel() {
 }
 
 // ── Thermal gauge ──
-// Horizontal bar: 0× to 2.5× baseline. Green up to 1.5×, yellow 1.5–2×, red 2×+.
+// Horizontal bar: 0× to 5.0× baseline. Green up to 1.5×, yellow 1.5–4×, red 4×+.
 // The marker needle shows the current ratio.
 
 function ThermalGauge({ ratio, throttling }: { ratio: number; throttling: boolean }) {
-  // Scale: 0 to 2.5× baseline
-  const maxScale = 2.5;
+  // Scale: 0 to 5.0× baseline (trigger threshold: 4×)
+  const maxScale = 5.0;
   const pct = Math.min(ratio / maxScale, 1) * 100;
   const hasData = ratio > 0;
 
@@ -193,7 +193,7 @@ function ThermalGauge({ ratio, throttling }: { ratio: number; throttling: boolea
       ? "Cool"
       : ratio < 1.5
         ? "Warm"
-        : ratio < 2.0
+        : ratio < 4.0
           ? "Hot"
           : "Throttling";
 
@@ -202,7 +202,7 @@ function ThermalGauge({ ratio, throttling }: { ratio: number; throttling: boolea
     ? "#525252"
     : ratio < 1.5
       ? "#34d399"  // emerald-400
-      : ratio < 2.0
+      : ratio < 4.0
         ? "#fbbf24"  // amber-400
         : "#f87171"; // red-400
 
@@ -241,9 +241,9 @@ function ThermalGauge({ ratio, throttling }: { ratio: number; throttling: boolea
       {/* Scale ticks */}
       <div className="flex justify-between mt-0.5 text-[10px] text-neutral-600 font-mono px-0.5">
         <span>1.0x</span>
-        <span>1.5x</span>
         <span>2.0x</span>
-        <span>2.5x</span>
+        <span>3.0x</span>
+        <span>4.0x</span>
       </div>
     </div>
   );
@@ -385,7 +385,7 @@ function drawChart(ctx: CanvasRenderingContext2D, samples: PerfSample[], scale: 
   // Threshold labels on right
   ctx.textAlign = "left";
   ctx.fillStyle = "#666";
-  ctx.fillText("2.5x", PADDING.left + PLOT_W + 6, stripTop + stripH / 2 + 3);
+  ctx.fillText("5.0x", PADDING.left + PLOT_W + 6, stripTop + stripH / 2 + 3);
 
   for (let i = 0; i < samples.length; i++) {
     const ratio = samples[i].thermalRatio;
@@ -397,9 +397,9 @@ function drawChart(ctx: CanvasRenderingContext2D, samples: PerfSample[], scale: 
     ctx.fillRect(x, stripTop, barW + 0.5, stripH);
   }
 
-  // Draw threshold lines at 1.5x and 2.0x
-  const ratio1_5 = 1.5 / 2.5; // position within strip
-  const ratio2_0 = 2.0 / 2.5;
+  // Draw threshold lines at 1.5x and 4.0x
+  const ratio1_5 = 1.5 / 5.0; // position within strip
+  const ratio2_0 = 4.0 / 5.0;
   ctx.strokeStyle = "rgba(255,255,255,0.2)";
   ctx.lineWidth = 0.5;
   ctx.setLineDash([3, 3]);
@@ -411,21 +411,23 @@ function drawChart(ctx: CanvasRenderingContext2D, samples: PerfSample[], scale: 
   ctx.strokeRect(PADDING.left, stripTop, PLOT_W, stripH);
 }
 
-/** Map thermal ratio to a green→yellow→red color. */
+/** Map thermal ratio to a green→yellow→red color. Trigger threshold: 4.0×. */
 function ratioToColor(ratio: number): string {
-  // Clamp to 0.5–2.5 range for color mapping
-  const t = Math.max(0, Math.min(1, (ratio - 0.5) / 2.0)); // 0 at 0.5x, 1 at 2.5x
-  if (t < 0.5) {
+  if (ratio <= 1.5) {
     // Green → Yellow (0.5x–1.5x)
-    const g = Math.round(209 - t * 2 * 80);  // 209 → 129
-    const r = Math.round(6 + t * 2 * 245);   // 6 → 251
+    const t = Math.max(0, (ratio - 0.5) / 1.0); // 0 at 0.5x, 1 at 1.5x
+    const g = Math.round(209 - t * 80);  // 209 → 129
+    const r = Math.round(6 + t * 245);   // 6 → 251
     return `rgb(${r},${g},52)`;
   }
-  // Yellow → Red (1.5x–2.5x)
-  const u = (t - 0.5) * 2; // 0–1
-  const r = Math.round(251 - u * 3);   // stays ~248
-  const g = Math.round(129 - u * 100); // 129 → 29
-  return `rgb(${r},${g},36)`;
+  if (ratio < 4.0) {
+    // Yellow → Orange (1.5x–4.0x)
+    const t = (ratio - 1.5) / 2.5; // 0 at 1.5x, 1 at 4.0x
+    const g = Math.round(129 - t * 100); // 129 → 29
+    return `rgb(251,${g},36)`;
+  }
+  // Red (4.0x+)
+  return `rgb(248,29,36)`;
 }
 
 // ── Small helper components ──

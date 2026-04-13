@@ -456,7 +456,7 @@ function EntryCard({
         const t1RanNoWaste = rawT1 && rawT1.length > 0 && (!t1 || t1.length === 0);
         return (
           <div className="flex items-center gap-1.5 flex-wrap text-[11px]">
-            <span className="text-neutral-600 font-medium shrink-0">T1:</span>
+            <span className="text-neutral-600 font-medium shrink-0">YOLO:</span>
             {t1 && t1.length > 0 ? t1.map((r, i) => (
               <span key={i} className="bg-neutral-800/80 text-neutral-400 px-1.5 py-0.5 rounded">
                 {r.itemName} <span className="text-neutral-600">{Math.round(r.confidence * 100)}%</span>
@@ -630,8 +630,8 @@ function AnalysisExportPanel({ locale }: { locale: Locale }) {
   ];
 
   const modelOptions: { value: AnalysisModel; label: string }[] = [
-    { value: "yolo-local", label: "YOLO (T1)" },
-    { value: "t2", label: "GPT mini (T2)" },
+    { value: "yolo-local", label: "YOLO" },
+    { value: "t2", label: "GPT mini" },
   ];
 
   const streamOptions = ["recycling", "compost", "landfill", "special", "needs_review"];

@@ -11,10 +11,10 @@ import { computeThresholds } from "@/lib/threshold-config";
 const { ROI_FG_THRESHOLD } = computeThresholds(0.5);
 
 // Constants matching KioskDisplay.tsx
+const SHARP_FG_FRAMES_REQUIRED = 3;
 const FG_PERSIST_FRAMES = 2;
-const SHARP_FRAMES_REQUIRED = 2;
-const RESULT_TIMEOUT_MS = 30_000;
-const OBJECT_GONE_FRAMES = 2;
+const RESULT_TIMEOUT_MS = 20_000;
+const RESULT_GONE_FRAMES = 5;
 const ROI_BLOB_THRESHOLD = 0.05;
 const COOLDOWN_MS = 1500;
 
@@ -31,16 +31,16 @@ function makeAnalysis(overrides: Partial<FrameAnalysis> = {}): FrameAnalysis {
   };
 }
 
-// Simulate the state machine
+// Simulate the state machine (matches KioskDisplay.tsx after object_detected removal)
 class StateMachineSimulator {
   state: PipelineState = "idle";
   fgPersist = 0;
   goneCount = 0;
-  objectDetectedFrames = 0;
   resultEnterTime = 0;
   cooldownStart = 0;
   classifyTriggered = false;
   pendingItem = false;
+  nothingDetectedCount = 0;
 
   tick(analysis: FrameAnalysis): void {
     if (!analysis.isSettled) return;
@@ -48,54 +48,62 @@ class StateMachineSimulator {
     const roiHasFg =
       analysis.roiForegroundRatio >= ROI_FG_THRESHOLD &&
       analysis.roiLargestBlobRatio >= ROI_BLOB_THRESHOLD;
+    const isSharp = analysis.sharpnessScore > 500;
 
-    if (this.state === "idle") {
+    // Pending-item queue (non-idle states only)
+    if (this.state !== "idle") {
       if (roiHasFg) {
         this.fgPersist++;
         if (this.fgPersist >= FG_PERSIST_FRAMES) {
+          this.pendingItem = true;
           this.fgPersist = 0;
-          this.goneCount = 0;
-          this.objectDetectedFrames = 0;
-          this.state = "object_detected";
         }
       } else {
         this.fgPersist = 0;
       }
+    }
+
+    if (this.state === "idle") {
+      // Overlapped FG + sharpness check
+      if (roiHasFg && isSharp) {
+        this.fgPersist++;
+        if (this.fgPersist >= SHARP_FG_FRAMES_REQUIRED) {
+          this.fgPersist = 0;
+          this.goneCount = 0;
+          this.classifyTriggered = true;
+          this.state = "classifying";
+        }
+      } else if (roiHasFg) {
+        // FG present but blurry — count toward persistence but don't trigger
+        this.fgPersist++;
+      } else {
+        this.fgPersist = 0;
+        this.nothingDetectedCount = 0;
+      }
       return;
     }
 
-    if (this.state === "object_detected") {
-      if (!roiHasFg) {
-        this.goneCount++;
-        if (this.goneCount >= OBJECT_GONE_FRAMES) {
-          this.objectDetectedFrames = 0;
-          this.state = "idle";
-        }
-        return;
-      }
-      this.goneCount = 0;
-
-      // Sharpness gate: only count frames where sharpnessScore > 500
-      if (analysis.sharpnessScore > 500) {
-        this.objectDetectedFrames++;
-      }
-
-      if (this.objectDetectedFrames >= SHARP_FRAMES_REQUIRED) {
-        this.objectDetectedFrames = 0;
-        this.classifyTriggered = true;
-        this.state = "classifying";
-      }
+    if (this.state === "classifying") {
+      // Handled externally (API timeout check)
       return;
     }
 
     if (this.state === "result") {
       if (!roiHasFg) {
         this.goneCount++;
-        if (this.goneCount >= OBJECT_GONE_FRAMES) {
+        if (this.goneCount >= RESULT_GONE_FRAMES) {
           this.cooldownStart = Date.now();
           this.state = "cooldown";
         }
       } else {
+        // Re-classify: item was gone for ≥2 frames and came back
+        if (this.goneCount >= 2 && roiHasFg) {
+          this.goneCount = 0;
+          this.fgPersist = 0;
+          this.classifyTriggered = true;
+          this.state = "classifying";
+          return;
+        }
         this.goneCount = 0;
         if (Date.now() - this.resultEnterTime >= RESULT_TIMEOUT_MS) {
           this.goneCount = 0;
@@ -107,16 +115,25 @@ class StateMachineSimulator {
     }
 
     if (this.state === "cooldown") {
-      // New item pending → skip cooldown wait, fast-path to object_detected
+      const effectiveCooldown = this.nothingDetectedCount > 1
+        ? Math.min(COOLDOWN_MS * this.nothingDetectedCount, 2_500)
+        : COOLDOWN_MS;
+
+      // Pending item: classify immediately if sharp, otherwise return to idle
       if (this.pendingItem) {
         this.pendingItem = false;
         this.fgPersist = 0;
         this.goneCount = 0;
-        this.objectDetectedFrames = 0;
-        this.state = "object_detected";
+        if (roiHasFg && isSharp) {
+          this.classifyTriggered = true;
+          this.state = "classifying";
+        } else {
+          this.state = "idle";
+        }
         return;
       }
-      if (Date.now() - this.cooldownStart >= COOLDOWN_MS) {
+
+      if (Date.now() - this.cooldownStart >= effectiveCooldown) {
         this.state = "idle";
       }
       return;
@@ -131,44 +148,13 @@ class StateMachineSimulator {
 }
 
 describe("State machine", () => {
-  it("idle -> object_detected after FG_PERSIST_FRAMES", () => {
+  it("idle -> classifying after SHARP_FG_FRAMES_REQUIRED sharp frames", () => {
     const sim = new StateMachineSimulator();
     expect(sim.state).toBe("idle");
 
-    const objectFrame = makeAnalysis();
+    const sharpFrame = makeAnalysis();
 
-    for (let i = 0; i < FG_PERSIST_FRAMES; i++) {
-      sim.tick(objectFrame);
-    }
-
-    expect(sim.state).toBe("object_detected");
-  });
-
-  it("object_detected -> idle when object disappears", () => {
-    const sim = new StateMachineSimulator();
-    sim.state = "object_detected";
-    sim.objectDetectedFrames = 0;
-
-    const emptyFrame = makeAnalysis({
-      roiForegroundRatio: 0,
-      roiLargestBlobRatio: 0,
-    });
-
-    for (let i = 0; i < OBJECT_GONE_FRAMES; i++) {
-      sim.tick(emptyFrame);
-    }
-
-    expect(sim.state).toBe("idle");
-  });
-
-  it("object_detected -> classifying after SHARP_FRAMES_REQUIRED sharp frames", () => {
-    const sim = new StateMachineSimulator();
-    sim.state = "object_detected";
-    sim.objectDetectedFrames = 0;
-
-    const sharpFrame = makeAnalysis({ sharpnessScore: 2000 });
-
-    for (let i = 0; i < SHARP_FRAMES_REQUIRED; i++) {
+    for (let i = 0; i < SHARP_FG_FRAMES_REQUIRED; i++) {
       sim.tick(sharpFrame);
     }
 
@@ -176,53 +162,46 @@ describe("State machine", () => {
     expect(sim.classifyTriggered).toBe(true);
   });
 
-  it("object_detected ignores blurry frames", () => {
+  it("idle stays idle when object disappears mid-count", () => {
     const sim = new StateMachineSimulator();
-    sim.state = "object_detected";
-    sim.objectDetectedFrames = 0;
+    const objectFrame = makeAnalysis();
+    const emptyFrame = makeAnalysis({
+      roiForegroundRatio: 0,
+      roiLargestBlobRatio: 0,
+    });
 
+    // Count 2 frames, then object disappears
+    sim.tick(objectFrame);
+    sim.tick(objectFrame);
+    sim.tick(emptyFrame);
+
+    expect(sim.state).toBe("idle");
+    expect(sim.fgPersist).toBe(0);
+  });
+
+  it("idle ignores blurry frames for classification trigger", () => {
+    const sim = new StateMachineSimulator();
     const blurryFrame = makeAnalysis({ sharpnessScore: 50 });
 
-    // Feed many blurry frames — should stay in object_detected
+    // Many blurry frames — should NOT trigger classification
     for (let i = 0; i < 10; i++) {
       sim.tick(blurryFrame);
     }
 
-    expect(sim.state).toBe("object_detected");
+    expect(sim.state).toBe("idle");
   });
 
-  it("object_detected counts only sharp frames among mixed input", () => {
+  it("idle counts only sharp frames among mixed input", () => {
     const sim = new StateMachineSimulator();
-    sim.state = "object_detected";
-    sim.objectDetectedFrames = 0;
-
     const blurryFrame = makeAnalysis({ sharpnessScore: 50 });
     const sharpFrame = makeAnalysis({ sharpnessScore: 2000 });
 
-    // Interleave: blurry, sharp, blurry, blurry, sharp → should trigger on 2nd sharp
-    sim.tick(blurryFrame);
-    expect(sim.state).toBe("object_detected");
+    // Interleave: sharp, blurry (still FG), sharp, sharp → trigger on 3rd sharp
     sim.tick(sharpFrame);
-    expect(sim.state).toBe("object_detected");
-    sim.tick(blurryFrame);
-    sim.tick(blurryFrame);
-    expect(sim.state).toBe("object_detected");
+    expect(sim.state).toBe("idle");
+    sim.tick(blurryFrame); // FG present but blurry — increments fgPersist
+    expect(sim.state).toBe("idle");
     sim.tick(sharpFrame);
-    expect(sim.state).toBe("classifying");
-  });
-
-  it("object_detected -> classifying works with high skin ratio (hand holding item)", () => {
-    const sim = new StateMachineSimulator();
-    sim.state = "object_detected";
-    sim.objectDetectedFrames = 0;
-
-    // High skin ratio should NOT block classification — user always holds the item
-    const handHeldFrame = makeAnalysis({ sharpnessScore: 2000 });
-
-    for (let i = 0; i < SHARP_FRAMES_REQUIRED; i++) {
-      sim.tick(handHeldFrame);
-    }
-
     expect(sim.state).toBe("classifying");
   });
 
@@ -239,7 +218,7 @@ describe("State machine", () => {
     expect(sim.state).toBe("cooldown");
   });
 
-  it("result -> cooldown when object leaves (no minimum display time)", () => {
+  it("result -> cooldown when object leaves", () => {
     const sim = new StateMachineSimulator();
     sim.enterResult();
 
@@ -248,23 +227,73 @@ describe("State machine", () => {
       roiLargestBlobRatio: 0,
     });
 
-    for (let i = 0; i < OBJECT_GONE_FRAMES; i++) {
+    for (let i = 0; i < RESULT_GONE_FRAMES; i++) {
       sim.tick(emptyFrame);
     }
 
     expect(sim.state).toBe("cooldown");
   });
 
-  it("cooldown with pendingItem skips wait and transitions to object_detected", () => {
+  it("result does NOT re-classify after only 1 frame of absence (flicker protection)", () => {
+    const sim = new StateMachineSimulator();
+    sim.enterResult();
+
+    const emptyFrame = makeAnalysis({
+      roiForegroundRatio: 0,
+      roiLargestBlobRatio: 0,
+    });
+    const objectFrame = makeAnalysis();
+
+    // 1 frame gone, then back — should NOT re-classify
+    sim.tick(emptyFrame);
+    expect(sim.goneCount).toBe(1);
+    sim.tick(objectFrame);
+    expect(sim.state).toBe("result");
+    expect(sim.classifyTriggered).toBe(false);
+  });
+
+  it("result re-classifies after ≥2 frames of absence then return", () => {
+    const sim = new StateMachineSimulator();
+    sim.enterResult();
+
+    const emptyFrame = makeAnalysis({
+      roiForegroundRatio: 0,
+      roiLargestBlobRatio: 0,
+    });
+    const objectFrame = makeAnalysis();
+
+    // 2 frames gone, then back — should re-classify
+    sim.tick(emptyFrame);
+    sim.tick(emptyFrame);
+    expect(sim.goneCount).toBe(2);
+    sim.tick(objectFrame);
+    expect(sim.state).toBe("classifying");
+    expect(sim.classifyTriggered).toBe(true);
+  });
+
+  it("cooldown with pendingItem + sharp frame transitions to classifying", () => {
     const sim = new StateMachineSimulator();
     sim.state = "cooldown";
     sim.cooldownStart = Date.now(); // just started cooldown
     sim.pendingItem = true;
 
-    const objectFrame = makeAnalysis();
-    sim.tick(objectFrame);
+    const sharpFrame = makeAnalysis();
+    sim.tick(sharpFrame);
 
-    expect(sim.state).toBe("object_detected");
+    expect(sim.state).toBe("classifying");
+    expect(sim.pendingItem).toBe(false);
+  });
+
+  it("cooldown with pendingItem + blurry frame transitions to idle", () => {
+    const sim = new StateMachineSimulator();
+    sim.state = "cooldown";
+    sim.cooldownStart = Date.now();
+    sim.pendingItem = true;
+
+    const blurryFrame = makeAnalysis({ sharpnessScore: 50 });
+    sim.tick(blurryFrame);
+
+    expect(sim.state).toBe("idle");
     expect(sim.pendingItem).toBe(false);
   });
 
@@ -274,15 +303,42 @@ describe("State machine", () => {
     sim.cooldownStart = Date.now();
     sim.pendingItem = false;
 
-    const objectFrame = makeAnalysis();
-    sim.tick(objectFrame);
+    // Use empty frame to avoid triggering pending-item queue during cooldown
+    const emptyFrame = makeAnalysis({
+      roiForegroundRatio: 0,
+      roiLargestBlobRatio: 0,
+    });
+    sim.tick(emptyFrame);
 
     // Should still be in cooldown (time hasn't elapsed)
     expect(sim.state).toBe("cooldown");
 
     // Now simulate time passing
     sim.cooldownStart = Date.now() - COOLDOWN_MS - 1;
-    sim.tick(objectFrame);
+    sim.tick(emptyFrame);
+
+    expect(sim.state).toBe("idle");
+  });
+
+  it("progressive cooldown increases with nothingDetectedCount", () => {
+    const sim = new StateMachineSimulator();
+    sim.state = "cooldown";
+    sim.nothingDetectedCount = 3; // 3 consecutive nothing_detected
+    sim.cooldownStart = Date.now() - COOLDOWN_MS - 1; // just past normal cooldown
+
+    // Use empty frame to avoid triggering pending-item queue during cooldown
+    const emptyFrame = makeAnalysis({
+      roiForegroundRatio: 0,
+      roiLargestBlobRatio: 0,
+    });
+    sim.tick(emptyFrame);
+
+    // Normal cooldown (1500ms) has elapsed but effective cooldown is 3×1500=4500ms
+    expect(sim.state).toBe("cooldown");
+
+    // Simulate full effective cooldown elapsed
+    sim.cooldownStart = Date.now() - 4500 - 1;
+    sim.tick(emptyFrame);
 
     expect(sim.state).toBe("idle");
   });
@@ -292,14 +348,13 @@ describe("State machine", () => {
     function deriveUiScreen(state: PipelineState): "idle" | "camera" | "result" {
       return state === "result"
         ? "result"
-        : state === "object_detected" || state === "classifying"
+        : state === "classifying"
           ? "camera"
           : "idle";
     }
 
     expect(deriveUiScreen("idle")).toBe("idle");
     expect(deriveUiScreen("cooldown")).toBe("idle");
-    expect(deriveUiScreen("object_detected")).toBe("camera");
     expect(deriveUiScreen("classifying")).toBe("camera");
     expect(deriveUiScreen("result")).toBe("result");
   });

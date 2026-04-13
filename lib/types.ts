@@ -3,7 +3,6 @@ export type KioskState = "idle" | "detecting" | "result" | "error";
 // ── Local camera pipeline states ──
 export type PipelineState =
   | "idle"
-  | "object_detected"
   | "classifying"
   | "result"
   | "cooldown";

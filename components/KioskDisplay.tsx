@@ -65,7 +65,7 @@ const BG_RATE_IDLE = 0.025; // matches BG_LEARN_RATE in frame-analyzer
 // result: frozen — BG model still holds the pre-item scene, so item-vs-empty
 // diff stays accurate; absorbing the item would erode foreground detection
 const BG_RATE_RESULT = 0;
-// object_detected / classifying: frozen — never absorb the held object
+// classifying: frozen — never absorb the held object
 const BG_RATE_FROZEN = 0;
 
 // ── Detection ROI margin (fraction of the short-side square capture crop) ──
@@ -139,7 +139,6 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
   const goneCountRef = useRef(0);
   const fgPersistRef = useRef(0);
   const pendingItemRef = useRef(false);
-  const objectDetectedFrameRef = useRef(0);
   const resultEnterTimeRef = useRef(0);
   const classifyStartRef = useRef(0);
   /** Consecutive "nothing detected" results — suppresses reclassification of persistent non-waste objects. */
@@ -518,7 +517,6 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           if (fgPersistRef.current >= SHARP_FG_FRAMES_REQUIRED) {
             fgPersistRef.current = 0;
             goneCountRef.current = 0;
-            objectDetectedFrameRef.current = 0;
             triggerClassification(analysis);
           }
         } else if (roiHasFg) {
@@ -530,28 +528,6 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           if (nothingDetectedCountRef.current > 0) {
             nothingDetectedCountRef.current = 0;
           }
-        }
-        return;
-      }
-
-      if (state === "object_detected") {
-        if (!roiHasFg) {
-          goneCountRef.current++;
-          if (goneCountRef.current >= th.OBJECT_GONE_FRAMES) {
-            objectDetectedFrameRef.current = 0;
-            transition("idle");
-          }
-          return;
-        }
-        goneCountRef.current = 0;
-
-        if (imageQualityBand(analysis) !== "poor") {
-          objectDetectedFrameRef.current++;
-        }
-
-        if (objectDetectedFrameRef.current >= SHARP_FG_FRAMES_REQUIRED) {
-          objectDetectedFrameRef.current = 0;
-          triggerClassification(analysis);
         }
         return;
       }
@@ -585,13 +561,12 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
         } else {
           // If goneCount > 0, the previous item briefly disappeared — this is a
           // new item. Reset and classify immediately without waiting for cooldown.
-          if (goneCountRef.current > 0 && roiHasFg) {
+          if (goneCountRef.current >= 2 && roiHasFg) {
             console.log(`[result-debug] ⚠️ RE-CLASSIFY triggered: goneCount=${goneCountRef.current} fgRatio=${analysis.roiForegroundRatio.toFixed(4)} blobRatio=${analysis.roiLargestBlobRatio.toFixed(4)}`);
             setStableResults([]); setResultRequestIds([]);
             setError(null);
             goneCountRef.current = 0;
             fgPersistRef.current = 0;
-            objectDetectedFrameRef.current = 0;
             analyzer.boostBackgroundAdaptation();
             triggerClassification(analysis);
             return;
@@ -624,16 +599,20 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
         const cooldownElapsed = Date.now() - cooldownStartRef.current >= effectiveCooldown;
         const errorHeld = !errorRef.current || (Date.now() - errorSetAtRef.current >= ERROR_HOLD_MS);
 
-        // If a new item is pending, skip cooldown wait (fast-path to next scan)
+        // If a new item is pending, skip cooldown wait
         if (pendingItemRef.current && errorHeld) {
           setStableResults([]); setResultRequestIds([]);
           setError(null);
           pendingItemRef.current = false;
           fgPersistRef.current = 0;
           goneCountRef.current = 0;
-          objectDetectedFrameRef.current = 0;
 
-          transition("object_detected");
+          // Classify immediately if frame is sharp, otherwise return to idle
+          if (roiHasFg && imageQualityBand(analysis) !== "poor") {
+            triggerClassification(analysis);
+          } else {
+            transition("idle");
+          }
           return;
         }
 
@@ -765,9 +744,9 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           // Filter out not_waste classes (person, furniture, vehicles, etc.)
           const wasteDetections = detections.filter(d => !isYoloClassNotWaste(d.className));
 
-          // ── Bbox-based routing ──
+          // ── Detection routing ──
           const resolvedResults: (ClassificationResponse & { _bboxX?: number })[] = [];
-          const unresolvedDetections: (YoloDetection & { _bboxX: number })[] = [];
+          let unresolvedCount = 0;
 
           for (const detection of wasteDetections.slice(0, 4)) {
             const bboxX = detection.bbox[0] + detection.bbox[2] / 2; // center-x
@@ -779,12 +758,11 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
                 continue;
               }
             }
-            // Lower confidence or no rule — collect for API escalation
-            unresolvedDetections.push(Object.assign({}, detection, { _bboxX: bboxX }));
+            unresolvedCount++;
           }
 
-          // If we have high-confidence results and nothing needs further resolution, deliver instantly
-          if (resolvedResults.length > 0 && unresolvedDetections.length === 0) {
+          // All items resolved locally → instant result
+          if (resolvedResults.length > 0 && unresolvedCount === 0) {
             resolvedResults.sort((a, b) => (a._bboxX ?? 0) - (b._bboxX ?? 0));
             console.log(`[tier1] YOLO HIT: ${resolvedResults.map((r) => r.itemName).join(" + ")} in ${yoloMs}ms`);
             logYoloOnlyResult(video, resolvedResults[0], detections, yoloMs, analysis, "yolo-local", undefined, undefined,
@@ -793,29 +771,20 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
             return;
           }
 
-          // ── Some items need further resolution via API (Tier 2) ──
+          // ── Some or all items need API resolution (Tier 2) ──
           const best = wasteDetections[0] ?? null;
           const hasBlobPresence = blobs.some(b => blobIsObject(b));
 
-          if (best || unresolvedDetections.length > 0 || hasBlobPresence) {
-            // Show optimistic UI for already-resolved items
-            if (resolvedResults.length > 0) {
-              resolvedResults.sort((a, b) => (a._bboxX ?? 0) - (b._bboxX ?? 0));
-              setStableResults(resolvedResults);
-              resultEnterTimeRef.current = Date.now();
-            }
-
+          if (best || unresolvedCount > 0 || hasBlobPresence) {
             const tier1Hints = wasteDetections
               .map(d => ({ itemName: d.className, confidence: d.confidence }))
               .sort((a, b) => b.confidence - a.confidence)
               .slice(0, 5);
 
-            console.log(`[tier1] ${resolvedResults.length} resolved, ${unresolvedDetections.length} unresolved — escalating to API`);
+            console.log(`[tier1] ${resolvedResults.length} resolved, ${unresolvedCount} unresolved — escalating to API`);
 
             escalateToApi(
-              video, best, apiPromise, apiController, detections, yoloMs, analysis,
-              resolvedResults, unresolvedDetections, hasBlobPresence && wasteDetections.length === 0,
-              tier1Hints,
+              best, apiPromise, resolvedResults, tier1Hints,
             );
           } else {
             // No waste detections and no qualified blobs
@@ -829,10 +798,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
             }
             // No YOLO detections at all — full-frame API fallback
             console.log(`[tier1] No YOLO detections (${yoloMs}ms) — escalating to API`);
-            escalateToApi(
-              video, null, apiPromise, apiController, detections, yoloMs, analysis,
-              [], [], true, [],
-            );
+            escalateToApi(null, apiPromise, [], []);
           }
         })
         .catch(() => {
@@ -846,160 +812,41 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
         });
     }
 
-    /**
-     * Crop the video frame to a YOLO detection's bbox with 30% margin,
-     * clamped to frame bounds. Returns base64 JPEG and the crop coordinates.
-     */
-    async function cropBboxToBase64(
-      video: HTMLVideoElement,
-      bbox: [number, number, number, number],
-    ): Promise<{ image: string; cropBox: [number, number, number, number] } | null> {
-      const vw = video.videoWidth;
-      const vh = video.videoHeight;
-      const side = Math.min(vw, vh);
-      // YOLO bbox is in 640×640 model space — scale to the center-crop square
-      const scale = side / YOLO_MODEL_SIZE;
-      const offsetX = Math.round((vw - side) / 2);
-      const offsetY = Math.round((vh - side) / 2);
-
-      const [bx, by, bw, bh] = bbox;
-      const marginX = bw * 0.3;
-      const marginY = bh * 0.3;
-
-      // Crop coordinates in video pixel space
-      const cx = Math.max(0, Math.round((bx - marginX) * scale + offsetX));
-      const cy = Math.max(0, Math.round((by - marginY) * scale + offsetY));
-      const cw = Math.min(vw - cx, Math.round((bw + marginX * 2) * scale));
-      const ch = Math.min(vh - cy, Math.round((bh + marginY * 2) * scale));
-
-      if (cw <= 0 || ch <= 0) return null;
-
-      const canvas = new OffscreenCanvas(cw, ch);
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return null;
-      ctx.drawImage(video, cx, cy, cw, ch, 0, 0, cw, ch);
-
-      const blob = await canvas.convertToBlob({ type: "image/jpeg", quality: 0.82 });
-      const dataUrl = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onloadend = () => resolve(reader.result as string);
-        reader.onerror = reject;
-        reader.readAsDataURL(blob);
-      });
-      const image = dataUrl.split(",")[1];
-      if (!image) return null;
-
-      return { image, cropBox: [cx, cy, cw, ch] };
-    }
-
-    /** Escalate unresolved detections to the API (Tier 2). */
+    /** Escalate to the API (Tier 2) with full-frame multi-item prompt. */
     function escalateToApi(
-      video: HTMLVideoElement,
       yoloBest: { className: string; confidence: number } | null,
       apiPromise: (multi?: boolean, tierResults?: { tier1?: { itemName: string; confidence: number }[] }) => Promise<{ result: (ClassificationResponse & { requestId?: string }) | null; requestId?: string; multiResults?: ClassificationResponse[] }>,
-      apiController: AbortController,
-      yoloDetections: YoloDetection[],
-      yoloMs: number,
-      analysis: FrameAnalysis,
-      tier1Results: (ClassificationResponse & { _bboxX?: number })[] = [],
-      unresolvedDetections: (YoloDetection & { _bboxX: number })[] = [],
-      zeroBboxFallback: boolean = false,
-      tier1Hints: { itemName: string; confidence: number }[] = [],
+      tier1Results: (ClassificationResponse & { _bboxX?: number })[],
+      tier1Hints: { itemName: string; confidence: number }[],
     ) {
-      /** Send per-bbox cropped images for unresolved detections via batch API. */
-      async function sendCroppedBatchApi(): Promise<(ClassificationResponse & { _bboxX?: number })[]> {
-        if (unresolvedDetections.length === 0) return [];
-        const crops = await Promise.all(
-          unresolvedDetections.map((det) => cropBboxToBase64(video, det.bbox))
-        );
-        const validItems: { image: string; yoloHint: string | null; cropBox: [number, number, number, number]; _bboxX: number }[] = [];
-        for (let i = 0; i < crops.length; i++) {
-          const crop = crops[i];
-          if (!crop) continue;
-          const det = unresolvedDetections[i];
-          validItems.push({
-            image: crop.image,
-            yoloHint: det.className,
-            cropBox: crop.cropBox,
-            _bboxX: det._bboxX,
-          });
-        }
-        if (validItems.length === 0) return [];
+      // Show optimistic T1 results while waiting for API
+      if (tier1Results.length > 0) {
+        tier1Results.sort((a, b) => (a._bboxX ?? 0) - (b._bboxX ?? 0));
+        setStableResults(tier1Results);
+        resultEnterTimeRef.current = Date.now();
+      }
 
-        const meta: ClassifyMeta = {
-          sharpnessScore: analysis.sharpnessScore,
-          imageQuality: imageQualityBand(analysis),
-        };
-
-        const res = await fetch("/api/classify", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            items: validItems.map((v) => ({
-              image: v.image,
-              yoloHint: v.yoloHint,
-              cropBox: v.cropBox,
-            })),
-            siteId: siteConfigRef.current?.siteId,
-            locale: localeRef.current,
-            meta,
-            tierResults: { tier1: tier1Hints },
-          }),
+      // Always send full frame — cheaper and more reliable than per-bbox crops
+      apiPromise(true, { tier1: tier1Hints })
+        .then(({ result: r, requestId, multiResults }) => {
+          const apiResults = multiResults ?? (r ? [r] : []);
+          if (apiResults.length > 0) {
+            handleMultiClassificationResults(apiResults, apiResults.map(() => requestId));
+          } else if (tier1Results.length > 0) {
+            handleMultiClassificationResults(tier1Results, tier1Results.map(() => undefined));
+          } else {
+            handleClassificationError(new Error("API returned no result"));
+          }
+        })
+        .catch((err) => {
+          if (tier1Results.length > 0) {
+            handleMultiClassificationResults(tier1Results, tier1Results.map(() => undefined));
+          } else if (yoloBest) {
+            handleClassificationResult(buildOfflineFallback(yoloBest.className, yoloBest.confidence), undefined);
+          } else {
+            handleClassificationError(err);
+          }
         });
-        if (!res.ok) throw new Error(`Batch API error: ${res.status}`);
-        const data = await res.json() as { results: (ClassificationResponse & { requestId?: string })[] };
-        return (data.results ?? []).map((r, i) => ({
-          ...r,
-          _bboxX: validItems[i]?._bboxX,
-        }));
-      }
-
-      /** Merge all tier results, sort by bbox x, cap at 4. */
-      function mergeAndDeliver(
-        apiResults: (ClassificationResponse & { _bboxX?: number })[],
-        requestIds: (string | undefined)[],
-      ) {
-        const allResults = [...tier1Results, ...apiResults];
-        allResults.sort((a, b) => (a._bboxX ?? Infinity) - (b._bboxX ?? Infinity));
-        const capped = allResults.slice(0, 4);
-        const cappedIds = capped.map((r) =>
-          requestIds[allResults.indexOf(r)] ?? (r as ClassificationResponse & { requestId?: string }).requestId
-        );
-        handleMultiClassificationResults(capped, cappedIds);
-      }
-
-      if (unresolvedDetections.length > 0) {
-        // Send per-bbox crops to API
-        sendCroppedBatchApi()
-          .then((batchResults) => mergeAndDeliver(batchResults, []))
-          .catch((err) => {
-            if (tier1Results.length > 0) {
-              mergeAndDeliver([], []);
-            } else if (yoloBest) {
-              handleClassificationResult(buildOfflineFallback(yoloBest.className, yoloBest.confidence), undefined);
-            } else {
-              handleClassificationError(err);
-            }
-          });
-      } else {
-        // Zero-detection fallback: send full frame to API (multi-item prompt)
-        apiPromise(zeroBboxFallback, { tier1: tier1Hints })
-          .then(({ result: r, requestId, multiResults }) => {
-            const apiResults = (multiResults ?? (r ? [r] : [])).map(item => item as ClassificationResponse & { _bboxX?: number });
-            if (apiResults.length > 0) mergeAndDeliver(apiResults, apiResults.map(() => requestId));
-            else if (tier1Results.length > 0) mergeAndDeliver([], []);
-            else handleClassificationError(new Error("API returned no result"));
-          })
-          .catch((err) => {
-            if (yoloBest) {
-              handleClassificationResult(buildOfflineFallback(yoloBest.className, yoloBest.confidence), undefined);
-            } else if (tier1Results.length > 0) {
-              mergeAndDeliver([], []);
-            } else {
-              handleClassificationError(err);
-            }
-          });
-      }
     }
 
     /** Handle offline classification: YOLO → rules → offline fallback. */
@@ -1081,7 +928,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       );
 
       if (valid.length === 0) {
-        nothingDetectedCountRef.current = 0;
+        nothingDetectedCountRef.current++;
         setStableResults([{
           itemName: "nothing_detected",
           wasteStream: "landfill",
@@ -1225,7 +1072,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
   const uiScreen: "idle" | "camera" | "result" =
     pipelineState === "result"
       ? "result"
-      : pipelineState === "object_detected" || pipelineState === "classifying"
+      : pipelineState === "classifying"
         ? "camera"
         : "idle"; // idle + cooldown both show idle screen
 

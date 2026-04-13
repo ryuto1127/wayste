@@ -363,6 +363,27 @@ export async function POST(request: Request) {
   const startMs = Date.now();
   const requestId = generateRequestId();
 
+  /** Apply conditional override if the model's reasoning mentions the condition keyword. */
+  function applyConditionalOverride(
+    result: { wasteStream: string; binColor: string; binLabel: string; specialInstructions?: string },
+    raw: { itemName: string; wasteStream: string; reasoning?: string },
+  ): void {
+    const overrideCheck = applyOverrides(raw.itemName, raw.wasteStream, siteConfig, locale);
+    if (overrideCheck.conditionalStream && overrideCheck.condition && !overrideCheck.requiresStaff) {
+      const conditionLower = overrideCheck.condition.toLowerCase();
+      const reasoningLower = (raw.reasoning ?? "").toLowerCase();
+      if (reasoningLower.includes(conditionLower)) {
+        const condStreamDef = siteConfig.streams.find((s) => s.id === overrideCheck.conditionalStream);
+        if (condStreamDef) {
+          result.wasteStream = overrideCheck.conditionalStream;
+          result.binColor = condStreamDef.color;
+          result.binLabel = condStreamDef.label;
+          result.specialInstructions = overrideCheck.note;
+        }
+      }
+    }
+  }
+
   /** Classify a single image using GPT-5.4 mini. */
   async function classifySingleImage(
     image: string,
@@ -387,20 +408,7 @@ export async function POST(request: Request) {
       const result = buildClassificationResult(raw, siteConfig, locale);
       result.modelUsed = modelUsed;
 
-      const overrideCheck = applyOverrides(raw.itemName, raw.wasteStream, siteConfig, locale);
-      if (overrideCheck.conditionalStream && overrideCheck.condition && !overrideCheck.requiresStaff) {
-        const conditionLower = overrideCheck.condition.toLowerCase();
-        const reasoningLower = (raw.reasoning ?? "").toLowerCase();
-        if (reasoningLower.includes(conditionLower)) {
-          const condStreamDef = siteConfig.streams.find((s) => s.id === overrideCheck.conditionalStream);
-          if (condStreamDef) {
-            result.wasteStream = overrideCheck.conditionalStream;
-            result.binColor = condStreamDef.color;
-            result.binLabel = condStreamDef.label;
-            result.specialInstructions = overrideCheck.note;
-          }
-        }
-      }
+      applyConditionalOverride(result, raw);
       return { result, raw, modelUsed };
     }
 
@@ -427,20 +435,7 @@ export async function POST(request: Request) {
     const result = buildClassificationResult(raw, siteConfig, locale);
     result.modelUsed = modelUsed;
 
-    const overrideCheck = applyOverrides(raw.itemName, raw.wasteStream, siteConfig, locale);
-    if (overrideCheck.conditionalStream && overrideCheck.condition && !overrideCheck.requiresStaff) {
-      const conditionLower = overrideCheck.condition.toLowerCase();
-      const reasoningLower = (raw.reasoning ?? "").toLowerCase();
-      if (reasoningLower.includes(conditionLower)) {
-        const condStreamDef = siteConfig.streams.find((s) => s.id === overrideCheck.conditionalStream);
-        if (condStreamDef) {
-          result.wasteStream = overrideCheck.conditionalStream;
-          result.binColor = condStreamDef.color;
-          result.binLabel = condStreamDef.label;
-          result.specialInstructions = overrideCheck.note;
-        }
-      }
-    }
+    applyConditionalOverride(result, raw);
 
     return { result, raw, modelUsed };
   }
@@ -516,20 +511,7 @@ export async function POST(request: Request) {
       const multiResults = rawItems.map((raw) => {
         const result = buildClassificationResult(raw, siteConfig, locale);
         result.modelUsed = "t2";
-        const overrideCheck = applyOverrides(raw.itemName, raw.wasteStream, siteConfig, locale);
-        if (overrideCheck.conditionalStream && overrideCheck.condition && !overrideCheck.requiresStaff) {
-          const conditionLower = overrideCheck.condition.toLowerCase();
-          const reasoningLower = (raw.reasoning ?? "").toLowerCase();
-          if (reasoningLower.includes(conditionLower)) {
-            const condStreamDef = siteConfig.streams.find((s) => s.id === overrideCheck.conditionalStream);
-            if (condStreamDef) {
-              result.wasteStream = overrideCheck.conditionalStream;
-              result.binColor = condStreamDef.color;
-              result.binLabel = condStreamDef.label;
-              result.specialInstructions = overrideCheck.note;
-            }
-          }
-        }
+        applyConditionalOverride(result, raw);
         return { result, raw };
       });
 

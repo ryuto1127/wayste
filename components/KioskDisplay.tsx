@@ -45,6 +45,13 @@ const RESULT_GONE_FRAMES = 5;     // result state exit window (~150ms at 33fps) 
  */
 const SHARP_FG_FRAMES_REQUIRED = 3;
 /**
+ * Maximum relative change in roiForegroundRatio between consecutive frames
+ * for the scene to be considered "settled". While a hand is entering the frame,
+ * FG area grows rapidly (delta >> threshold) so classification is deferred
+ * until the hand stops and all items are fully visible.
+ */
+const FG_SETTLE_THRESHOLD = 0.15;
+/**
  * Escape hatch: if the result state persists for this long with the object
  * still visible (e.g., a tissue leftover that never leaves), force a transition
  * to cooldown so the BG model gets a full-rate update window in idle.
@@ -145,6 +152,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
   const nothingDetectedCountRef = useRef(0);
   const cooldownStartRef = useRef(0);
   const inFlightRef = useRef(false);
+  const prevFgRatioRef = useRef(0);
   const lastAnalysisRef = useRef<FrameAnalysis | null>(null);
   const lastCachedRef = useRef("");
   const errorSetAtRef = useRef(0);
@@ -510,9 +518,19 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       // ── State machine transitions ──
 
       if (state === "idle") {
-        // ── Overlapped FG + sharpness check ──
-        // Count frames that are BOTH foreground-present AND sharp.
-        if (roiHasFg && imageQualityBand(analysis) !== "poor") {
+        // ── Overlapped FG + sharpness + scene-settled check ──
+        // Require foreground, good image quality, AND stable FG area.
+        // While a hand enters the frame FG area grows rapidly, so
+        // classification is deferred until the hand stops moving.
+        const currFg = analysis.roiForegroundRatio;
+        const prevFg = prevFgRatioRef.current;
+        const fgDelta = prevFg > 0.001
+          ? Math.abs(currFg - prevFg) / prevFg
+          : (currFg > 0.001 ? 1 : 0);
+        const sceneSettled = fgDelta < FG_SETTLE_THRESHOLD;
+        prevFgRatioRef.current = currFg;
+
+        if (roiHasFg && imageQualityBand(analysis) === "good" && sceneSettled) {
           fgPersistRef.current++;
           if (fgPersistRef.current >= SHARP_FG_FRAMES_REQUIRED) {
             fgPersistRef.current = 0;
@@ -520,10 +538,11 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
             triggerClassification(analysis);
           }
         } else if (roiHasFg) {
-          // FG present but blurry — count toward persistence but don't trigger
-          fgPersistRef.current++;
+          // FG present but scene not yet settled or not sharp enough — reset count
+          fgPersistRef.current = 0;
         } else {
           fgPersistRef.current = 0;
+          prevFgRatioRef.current = 0;
           // Scene cleared — reset nothing-detected suppression
           if (nothingDetectedCountRef.current > 0) {
             nothingDetectedCountRef.current = 0;
@@ -607,8 +626,8 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           fgPersistRef.current = 0;
           goneCountRef.current = 0;
 
-          // Classify immediately if frame is sharp, otherwise return to idle
-          if (roiHasFg && imageQualityBand(analysis) !== "poor") {
+          // Classify immediately if frame is sharp and scene settled, otherwise return to idle
+          if (roiHasFg && imageQualityBand(analysis) === "good") {
             triggerClassification(analysis);
           } else {
             transition("idle");

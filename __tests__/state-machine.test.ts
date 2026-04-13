@@ -12,6 +12,7 @@ const { ROI_FG_THRESHOLD } = computeThresholds(0.5);
 
 // Constants matching KioskDisplay.tsx
 const SHARP_FG_FRAMES_REQUIRED = 3;
+const FG_SETTLE_THRESHOLD = 0.15;
 const FG_PERSIST_FRAMES = 2;
 const RESULT_TIMEOUT_MS = 20_000;
 const RESULT_GONE_FRAMES = 5;
@@ -41,6 +42,7 @@ class StateMachineSimulator {
   classifyTriggered = false;
   pendingItem = false;
   nothingDetectedCount = 0;
+  prevFgRatio = 0;
 
   tick(analysis: FrameAnalysis): void {
     if (!analysis.isSettled) return;
@@ -48,7 +50,7 @@ class StateMachineSimulator {
     const roiHasFg =
       analysis.roiForegroundRatio >= ROI_FG_THRESHOLD &&
       analysis.roiLargestBlobRatio >= ROI_BLOB_THRESHOLD;
-    const isSharp = analysis.sharpnessScore > 500;
+    const isGood = analysis.sharpnessScore > 1500;
 
     // Pending-item queue (non-idle states only)
     if (this.state !== "idle") {
@@ -64,8 +66,15 @@ class StateMachineSimulator {
     }
 
     if (this.state === "idle") {
-      // Overlapped FG + sharpness check
-      if (roiHasFg && isSharp) {
+      const currFg = analysis.roiForegroundRatio;
+      const prevFg = this.prevFgRatio;
+      const fgDelta = prevFg > 0.001
+        ? Math.abs(currFg - prevFg) / prevFg
+        : (currFg > 0.001 ? 1 : 0);
+      const sceneSettled = fgDelta < FG_SETTLE_THRESHOLD;
+      this.prevFgRatio = currFg;
+
+      if (roiHasFg && isGood && sceneSettled) {
         this.fgPersist++;
         if (this.fgPersist >= SHARP_FG_FRAMES_REQUIRED) {
           this.fgPersist = 0;
@@ -74,10 +83,11 @@ class StateMachineSimulator {
           this.state = "classifying";
         }
       } else if (roiHasFg) {
-        // FG present but blurry — count toward persistence but don't trigger
-        this.fgPersist++;
+        // FG present but not settled or not sharp — reset count
+        this.fgPersist = 0;
       } else {
         this.fgPersist = 0;
+        this.prevFgRatio = 0;
         this.nothingDetectedCount = 0;
       }
       return;
@@ -124,7 +134,7 @@ class StateMachineSimulator {
         this.pendingItem = false;
         this.fgPersist = 0;
         this.goneCount = 0;
-        if (roiHasFg && isSharp) {
+        if (roiHasFg && isGood) {
           this.classifyTriggered = true;
           this.state = "classifying";
         } else {
@@ -148,18 +158,48 @@ class StateMachineSimulator {
 }
 
 describe("State machine", () => {
-  it("idle -> classifying after SHARP_FG_FRAMES_REQUIRED sharp frames", () => {
+  it("idle -> classifying after scene settled + SHARP_FG_FRAMES_REQUIRED", () => {
     const sim = new StateMachineSimulator();
     expect(sim.state).toBe("idle");
 
-    const sharpFrame = makeAnalysis();
+    const stableFrame = makeAnalysis(); // sharpness 2000, fgRatio 0.15
 
+    // Frame 1: FG appears (prevFgRatio=0 → delta=1 → not settled) — no count
+    sim.tick(stableFrame);
+    expect(sim.state).toBe("idle");
+    expect(sim.fgPersist).toBe(0);
+
+    // Frames 2–4: FG stable (delta≈0 → settled) — counts 1,2,3 → trigger
     for (let i = 0; i < SHARP_FG_FRAMES_REQUIRED; i++) {
-      sim.tick(sharpFrame);
+      sim.tick(stableFrame);
     }
 
     expect(sim.state).toBe("classifying");
     expect(sim.classifyTriggered).toBe(true);
+  });
+
+  it("idle defers trigger while FG area is growing (hand entering frame)", () => {
+    const sim = new StateMachineSimulator();
+
+    // Simulate hand entering: FG area grows each frame
+    const growingFrames = [0.03, 0.06, 0.10, 0.15, 0.18].map(fg =>
+      makeAnalysis({ roiForegroundRatio: fg, roiLargestBlobRatio: fg * 0.8 }),
+    );
+
+    for (const frame of growingFrames) {
+      sim.tick(frame);
+    }
+
+    // Still idle — FG was growing rapidly each frame
+    expect(sim.state).toBe("idle");
+    expect(sim.fgPersist).toBe(0);
+
+    // Now hand stops — stable FG
+    const settled = makeAnalysis({ roiForegroundRatio: 0.18, roiLargestBlobRatio: 0.14 });
+    for (let i = 0; i < SHARP_FG_FRAMES_REQUIRED; i++) {
+      sim.tick(settled);
+    }
+    expect(sim.state).toBe("classifying");
   });
 
   it("idle stays idle when object disappears mid-count", () => {
@@ -170,10 +210,10 @@ describe("State machine", () => {
       roiLargestBlobRatio: 0,
     });
 
-    // Count 2 frames, then object disappears
-    sim.tick(objectFrame);
-    sim.tick(objectFrame);
-    sim.tick(emptyFrame);
+    // Seed prevFgRatio, then count 1 settled frame, then object disappears
+    sim.tick(objectFrame); // delta=1, not settled
+    sim.tick(objectFrame); // settled, fgPersist=1
+    sim.tick(emptyFrame);  // gone
 
     expect(sim.state).toBe("idle");
     expect(sim.fgPersist).toBe(0);
@@ -183,7 +223,7 @@ describe("State machine", () => {
     const sim = new StateMachineSimulator();
     const blurryFrame = makeAnalysis({ sharpnessScore: 50 });
 
-    // Many blurry frames — should NOT trigger classification
+    // Many blurry frames — should NOT trigger classification (quality != good)
     for (let i = 0; i < 10; i++) {
       sim.tick(blurryFrame);
     }
@@ -191,18 +231,19 @@ describe("State machine", () => {
     expect(sim.state).toBe("idle");
   });
 
-  it("idle counts only sharp frames among mixed input", () => {
+  it("idle requires 'good' quality — 'fair' frames do not count", () => {
     const sim = new StateMachineSimulator();
-    const blurryFrame = makeAnalysis({ sharpnessScore: 50 });
-    const sharpFrame = makeAnalysis({ sharpnessScore: 2000 });
+    const fairFrame = makeAnalysis({ sharpnessScore: 1200 }); // fair, not good
 
-    // Interleave: sharp, blurry (still FG), sharp, sharp → trigger on 3rd sharp
-    sim.tick(sharpFrame);
+    // Seed prevFgRatio
+    sim.tick(fairFrame);
+    // Fair frames: settled but not good quality — no count
+    for (let i = 0; i < 10; i++) {
+      sim.tick(fairFrame);
+    }
+
     expect(sim.state).toBe("idle");
-    sim.tick(blurryFrame); // FG present but blurry — increments fgPersist
-    expect(sim.state).toBe("idle");
-    sim.tick(sharpFrame);
-    expect(sim.state).toBe("classifying");
+    expect(sim.fgPersist).toBe(0);
   });
 
   it("result -> cooldown after RESULT_TIMEOUT_MS", () => {

@@ -62,10 +62,9 @@ export default function ResultScreen({
   const firstResult = displayResults[0];
   const isNothingDetected = firstResult.itemName === "nothing_detected";
 
-  // Camera faces the user, so camera-left = user's right.
-  // Reverse multi-item order so physical left appears on the left card
-  // and physical right appears on the right card.
-  const orderedResults = isMulti ? [...displayResults].reverse() : displayResults;
+  // KioskDisplay sorts results in physical left-to-right order
+  // (mirror-aware), so no reversal is needed here.
+  const orderedResults = displayResults;
 
   // ── Voice announcement via Web Speech API ──
   const announcedRef = React.useRef(false);

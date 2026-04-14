@@ -97,6 +97,39 @@ const ROI_BLOB_DIAGONAL_MIN_AREA = 0.01;
 
 const YOLO_MODEL_SIZE = 640;
 
+/** Whether the camera feed is mirrored (front-facing / selfie cameras). */
+const IS_CAMERA_MIRRORED = process.env.NEXT_PUBLIC_MIRROR_CAMERA === "true";
+
+/**
+ * Sort tracked results by physical position (left-to-right on screen).
+ * Mirrored camera: high center-x in YOLO space = physical left → sort descending.
+ * Non-mirrored: low center-x = physical left → sort ascending.
+ */
+function sortByPhysicalPosition<T extends { _trackBbox: [number, number, number, number] }>(items: T[]): void {
+  items.sort((a, b) => {
+    const aCx = a._trackBbox[0] + a._trackBbox[2] / 2;
+    const bCx = b._trackBbox[0] + b._trackBbox[2] / 2;
+    return IS_CAMERA_MIRRORED ? (bCx - aCx) : (aCx - bCx);
+  });
+}
+
+/** Score how well an API item name matches a YOLO class name (0 = no match). */
+function nameMatchScore(apiName: string, yoloClassName: string): number {
+  const api = apiName.toLowerCase();
+  const yolo = yoloClassName.toLowerCase();
+  if (api === yolo) return 3;
+  if (api.includes(yolo)) return 2;
+  if (yolo.includes(api)) return 1;
+  const lastWord = api.split(/\s+/).pop() ?? "";
+  if (lastWord.length >= 3 && (lastWord === yolo || yolo.includes(lastWord))) return 1;
+  return 0;
+}
+
+/** Check if a bbox is the full-frame fallback (no real position data). */
+function isFullFrameFallback(bbox: [number, number, number, number]): boolean {
+  return bbox[0] === 0 && bbox[1] === 0 && bbox[2] === 640 && bbox[3] === 640;
+}
+
 /** Convert raw YOLO detections to log format with normalized bboxes. */
 function toDetectionLogs(detections: YoloDetection[]): YoloDetectionLog[] {
   return detections.map((d) => ({
@@ -184,6 +217,8 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
   const apiAbortRef = useRef<AbortController | null>(null);
   /** Tracks unresolved new bboxes in result state for API escalation. */
   const unresolvedNewItemsRef = useRef<Map<string, { bbox: Bbox; count: number }>>(new Map());
+  /** Latest waste detections from YOLO — used for bbox assignment to API results. */
+  const latestWasteDetectionsRef = useRef<YoloDetection[]>([]);
   /** Mirror of stableResults for stale-closure-safe reads in the YOLO loop. */
   const stableResultsRef = useRef<TrackedResult[]>([]);
   const lastAnalysisRef = useRef<FrameAnalysis | null>(null);
@@ -814,12 +849,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
             }));
             setStableResults(prev => {
               const merged = [...prev, ...newTracked].slice(0, 4);
-              // Sort by bbox center-x for consistent L→R display
-              merged.sort((a, b) => {
-                const aCx = a._trackBbox[0] + a._trackBbox[2] / 2;
-                const bCx = b._trackBbox[0] + b._trackBbox[2] / 2;
-                return aCx - bCx;
-              });
+              sortByPhysicalPosition(merged);
               return merged;
             });
             setResultRequestIds(prev => [...prev, ...newTracked.map(() => requestId)]);
@@ -844,6 +874,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       const state = stateRef.current;
       const th = thresholdsRef.current;
       const wasteDetections = detections.filter(d => !isYoloClassNotWaste(d.className));
+      latestWasteDetectionsRef.current = wasteDetections;
 
       // ── Resolve detections via YOLO rules ──
       const resolvedResults: (ClassificationResponse & { _bbox?: Bbox })[] = [];
@@ -1005,6 +1036,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           const updated = displayedResults
             .filter(r => !toRemoveIds.has(r._trackId))
             .slice(0, 4);
+          sortByPhysicalPosition(updated);
           if (toRemoveIds.size > 0) {
             console.log(`[yolo-loop] removed trackIds: ${[...toRemoveIds].join(", ")}`);
           }
@@ -1366,6 +1398,48 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       // Successful classification — reset the nothing-detected counter
       nothingDetectedCountRef.current = 0;
       const tracked = valid.map(r => toTrackedResult(r));
+
+      // ── Assign bboxes from YOLO detections for API results lacking spatial data ──
+      const recentDetections = latestWasteDetectionsRef.current;
+      const recentBlobs = lastAnalysisRef.current?.blobs ?? [];
+      const usedDetIdxs = new Set<number>();
+
+      // Phase 1: Name-match items to YOLO detections for bbox inheritance
+      for (const item of tracked) {
+        if (!isFullFrameFallback(item._trackBbox)) continue;
+        let bestIdx = -1;
+        let bestScore = 0;
+        for (let i = 0; i < recentDetections.length; i++) {
+          if (usedDetIdxs.has(i)) continue;
+          const score = nameMatchScore(item.itemName, recentDetections[i].className);
+          if (score > bestScore) { bestScore = score; bestIdx = i; }
+        }
+        if (bestIdx >= 0) {
+          usedDetIdxs.add(bestIdx);
+          item._trackBbox = recentDetections[bestIdx].bbox as [number, number, number, number];
+        }
+      }
+
+      // Phase 2: Assign remaining blobs to items still missing position
+      const qualifiedBlobs = recentBlobs
+        .filter(b => blobIsObject(b))
+        .sort((a, b) => a.bboxNorm[0] - b.bboxNorm[0]);
+      let blobIdx = 0;
+      for (const item of tracked) {
+        if (!isFullFrameFallback(item._trackBbox)) continue;
+        if (blobIdx >= qualifiedBlobs.length) break;
+        const bl = qualifiedBlobs[blobIdx++];
+        item._trackBbox = [
+          Math.round((bl.bboxNorm[0] - bl.bboxNorm[2] / 2) * 640),
+          Math.round((bl.bboxNorm[1] - bl.bboxNorm[3] / 2) * 640),
+          Math.round(bl.bboxNorm[2] * 640),
+          Math.round(bl.bboxNorm[3] * 640),
+        ];
+      }
+
+      // Sort by physical position (left-to-right on screen, mirror-aware)
+      sortByPhysicalPosition(tracked);
+
       setStableResults(tracked);
       setResultRequestIds(
         valid.map((r) => requestIds[results.indexOf(r)] ?? r.requestId)

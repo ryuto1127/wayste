@@ -7,6 +7,10 @@ import type { PilotLogEntry } from "@/lib/types";
 import type { Locale } from "@/lib/i18n";
 import { t } from "@/lib/i18n";
 
+// ── Constants ──
+
+const NOT_WASTE = new Set(["person","bicycle","car","motorcycle","airplane","bus","train","truck","boat","traffic light","fire hydrant","stop sign","parking meter","bench","bird","cat","dog","horse","sheep","cow","elephant","bear","zebra","giraffe","chair","couch","potted plant","bed","dining table","toilet","sink","refrigerator"]);
+
 // ── Types ──
 
 type ReviewEntry = PilotLogEntry & {
@@ -410,14 +414,24 @@ function EntryCard({
 
       {/* Info */}
       <div>
-        <p className="font-semibold text-white truncate">{entry.itemName}</p>
-        {siblingNames && siblingNames.length > 1 && (
-          <p className="text-xs text-neutral-400 mt-0.5 truncate">
-            {siblingNames.filter(n => n !== entry.itemName).length > 0
-              ? `+ ${siblingNames.filter(n => n !== entry.itemName).join(", ")}`
-              : `(${siblingNames.length} items)`}
-          </p>
-        )}
+        <p className="font-semibold text-white truncate">
+          {(() => {
+            // 1) T1: use YOLO tier1 names sorted left→right by x
+            const t1 = entry.tierResults?.tier1?.filter(r => !NOT_WASTE.has(r.itemName));
+            if (t1 && t1.length > 1) {
+              const sorted = [...t1].sort((a, b) =>
+                a.x != null && b.x != null ? a.x - b.x : b.confidence - a.confidence
+              );
+              return sorted.map(r => r.itemName).join(", ");
+            }
+            // 2) T2 siblings: API-classified items from the same frame
+            if (siblingNames && siblingNames.length > 1) {
+              return siblingNames.join(", ");
+            }
+            // 3) Single item
+            return entry.itemName;
+          })()}
+        </p>
         <p className="text-xs text-neutral-500 mt-0.5">{date}</p>
       </div>
 
@@ -443,7 +457,6 @@ function EntryCard({
       {(() => {
         // Use tierResults if available; fallback to yoloDetections for older entries
         // Show top 3, sorted by confidence descending
-        const NOT_WASTE = new Set(["person","bicycle","car","motorcycle","airplane","bus","train","truck","boat","traffic light","fire hydrant","stop sign","parking meter","bench","bird","cat","dog","horse","sheep","cow","elephant","bear","zebra","giraffe","chair","couch","potted plant","bed","dining table","toilet","sink","refrigerator"]);
         const top3 = (arr?: { itemName: string; confidence: number }[]) =>
           arr?.filter(r => !NOT_WASTE.has(r.itemName)).sort((a, b) => b.confidence - a.confidence).slice(0, 3);
         const rawT1 = entry.tierResults?.tier1

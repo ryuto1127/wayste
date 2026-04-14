@@ -56,7 +56,7 @@ const Tier1ContextSchema = z.object({
 
 // ── Intermediate tier results (for pilot-log traceability) ──
 const TierResultsSchema = z.object({
-  tier1: z.array(z.object({ itemName: z.string(), confidence: z.number() })).optional(),
+  tier1: z.array(z.object({ itemName: z.string(), confidence: z.number(), x: z.number().optional() })).optional(),
 }).optional();
 
 // ── Request validation (single-item format — backward compatible) ──
@@ -518,7 +518,7 @@ export async function POST(request: Request) {
       // Background logging for all multi-item results
       if (multiResults.length > 0) {
         const logTimestamp = new Date().toISOString();
-        const clientTierResults = (data as z.infer<typeof SingleRequestSchema>).tierResults as { tier1?: { itemName: string; confidence: number }[] } | undefined
+        const clientTierResults = (data as z.infer<typeof SingleRequestSchema>).tierResults as { tier1?: { itemName: string; confidence: number; x?: number }[] } | undefined
           ?? (() => {
             const yd = (data as z.infer<typeof SingleRequestSchema>).yoloDetections as YoloDetectionLog[] | undefined;
             return yd?.length ? { tier1: yd.map(d => ({ itemName: d.className, confidence: d.confidence })) } : undefined;
@@ -577,8 +577,8 @@ export async function POST(request: Request) {
 
     // Prefer client-provided tierResults (has T1 data).
     // Fall back to server-constructed from yoloDetections / tier1Context.
-    const tierResults = (singleData.tierResults as { tier1?: { itemName: string; confidence: number }[] } | undefined) ?? (() => {
-      const tr: { tier1?: { itemName: string; confidence: number }[] } = {};
+    const tierResults = (singleData.tierResults as { tier1?: { itemName: string; confidence: number; x?: number }[] } | undefined) ?? (() => {
+      const tr: { tier1?: { itemName: string; confidence: number; x?: number }[] } = {};
       const t1Ctx = tier1Context as { className: string; confidence: number } | undefined;
       if (t1Ctx) {
         tr.tier1 = [{ itemName: t1Ctx.className, confidence: t1Ctx.confidence }];

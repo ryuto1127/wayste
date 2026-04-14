@@ -108,7 +108,7 @@ export interface PilotLogEntry {
   /** Intermediate classification results from Tier 1 (YOLO).
    *  Present when final classification came from Tier 2 (API). */
   tierResults?: {
-    tier1?: { itemName: string; confidence: number }[];
+    tier1?: { itemName: string; confidence: number; x?: number }[];
   };
 }
 

@@ -360,7 +360,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
 
   // ── API call (with timeout + 429 retry) ──
   const classify = useCallback(
-    async (frame: string, meta: ClassifyMeta, yoloDetections?: YoloDetectionLog[], multi?: boolean, tierResults?: { tier1?: { itemName: string; confidence: number }[] }): Promise<ClassificationResponse & { requestId?: string }> => {
+    async (frame: string, meta: ClassifyMeta, yoloDetections?: YoloDetectionLog[], multi?: boolean, tierResults?: { tier1?: { itemName: string; confidence: number; x?: number }[] }): Promise<ClassificationResponse & { requestId?: string }> => {
       const doFetch = async (): Promise<ClassificationResponse & { requestId?: string }> => {
         const fetchStartMs = Date.now();
         const controller = new AbortController();
@@ -791,7 +791,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
 
       const wasteDetections: YoloDetection[] = []; // no detections to hint
       const tier1Hints = wasteDetections
-        .map(d => ({ itemName: d.className, confidence: d.confidence }))
+        .map(d => ({ itemName: d.className, confidence: d.confidence, x: d.bbox[0] + d.bbox[2] / 2 }))
         .sort((a, b) => b.confidence - a.confidence).slice(0, 5);
 
       classifyViaApiAsync(video, analysis, controller.signal, undefined, true, { tier1: tier1Hints })
@@ -834,7 +834,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       apiAbortRef.current = controller;
 
       classifyViaApiAsync(video, analysis, controller.signal, undefined, true, {
-        tier1: [{ itemName: triggeringDetection.className, confidence: triggeringDetection.confidence }],
+        tier1: [{ itemName: triggeringDetection.className, confidence: triggeringDetection.confidence, x: triggeringDetection.bbox[0] + triggeringDetection.bbox[2] / 2 }],
       })
         .then(({ result: r, requestId, multiResults }) => {
           apiAbortRef.current = null;
@@ -920,7 +920,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
 
           if (analysis) {
             logYoloOnlyResult(video, resolvedResults[0], detections, yoloMs, analysis, "T1", undefined, undefined,
-              { tier1: wasteDetections.map(d => ({ itemName: d.className, confidence: d.confidence })).sort((a, b) => b.confidence - a.confidence).slice(0, 5) });
+              { tier1: wasteDetections.map(d => ({ itemName: d.className, confidence: d.confidence, x: d.bbox[0] + d.bbox[2] / 2 })).sort((a, b) => b.confidence - a.confidence).slice(0, 5) });
           }
 
           handleMultiClassificationResults(resolvedResults, resolvedResults.map(() => undefined));
@@ -1061,7 +1061,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       modelUsed: "T1" = "T1",
       _hint?: unknown,
       _refinedFrom?: unknown,
-      tierResults?: { tier1?: { itemName: string; confidence: number }[] },
+      tierResults?: { tier1?: { itemName: string; confidence: number; x?: number }[] },
     ) {
       // Capture the same center short-side square that YOLO sees (e.g. 720×720
       // from 1280×720). Log images preserve full resolution for fine-tuning.
@@ -1135,7 +1135,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
 
       const apiController = new AbortController();
       let yoloDetectionLogs: YoloDetectionLog[] | undefined;
-      type TierHints = { tier1?: { itemName: string; confidence: number }[] };
+      type TierHints = { tier1?: { itemName: string; confidence: number; x?: number }[] };
       const apiPromise = (multi?: boolean, tierResults?: TierHints) => classifyViaApiAsync(video, analysis, apiController.signal, yoloDetectionLogs, multi, tierResults);
 
       if (!yoloReady || !backend) {
@@ -1198,7 +1198,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
             });
             console.log(`[tier1] YOLO HIT: ${resolvedResults.map((r) => r.itemName).join(" + ")} in ${yoloMs}ms`);
             logYoloOnlyResult(video, resolvedResults[0], detections, yoloMs, analysis, "T1", undefined, undefined,
-              { tier1: wasteDetections.map(d => ({ itemName: d.className, confidence: d.confidence })).sort((a, b) => b.confidence - a.confidence).slice(0, 5) });
+              { tier1: wasteDetections.map(d => ({ itemName: d.className, confidence: d.confidence, x: d.bbox[0] + d.bbox[2] / 2 })).sort((a, b) => b.confidence - a.confidence).slice(0, 5) });
             handleMultiClassificationResults(resolvedResults, resolvedResults.map(() => undefined));
             return;
           }
@@ -1209,7 +1209,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
 
           if (best || unresolvedCount > 0 || hasBlobPresence) {
             const tier1Hints = wasteDetections
-              .map(d => ({ itemName: d.className, confidence: d.confidence }))
+              .map(d => ({ itemName: d.className, confidence: d.confidence, x: d.bbox[0] + d.bbox[2] / 2 }))
               .sort((a, b) => b.confidence - a.confidence)
               .slice(0, 5);
 
@@ -1247,9 +1247,9 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
     /** Escalate to the API (Tier 2) with full-frame multi-item prompt. */
     function escalateToApi(
       yoloBest: { className: string; confidence: number } | null,
-      apiPromise: (multi?: boolean, tierResults?: { tier1?: { itemName: string; confidence: number }[] }) => Promise<{ result: (ClassificationResponse & { requestId?: string }) | null; requestId?: string; multiResults?: ClassificationResponse[] }>,
+      apiPromise: (multi?: boolean, tierResults?: { tier1?: { itemName: string; confidence: number; x?: number }[] }) => Promise<{ result: (ClassificationResponse & { requestId?: string }) | null; requestId?: string; multiResults?: ClassificationResponse[] }>,
       tier1Results: (ClassificationResponse & { _bbox?: Bbox })[],
-      tier1Hints: { itemName: string; confidence: number }[],
+      tier1Hints: { itemName: string; confidence: number; x?: number }[],
     ) {
       // Show optimistic T1 results while waiting for API
       if (tier1Results.length > 0) {
@@ -1480,7 +1480,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       yoloDetections?: YoloDetectionLog[],
       /** When true, uses multi-item prompt — for zero-detection fallback. */
       multi?: boolean,
-      tierResults?: { tier1?: { itemName: string; confidence: number }[] },
+      tierResults?: { tier1?: { itemName: string; confidence: number; x?: number }[] },
     ): Promise<{ result: (ClassificationResponse & { requestId?: string }) | null; requestId?: string; multiResults?: ClassificationResponse[] }> {
       // Send the same center short-side square that YOLO sees to the API.
       const procStart = Date.now();

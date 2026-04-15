@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { loadSiteConfig } from "@/lib/waste-rules";
 
 export async function GET() {
-  const siteId = process.env.SITE_ID ?? "default";
+  const siteId = process.env.SITE_ID ?? "japan-office";
   const config = loadSiteConfig(siteId);
 
   return NextResponse.json({

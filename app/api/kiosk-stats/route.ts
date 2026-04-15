@@ -9,7 +9,7 @@ const SAFE_DEFAULT = {
 
 export async function GET() {
   try {
-    const siteId = process.env.SITE_ID ?? "default";
+    const siteId = process.env.SITE_ID ?? "japan-office";
     const stats = await getTodayKioskStats(siteId);
     return NextResponse.json(stats);
   } catch (err) {

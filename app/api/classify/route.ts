@@ -358,7 +358,7 @@ export async function POST(request: Request) {
   const siteId = data.siteId;
   const locale = data.locale ?? "en";
   const meta = data.meta;
-  const siteConfig = loadSiteConfig(siteId ?? process.env.SITE_ID ?? "default");
+  const siteConfig = loadSiteConfig(siteId ?? process.env.SITE_ID ?? "japan-office");
   const openai = new OpenAI();
   const startMs = Date.now();
   const requestId = generateRequestId();

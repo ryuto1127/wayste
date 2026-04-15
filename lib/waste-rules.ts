@@ -28,7 +28,7 @@ interface CachedConfig {
 
 const configCache = new Map<string, CachedConfig>();
 
-export function loadSiteConfig(siteId: string = "default"): SiteConfig {
+export function loadSiteConfig(siteId: string = "japan-office"): SiteConfig {
   const now = Date.now();
   const cached = configCache.get(siteId);
   if (cached && now - cached.loadedAt < CONFIG_CACHE_TTL_MS) {
@@ -42,13 +42,13 @@ export function loadSiteConfig(siteId: string = "default"): SiteConfig {
     const raw = readFileSync(configPath, "utf-8");
     config = JSON.parse(raw) as SiteConfig;
   } catch {
-    if (siteId !== "default") {
+    if (siteId !== "japan-office") {
       console.warn(
-        `Site config "${siteId}" not found, falling back to default.`
+        `Site config "${siteId}" not found, falling back to japan-office.`
       );
-      return loadSiteConfig("default");
+      return loadSiteConfig("japan-office");
     }
-    throw new Error("Default site config not found.");
+    throw new Error("japan-office site config not found.");
   }
 
   configCache.set(siteId, { config, loadedAt: now });

@@ -16,7 +16,7 @@
 
 ## Tech Stack
 - TypeScript / Next.js 16 (App Router) / React 19 / Tailwind CSS v4
-- YOLO26m FP16 (ONNX Runtime Web) — browser object detection, COCO-80
+- YOLO26m FP16 (ONNX Runtime Web) — browser object detection, 15 custom classes
 - YOLO World S (ONNX Runtime Web) — browser recycling detection, 36 classes
 - OpenAI GPT-5.4 (nano → mini escalation) — cloud fallback
 - Upstash Redis (REST) / Vercel Blob / Vercel Serverless + Cron
@@ -39,7 +39,7 @@
 - `lib/waste-rules-core.ts` — Word-boundary pattern matching + override engine (browser-safe)
 - `lib/waste-rules.ts` — Site config loader + GPT prompt builder (5-min cache)
 - `components/KioskDisplay.tsx` — State machine: loading → idle → object_detected → classifying → result → cooldown; multi-item blob-to-detection matching (up to 4), three-way routing (YOLO match → tier system, unmatched+object → API, unmatched+noise → discard)
-- `config/sites/*.json` — Per-site waste rules (5 presets: default, japan-office, office-hq, airport, pilot)
+- `config/sites/*.json` — Per-site waste rules (4 presets: japan-office, office-hq, airport, pilot; japan-office is the default)
 - `middleware.ts` — Admin auth: HTTP Basic Auth → 7-day session cookie
 
 ## Rules & Conventions

@@ -5,43 +5,43 @@
     "plastic_bottle": {
       "itemName": "Plastic Bottle",
       "itemName_ja": "ペットボトル",
-      "wasteStream": "recycling",
-      "reasoning": "PET/HDPE plastic bottles are recyclable. Empty and rinse before recycling.",
-      "preAction": "Empty and rinse before recycling",
-      "preAction_ja": "中を空にして洗ってからリサイクルへ"
+      "wasteStream": "recyclable",
+      "reasoning": "PET bottles are recyclable. Empty, rinse, and remove cap and label.",
+      "preAction": "Empty, rinse, remove cap and label",
+      "preAction_ja": "中を空にして洗い、キャップとラベルを外して資源ゴミへ"
     },
     "can": {
       "itemName": "Aluminum Can",
       "itemName_ja": "アルミ缶",
-      "wasteStream": "recycling",
+      "wasteStream": "recyclable",
       "reasoning": "Aluminum and steel cans are recyclable. Rinse before recycling.",
       "preAction": "Rinse before recycling",
-      "preAction_ja": "洗ってからリサイクルへ"
+      "preAction_ja": "洗ってから資源ゴミへ"
     },
     "paper_cup": {
       "itemName": "Paper Cup",
       "itemName_ja": "紙コップ",
-      "wasteStream": "landfill",
-      "reasoning": "Most paper cups have a plastic lining and cannot be recycled."
+      "wasteStream": "burnable",
+      "reasoning": "Paper cups have a plastic lining and go in burnable waste."
     },
     "plastic_cup": {
       "itemName": "Plastic Cup",
       "itemName_ja": "プラスチックカップ",
-      "wasteStream": "landfill",
-      "reasoning": "Disposable plastic cups are generally not recyclable."
+      "wasteStream": "plastic",
+      "reasoning": "Disposable plastic cups go in the plastic waste stream."
     },
     "glass_bottle": {
       "itemName": "Glass Bottle",
       "itemName_ja": "ガラス瓶",
-      "wasteStream": "recycling",
-      "reasoning": "Glass bottles are recyclable. Rinse before recycling.",
+      "wasteStream": "recyclable",
+      "reasoning": "Glass bottles are recyclable. Rinse and remove cap.",
       "preAction": "Rinse and remove cap if different material",
       "preAction_ja": "洗ってからリサイクルへ。素材の異なるキャップは外してください"
     },
     "cardboard": {
       "itemName": "Cardboard",
       "itemName_ja": "段ボール",
-      "wasteStream": "recycling",
+      "wasteStream": "recyclable",
       "reasoning": "Cardboard is recyclable. Flatten before recycling.",
       "preAction": "Flatten and remove tape if possible",
       "preAction_ja": "潰してテープはできるだけ剥がしてください"
@@ -49,19 +49,19 @@
     "paper": {
       "itemName": "Paper",
       "itemName_ja": "紙",
-      "wasteStream": "recycling",
+      "wasteStream": "recyclable",
       "reasoning": "Clean paper is recyclable."
     },
     "plastic_bag": {
       "itemName": "Plastic Bag",
       "itemName_ja": "ビニール袋",
-      "wasteStream": "landfill",
-      "reasoning": "Plastic bags jam sorting machinery. Some grocery stores accept them for separate recycling."
+      "wasteStream": "plastic",
+      "reasoning": "Plastic bags with the plastic recycling mark go in the plastic stream."
     },
     "paper_bag": {
       "itemName": "Paper Bag",
       "itemName_ja": "紙袋",
-      "wasteStream": "recycling",
+      "wasteStream": "recyclable",
       "reasoning": "Paper bags are recyclable."
     },
     "battery": {
@@ -75,178 +75,38 @@
     "styrofoam": {
       "itemName": "Styrofoam",
       "itemName_ja": "発泡スチロール",
-      "wasteStream": "landfill",
-      "reasoning": "Expanded polystyrene is not accepted in most recycling programs."
+      "wasteStream": "plastic",
+      "reasoning": "Expanded polystyrene goes in the plastic stream."
     },
     "tetra_pak": {
       "itemName": "Tetra Pak Carton",
       "itemName_ja": "テトラパック",
-      "wasteStream": "recycling",
-      "reasoning": "Tetra Pak cartons are recyclable in many programs. Empty and rinse before recycling.",
+      "wasteStream": "recyclable",
+      "reasoning": "Tetra Pak cartons are recyclable. Empty and rinse before recycling.",
       "preAction": "Empty and rinse before recycling",
-      "preAction_ja": "中を空にして洗ってからリサイクルへ"
+      "preAction_ja": "中を空にして洗ってから資源ゴミへ"
     },
-    "bone": {
-      "itemName": "Bone",
-      "itemName_ja": "骨",
-      "wasteStream": "compost",
-      "reasoning": "Bones are compostable in municipal composting facilities."
+    "plastic_bottle_cap": {
+      "itemName": "Plastic Bottle Cap",
+      "itemName_ja": "ペットボトルキャップ",
+      "wasteStream": "plastic",
+      "reasoning": "Plastic bottle caps are separate from the bottle and go in the plastic stream.",
+      "preAction": "Remove from bottle and put in plastic",
+      "preAction_ja": "ボトルから外してプラスチックへ"
     },
-    "vegetable": {
-      "itemName": "Vegetable",
-      "itemName_ja": "野菜",
-      "wasteStream": "compost",
-      "reasoning": "Vegetables and vegetable scraps are compostable."
+    "plastic_bottle_label": {
+      "itemName": "Plastic Bottle Label",
+      "itemName_ja": "ペットボトルラベル",
+      "wasteStream": "plastic",
+      "reasoning": "Plastic shrink-wrap labels go in the plastic stream.",
+      "preAction": "Peel off the bottle and put in plastic",
+      "preAction_ja": "ボトルから剥がしてプラスチックへ"
     },
-    "egg_shell": {
-      "itemName": "Egg Shell",
-      "itemName_ja": "卵の殻",
-      "wasteStream": "compost",
-      "reasoning": "Egg shells are compostable and add calcium to compost."
-    },
-    "orange": {
-      "itemName": "Orange",
-      "itemName_ja": "オレンジ",
-      "wasteStream": "compost",
-      "reasoning": "Whole fruit and fruit scraps are compostable."
-    },
-    "orange_peel": {
-      "itemName": "Orange Peel",
-      "itemName_ja": "オレンジの皮",
-      "wasteStream": "compost",
-      "reasoning": "Citrus peels are compostable."
-    },
-    "apple_peel": {
-      "itemName": "Apple Peel",
-      "itemName_ja": "りんごの皮",
-      "wasteStream": "compost",
-      "reasoning": "Fruit peels are compostable."
-    },
-    "apple": {
-      "itemName": "Apple",
-      "itemName_ja": "りんご",
-      "wasteStream": "compost",
-      "reasoning": "Whole fruit and fruit scraps are compostable."
-    },
-    "pear": {
-      "itemName": "Pear",
-      "itemName_ja": "梨",
-      "wasteStream": "compost",
-      "reasoning": "Whole fruit and fruit scraps are compostable."
-    },
-    "meat": {
-      "itemName": "Meat",
-      "itemName_ja": "肉",
-      "wasteStream": "compost",
-      "reasoning": "Meat scraps are accepted in municipal composting programs."
-    },
-    "bread": {
-      "itemName": "Bread",
-      "itemName_ja": "パン",
-      "wasteStream": "compost",
-      "reasoning": "Bread and baked goods are compostable."
-    },
-    "rice": {
-      "itemName": "Rice",
-      "itemName_ja": "ご飯",
-      "wasteStream": "compost",
-      "reasoning": "Cooked and uncooked rice is compostable."
-    },
-    "egg_yolk": {
-      "itemName": "Egg Yolk",
-      "itemName_ja": "卵黄",
-      "wasteStream": "compost",
-      "reasoning": "Egg waste is compostable."
-    },
-    "apple_core": {
-      "itemName": "Apple Core",
-      "itemName_ja": "りんごの芯",
-      "wasteStream": "compost",
-      "reasoning": "Fruit cores and scraps are compostable."
-    },
-    "bone_fish": {
-      "itemName": "Fish Bone",
-      "itemName_ja": "魚の骨",
-      "wasteStream": "compost",
-      "reasoning": "Fish bones are compostable in municipal composting facilities."
-    },
-    "noodle": {
-      "itemName": "Noodle",
-      "itemName_ja": "麺",
-      "wasteStream": "compost",
-      "reasoning": "Cooked noodles and pasta are compostable."
-    },
-    "pear_peel": {
-      "itemName": "Pear Peel",
-      "itemName_ja": "梨の皮",
-      "wasteStream": "compost",
-      "reasoning": "Fruit peels are compostable."
-    },
-    "pastry": {
-      "itemName": "Pastry",
-      "itemName_ja": "ペストリー",
-      "wasteStream": "compost",
-      "reasoning": "Baked goods and pastries are compostable."
-    },
-    "tomato": {
-      "itemName": "Tomato",
-      "itemName_ja": "トマト",
-      "wasteStream": "compost",
-      "reasoning": "Vegetables and vegetable scraps are compostable."
-    },
-    "fish": {
-      "itemName": "Fish",
-      "itemName_ja": "魚",
-      "wasteStream": "compost",
-      "reasoning": "Fish scraps are accepted in municipal composting programs."
-    },
-    "cucumber": {
-      "itemName": "Cucumber",
-      "itemName_ja": "きゅうり",
-      "wasteStream": "compost",
-      "reasoning": "Vegetables and vegetable scraps are compostable."
-    },
-    "carrot": {
-      "itemName": "Carrot",
-      "itemName_ja": "にんじん",
-      "wasteStream": "compost",
-      "reasoning": "Vegetables and vegetable scraps are compostable."
-    },
-    "banana": {
-      "itemName": "Banana",
-      "itemName_ja": "バナナ",
-      "wasteStream": "compost",
-      "reasoning": "Whole fruit, fruit scraps, and peels are compostable."
-    },
-    "chicken": {
-      "itemName": "Chicken",
-      "itemName_ja": "鶏肉",
-      "wasteStream": "compost",
-      "reasoning": "Meat scraps are accepted in municipal composting programs."
-    },
-    "potato": {
-      "itemName": "Potato",
-      "itemName_ja": "じゃがいも",
-      "wasteStream": "compost",
-      "reasoning": "Vegetables and vegetable scraps are compostable."
-    },
-    "pizza": {
-      "itemName": "Pizza",
-      "itemName_ja": "ピザ",
-      "wasteStream": "compost",
-      "reasoning": "Food waste including pizza is compostable."
-    },
-    "cake": {
-      "itemName": "Cake",
-      "itemName_ja": "ケーキ",
-      "wasteStream": "compost",
-      "reasoning": "Baked goods and food waste are compostable."
-    },
-    "hamburger": {
-      "itemName": "Hamburger",
-      "itemName_ja": "ハンバーガー",
-      "wasteStream": "compost",
-      "reasoning": "Food waste including prepared foods is compostable."
+    "food_waste": {
+      "itemName": "Food Waste",
+      "itemName_ja": "生ゴミ",
+      "wasteStream": "burnable",
+      "reasoning": "Food scraps and leftovers go in burnable waste."
     }
   }
 }

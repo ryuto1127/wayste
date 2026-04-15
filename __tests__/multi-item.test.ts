@@ -439,8 +439,8 @@ describe("POST /api/classify — multi-item mode", () => {
 
   it("returns array of results when multi=true", async () => {
     mockCreate.mockResolvedValueOnce(makeMultiOpenAIResponse([
-      { itemName: "plastic bottle", wasteStream: "recycling", confidence: 0.9, reasoning: "PET" },
-      { itemName: "banana peel", wasteStream: "compost", confidence: 0.85, reasoning: "organic" },
+      { itemName: "plastic bottle", wasteStream: "recyclable", confidence: 0.9, reasoning: "PET" },
+      { itemName: "banana peel", wasteStream: "burnable", confidence: 0.85, reasoning: "organic" },
     ]));
 
     const { POST } = await import("@/app/api/classify/route");
@@ -449,7 +449,7 @@ describe("POST /api/classify — multi-item mode", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         image: "m".repeat(200),
-        siteId: "default",
+        siteId: "japan-office",
         multi: true,
       }),
     });
@@ -473,7 +473,7 @@ describe("POST /api/classify — multi-item mode", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         image: "n".repeat(200),
-        siteId: "default",
+        siteId: "japan-office",
         multi: true,
       }),
     });
@@ -488,7 +488,7 @@ describe("POST /api/classify — multi-item mode", () => {
   it("without multi flag, returns single-item format (backward compat)", async () => {
     mockCreate.mockResolvedValueOnce(makeOpenAIResponse({
       itemName: "can",
-      wasteStream: "recycling",
+      wasteStream: "recyclable",
       confidence: 0.88,
       reasoning: "aluminum",
     }));
@@ -499,7 +499,7 @@ describe("POST /api/classify — multi-item mode", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         image: "o".repeat(200),
-        siteId: "default",
+        siteId: "japan-office",
       }),
     });
 
@@ -521,13 +521,13 @@ describe("POST /api/classify — batch mode", () => {
     mockCreate
       .mockResolvedValueOnce(makeOpenAIResponse({
         itemName: "plastic bottle",
-        wasteStream: "recycling",
+        wasteStream: "recyclable",
         confidence: 0.95,
         reasoning: "PET bottle",
       }))
       .mockResolvedValueOnce(makeOpenAIResponse({
         itemName: "banana peel",
-        wasteStream: "compost",
+        wasteStream: "burnable",
         confidence: 0.9,
         reasoning: "organic waste",
       }));
@@ -541,7 +541,7 @@ describe("POST /api/classify — batch mode", () => {
           { image: "a".repeat(200), yoloHint: null },
           { image: "b".repeat(200), yoloHint: "banana" },
         ],
-        siteId: "default",
+        siteId: "japan-office",
         locale: "en",
       }),
     });
@@ -559,7 +559,7 @@ describe("POST /api/classify — batch mode", () => {
   it("single-item format still works (backward compat)", async () => {
     mockCreate.mockResolvedValueOnce(makeOpenAIResponse({
       itemName: "aluminum can",
-      wasteStream: "recycling",
+      wasteStream: "recyclable",
       confidence: 0.92,
       reasoning: "metal can",
     }));
@@ -570,7 +570,7 @@ describe("POST /api/classify — batch mode", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         image: "c".repeat(200),
-        siteId: "default",
+        siteId: "japan-office",
       }),
     });
 
@@ -578,7 +578,7 @@ describe("POST /api/classify — batch mode", () => {
     if (res.status === 200) {
       const data = await res.json();
       expect(data.itemName).toBe("aluminum can");
-      expect(data.wasteStream).toBe("recycling");
+      expect(data.wasteStream).toBe("recyclable");
       // Single-item: no "results" array wrapper
       expect(data.results).toBeUndefined();
     }

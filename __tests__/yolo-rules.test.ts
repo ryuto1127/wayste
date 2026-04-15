@@ -2,7 +2,7 @@
  * Tests for YOLO → waste stream resolution (Tier 1).
  *
  * Verifies that:
- * 1. YOLO 39-class detections resolve to the correct waste stream
+ * 1. YOLO 15-class detections resolve to the correct waste stream
  * 2. Unknown classes return null (trigger API fallback)
  * 3. Site overrides are applied on top of YOLO rules
  * 4. modelUsed is correctly tagged
@@ -27,14 +27,15 @@ function makeSiteConfig(overrides: Partial<SiteConfig> = {}): SiteConfig {
     siteId: "test",
     siteName: "Test Site",
     streams: [
-      { id: "recycling", label: "Recycling", color: "#2563EB", description: "" },
-      { id: "compost", label: "Compost", color: "#16A34A", description: "" },
-      { id: "landfill", label: "Landfill", color: "#525252", description: "" },
-      { id: "special", label: "Special", color: "#DC2626", description: "" },
-      { id: "needs_review", label: "Needs Review", color: "#D97706", description: "" },
+      { id: "burnable", label: "可燃ゴミ", color: "#EF4444", description: "" },
+      { id: "non-burnable", label: "不燃ゴミ", color: "#6B7280", description: "" },
+      { id: "recyclable", label: "資源ゴミ", color: "#3B82F6", description: "" },
+      { id: "plastic", label: "プラスチック", color: "#F59E0B", description: "" },
+      { id: "special", label: "特別収集", color: "#7C3AED", description: "" },
+      { id: "needs_review", label: "確認が必要", color: "#D97706", description: "" },
     ],
     overrides: [],
-    defaultStream: "landfill",
+    defaultStream: "burnable",
     ...overrides,
   };
 }
@@ -58,21 +59,21 @@ afterAll(() => {
 });
 
 // ═══════════════════════════════════════════════════════════════════
-// Tier 1: YOLO 39-class custom model → waste stream
+// Tier 1: YOLO 15-class custom model → waste stream
 // ═══════════════════════════════════════════════════════════════════
 
-describe("Tier 1: YOLO 39-class detection → waste stream", () => {
+describe("Tier 1: YOLO 15-class detection → waste stream", () => {
   const config = makeSiteConfig();
 
-  describe("recycling items", () => {
+  describe("recyclable items", () => {
     it.each([
-      ["plastic_bottle", "recycling"],
-      ["can", "recycling"],
-      ["glass_bottle", "recycling"],
-      ["cardboard", "recycling"],
-      ["paper", "recycling"],
-      ["paper_bag", "recycling"],
-      ["tetra_pak", "recycling"],
+      ["plastic_bottle", "recyclable"],
+      ["can", "recyclable"],
+      ["glass_bottle", "recyclable"],
+      ["cardboard", "recyclable"],
+      ["paper", "recyclable"],
+      ["paper_bag", "recyclable"],
+      ["tetra_pak", "recyclable"],
     ])("%s → %s", (className, expectedStream) => {
       const result = resolveYoloDetection(makeDetection(className), config);
       expect(result).not.toBeNull();
@@ -81,35 +82,13 @@ describe("Tier 1: YOLO 39-class detection → waste stream", () => {
     });
   });
 
-  describe("compost items (food waste)", () => {
+  describe("plastic items", () => {
     it.each([
-      ["bone", "compost"],
-      ["vegetable", "compost"],
-      ["egg_shell", "compost"],
-      ["orange", "compost"],
-      ["orange_peel", "compost"],
-      ["apple_peel", "compost"],
-      ["apple", "compost"],
-      ["pear", "compost"],
-      ["meat", "compost"],
-      ["bread", "compost"],
-      ["rice", "compost"],
-      ["egg_yolk", "compost"],
-      ["apple_core", "compost"],
-      ["bone_fish", "compost"],
-      ["noodle", "compost"],
-      ["pear_peel", "compost"],
-      ["pastry", "compost"],
-      ["tomato", "compost"],
-      ["fish", "compost"],
-      ["cucumber", "compost"],
-      ["carrot", "compost"],
-      ["banana", "compost"],
-      ["chicken", "compost"],
-      ["potato", "compost"],
-      ["pizza", "compost"],
-      ["cake", "compost"],
-      ["hamburger", "compost"],
+      ["plastic_bottle_cap", "plastic"],
+      ["plastic_bottle_label", "plastic"],
+      ["plastic_cup", "plastic"],
+      ["plastic_bag", "plastic"],
+      ["styrofoam", "plastic"],
     ])("%s → %s", (className, expectedStream) => {
       const result = resolveYoloDetection(makeDetection(className), config);
       expect(result).not.toBeNull();
@@ -117,12 +96,10 @@ describe("Tier 1: YOLO 39-class detection → waste stream", () => {
     });
   });
 
-  describe("landfill items", () => {
+  describe("burnable items", () => {
     it.each([
-      ["paper_cup", "landfill"],
-      ["plastic_cup", "landfill"],
-      ["plastic_bag", "landfill"],
-      ["styrofoam", "landfill"],
+      ["paper_cup", "burnable"],
+      ["food_waste", "burnable"],
     ])("%s → %s", (className, expectedStream) => {
       const result = resolveYoloDetection(makeDetection(className), config);
       expect(result).not.toBeNull();
@@ -141,7 +118,7 @@ describe("Tier 1: YOLO 39-class detection → waste stream", () => {
   it("includes preAction when defined in rules", () => {
     const result = resolveYoloDetection(makeDetection("plastic_bottle", 0.85), config);
     expect(result).not.toBeNull();
-    expect(result!.preAction).toBe("Empty and rinse before recycling");
+    expect(result!.preAction).toBe("Empty, rinse, remove cap and label");
   });
 
   it("preserves detection confidence in result", () => {
@@ -161,21 +138,14 @@ describe("Tier 1: YOLO 39-class detection → waste stream", () => {
 // ═══════════════════════════════════════════════════════════════════
 
 describe("Site overrides applied to YOLO results", () => {
-  it("site override changes pizza from compost to landfill", () => {
+  it("site override changes food_waste from burnable to non-burnable", () => {
     const config = makeSiteConfig({
-      streams: [
-        { id: "recycling", label: "Recycling", color: "#2563EB", description: "" },
-        { id: "compost", label: "Compost", color: "#16A34A", description: "" },
-        { id: "landfill", label: "Landfill", color: "#525252", description: "" },
-        { id: "special", label: "Special", color: "#DC2626", description: "" },
-        { id: "needs_review", label: "Needs Review", color: "#D97706", description: "" },
-      ],
-      overrides: [{ pattern: "Pizza", stream: "landfill", note: "Greasy pizza goes to landfill here" }],
+      overrides: [{ pattern: "Food Waste", stream: "non-burnable", note: "Food waste override test" }],
     });
 
-    const result = resolveYoloDetection(makeDetection("pizza"), config);
+    const result = resolveYoloDetection(makeDetection("food_waste"), config);
     expect(result).not.toBeNull();
-    expect(result!.wasteStream).toBe("landfill");
+    expect(result!.wasteStream).toBe("non-burnable");
   });
 });
 
@@ -184,8 +154,8 @@ describe("Site overrides applied to YOLO results", () => {
 // ═══════════════════════════════════════════════════════════════════
 
 describe("Rules JSON integrity", () => {
-  it("YOLO rules covers all 39 custom classes", () => {
-    expect(Object.keys(yoloRules.rules)).toHaveLength(39);
+  it("YOLO rules covers all 15 custom classes", () => {
+    expect(Object.keys(yoloRules.rules)).toHaveLength(15);
   });
 
   it("every YOLO rule has required fields", () => {
@@ -197,7 +167,7 @@ describe("Rules JSON integrity", () => {
   });
 
   it("all waste streams in rules are valid", () => {
-    const validStreams = new Set(["recycling", "compost", "landfill", "special", "plastic", "needs_review", "not_waste"]);
+    const validStreams = new Set(["burnable", "non-burnable", "recyclable", "plastic", "special", "needs_review", "not_waste"]);
     for (const rule of Object.values(yoloRules.rules)) {
       expect(validStreams.has(rule.wasteStream)).toBe(true);
     }

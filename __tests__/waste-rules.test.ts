@@ -14,7 +14,7 @@ import {
 import type { MaterialHint, SiteConfig } from "@/lib/types";
 
 // Load real configs for integration-style tests
-const defaultConfig = loadSiteConfig("default");
+const defaultConfig = loadSiteConfig("japan-office");
 const officeConfig = loadSiteConfig("office-hq");
 const japanOfficeConfig = loadSiteConfig("japan-office");
 
@@ -279,14 +279,14 @@ describe("japan-office config", () => {
   });
 });
 
-describe("loadSiteConfig merges default + site-specific config", () => {
-  it("loads default config successfully", () => {
-    expect(defaultConfig.siteId).toBe("default");
+describe("loadSiteConfig loads site configs", () => {
+  it("loads japan-office config successfully", () => {
+    expect(defaultConfig.siteId).toBe("japan-office");
     expect(defaultConfig.streams.length).toBeGreaterThan(0);
     expect(defaultConfig.overrides.length).toBeGreaterThan(0);
   });
 
-  it("office-hq has extra streams not in default", () => {
+  it("office-hq has extra streams", () => {
     const officeStreamIds = officeConfig.streams.map((s) => s.id);
     expect(officeStreamIds).toContain("ewaste");
   });
@@ -296,9 +296,9 @@ describe("loadSiteConfig merges default + site-specific config", () => {
     expect(officeConfig.staffHandlingItems!.length).toBeGreaterThan(0);
   });
 
-  it("falls back to default when site config not found", () => {
+  it("falls back to japan-office when site config not found", () => {
     const config = loadSiteConfig("nonexistent-site-xyz");
-    expect(config.siteId).toBe("default");
+    expect(config.siteId).toBe("japan-office");
   });
 });
 

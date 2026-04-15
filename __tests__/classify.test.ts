@@ -82,7 +82,7 @@ describe("POST /api/classify", () => {
   it("uses mini directly for classification", async () => {
     const miniResponse = makeOpenAIResponse({
       itemName: "plastic bottle",
-      wasteStream: "recycling",
+      wasteStream: "recyclable",
       confidence: 0.95,
       reasoning: "clear PET bottle",
       isCompound: false,
@@ -93,14 +93,14 @@ describe("POST /api/classify", () => {
     const { POST } = await import("@/app/api/classify/route");
     const req = makeRequest({
       image: "a".repeat(200),
-      siteId: "default",
+      siteId: "japan-office",
     });
 
     const res = await POST(req);
     if (res.status === 200) {
       const data = await res.json();
       expect(data.itemName).toBe("plastic bottle");
-      expect(data.wasteStream).toBe("recycling");
+      expect(data.wasteStream).toBe("recyclable");
       // Only one model call (mini, no escalation)
       expect(mockCreate).toHaveBeenCalledTimes(1);
       // Verify mini was called (not nano)
@@ -111,13 +111,13 @@ describe("POST /api/classify", () => {
   it("handles compound items from mini", async () => {
     const miniResponse = makeOpenAIResponse({
       itemName: "coffee cup",
-      wasteStream: "landfill",
+      wasteStream: "burnable",
       confidence: 0.88,
       reasoning: "lined paper cup with plastic lid",
       isCompound: true,
       components: [
-        { partName: "plastic lid", wasteStream: "recycling", instruction: "Remove lid and recycle" },
-        { partName: "paper cup", wasteStream: "landfill", instruction: "Lined cup goes to landfill" },
+        { partName: "plastic lid", wasteStream: "plastic", instruction: "Remove lid, put in plastic" },
+        { partName: "paper cup", wasteStream: "burnable", instruction: "Lined cup goes to burnable" },
       ],
     });
     mockCreate.mockResolvedValueOnce(miniResponse);
@@ -125,7 +125,7 @@ describe("POST /api/classify", () => {
     const { POST } = await import("@/app/api/classify/route");
     const req = makeRequest({
       image: "b".repeat(200),
-      siteId: "default",
+      siteId: "japan-office",
     });
 
     const res = await POST(req);
@@ -140,7 +140,7 @@ describe("POST /api/classify", () => {
   it("includes preAction field in response when model provides it", async () => {
     const miniResponse = makeOpenAIResponse({
       itemName: "pet bottle",
-      wasteStream: "recycling",
+      wasteStream: "recyclable",
       confidence: 0.92,
       reasoning: "PET plastic bottle",
       preAction: "Empty contents and remove cap",
@@ -152,7 +152,7 @@ describe("POST /api/classify", () => {
     const { POST } = await import("@/app/api/classify/route");
     const req = makeRequest({
       image: "d".repeat(200),
-      siteId: "default",
+      siteId: "japan-office",
     });
 
     const res = await POST(req);

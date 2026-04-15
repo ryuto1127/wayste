@@ -421,10 +421,10 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
               console.warn("[classify] Multi-item returned no results — treating as unclassifiable");
               return {
                 itemName: "unknown",
-                wasteStream: "landfill",
+                wasteStream: "burnable",
                 confidence: 0,
                 reasoning: "Classification returned no results",
-                binColor: "#525252",
+                binColor: "#EF4444",
                 binLabel: "",
                 needsReview: true,
                 isCompound: false,
@@ -1378,10 +1378,10 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
         nothingDetectedCountRef.current++;
         setStableResults([toTrackedResult({
           itemName: "nothing_detected",
-          wasteStream: "landfill",
+          wasteStream: "burnable",
           confidence: 0,
           reasoning: "",
-          binColor: "#525252",
+          binColor: "#EF4444",
           binLabel: "",
           needsReview: false,
           isCompound: false,

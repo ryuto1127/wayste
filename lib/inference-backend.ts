@@ -1,7 +1,7 @@
 /**
  * Inference backend abstraction layer — Tiered Detection Pipeline.
  *
- *   1. **Tier 1: YOLO (39-class custom)** — Packaging + granular food waste.
+ *   1. **Tier 1: YOLO (15-class custom)** — Packaging, food waste, special.
  *      High confidence + rule match → instant result.
  *
  *   2. **Tier 2: OpenAI API (GPT-5.4-mini)** — Handled in KioskDisplay.tsx.

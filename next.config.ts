@@ -10,6 +10,46 @@ const nextConfig: NextConfig = {
       crypto: { browser: "./lib/empty-module.js" },
     },
   },
+
+  // Security headers
+  async headers() {
+    return [
+      {
+        source: "/:path*",
+        headers: [
+          // Prevent MIME-type sniffing
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          // Block embedding in iframes (clickjacking protection)
+          { key: "X-Frame-Options", value: "DENY" },
+          // Only send origin as referrer to external sites
+          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+          // Opt out of Google's FLoC / Topics API
+          { key: "Permissions-Policy", value: "interest-cohort=()" },
+          // CSP: allow self + ONNX WASM eval + MediaPipe CDN + Vercel Blob
+          {
+            key: "Content-Security-Policy",
+            value: [
+              "default-src 'self'",
+              // Scripts: self + wasm-unsafe-eval for ONNX Runtime Web
+              "script-src 'self' 'wasm-unsafe-eval'",
+              // Styles: self + inline (Tailwind)
+              "style-src 'self' 'unsafe-inline'",
+              // Images: self + blob (canvas) + Vercel Blob storage
+              "img-src 'self' blob: data: https://*.public.blob.vercel-storage.com",
+              // Connect: self + MediaPipe CDN + Google Storage (models) + OpenAI + Upstash
+              "connect-src 'self' https://cdn.jsdelivr.net https://storage.googleapis.com https://api.openai.com https://*.upstash.io",
+              // Media: self + blob (camera)
+              "media-src 'self' blob:",
+              // Workers: self + blob (ONNX web workers)
+              "worker-src 'self' blob:",
+              // No iframes
+              "frame-ancestors 'none'",
+            ].join("; "),
+          },
+        ],
+      },
+    ];
+  },
 };
 
 export default nextConfig;

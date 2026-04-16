@@ -32,7 +32,7 @@ describe("computeThresholds", () => {
     });
 
     it("derives strict YOLO_FALLBACK_THRESHOLD", () => {
-      expect(th.YOLO_FALLBACK_THRESHOLD).toBeCloseTo(0.70, 4);
+      expect(th.YOLO_FALLBACK_THRESHOLD).toBeCloseTo(0.80, 4);
     });
 
     it("uses 3 FG_PERSIST_FRAMES for strict sensitivity", () => {
@@ -55,8 +55,8 @@ describe("computeThresholds", () => {
       expect(th.ROI_BLOB_DIAGONAL_THRESHOLD).toBeCloseTo(0.375, 4);
     });
 
-    it("derives default YOLO_FALLBACK_THRESHOLD (0.60)", () => {
-      expect(th.YOLO_FALLBACK_THRESHOLD).toBeCloseTo(0.60, 4);
+    it("derives default YOLO_FALLBACK_THRESHOLD (0.725)", () => {
+      expect(th.YOLO_FALLBACK_THRESHOLD).toBeCloseTo(0.725, 4);
     });
 
     it("uses 3 FG_PERSIST_FRAMES at default sensitivity", () => {
@@ -80,7 +80,7 @@ describe("computeThresholds", () => {
     });
 
     it("derives sensitive YOLO_FALLBACK_THRESHOLD", () => {
-      expect(th.YOLO_FALLBACK_THRESHOLD).toBeCloseTo(0.50, 4);
+      expect(th.YOLO_FALLBACK_THRESHOLD).toBeCloseTo(0.65, 4);
     });
 
     it("uses 2 FG_PERSIST_FRAMES for high sensitivity", () => {
@@ -113,7 +113,7 @@ describe("computeThresholds", () => {
 
     it("does not affect non-ROI thresholds", () => {
       const th = computeThresholds(0.5, calibration);
-      expect(th.YOLO_FALLBACK_THRESHOLD).toBeCloseTo(0.60, 4);
+      expect(th.YOLO_FALLBACK_THRESHOLD).toBeCloseTo(0.725, 4);
       expect(th.ROI_BLOB_DIAGONAL_THRESHOLD).toBeCloseTo(0.375, 4);
     });
 

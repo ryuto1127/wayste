@@ -1,9 +1,11 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import type { Locale, TranslationKey } from "@/lib/i18n";
 import { t } from "@/lib/i18n";
 import type { KioskDayStats } from "@/lib/kiosk-stats";
+import { getForestState, isForestComplete } from "@/lib/forest-state";
+import ForestVisualization from "./ForestVisualization";
 
 interface IdleScreenProps {
   locale: Locale;
@@ -16,6 +18,10 @@ interface IdleScreenProps {
   detectionRoiMargin: number;
   /** YOLO target inset (fraction, e.g. 0.0556 = inner 89% where YOLO analyzes). */
   yoloTargetInset: number;
+  /** Index of the tree that just advanced (triggers growth animation). */
+  justAdvancedTreeIndex?: number | null;
+  /** Called after the tree growth animation finishes to clear the index. */
+  onTreeAnimationDone?: () => void;
 }
 
 export default function IdleScreen({
@@ -26,6 +32,8 @@ export default function IdleScreen({
   onToggleVoice,
   detectionRoiMargin,
   yoloTargetInset,
+  justAdvancedTreeIndex = null,
+  onTreeAnimationDone,
 }: IdleScreenProps) {
   const T = useCallback(
     (key: TranslationKey) => t(locale, key),
@@ -50,20 +58,61 @@ export default function IdleScreen({
     return () => { cancelled = true; clearInterval(interval); };
   }, [statsVersion]);
 
-  const hasData = stats !== null && stats.totalClassifications > 0;
+  // ── Forest gamification state ──
+  // Refresh forest when statsVersion changes (= after each cooldown→idle cycle).
+  // useMemo avoids the lint error about setState in useEffect while still
+  // recomputing whenever statsVersion changes.
+  const forest = React.useMemo(() => getForestState(), [statsVersion]);
+
   const successPct = stats ? Math.round(stats.successRate * 100) : 0;
 
-  // Three-zone vignette: outer (dark) → middle (slightly dark) → inner (clear).
-  // The viewfinder square represents the FG detection area (720×720).
-  // The YOLO target zone (640×640) is inset within it.
-  const _roiInsetPct = `${detectionRoiMargin * 100}%`; // ~2% — detection edge
-  const yoloInsetPct = `${yoloTargetInset * 100}%`;    // ~5.56% — YOLO target
+  // Accuracy display: show only if ≥20 reviews AND accuracy ≥85%
+  const showAccuracy = stats !== null
+    && stats.reviewedCount >= 20
+    && stats.successRate >= 0.85;
+
+  // ── Viewfinder: dynamically sized to match YOLO's actual 640×640 on screen ──
+  // The camera (1280×720) is displayed with object-cover. We compute how large
+  // the 640×640 YOLO crop appears on screen, then show 85% of that so users
+  // aim inside, guaranteeing items land within the full YOLO field of view.
+  const CAMERA_W = 1280;
+  const CAMERA_H = 720;
+  const YOLO_SIZE = 640;
+  const VIEWFINDER_RATIO = 0.85;
+
+  const [viewfinderPx, setViewfinderPx] = useState<number>(0);
+
+  useEffect(() => {
+    function calc() {
+      const cw = window.innerWidth;
+      const ch = window.innerHeight;
+      // object-cover: scale to cover the entire container
+      const scale = Math.max(cw / CAMERA_W, ch / CAMERA_H);
+      const yoloOnScreen = YOLO_SIZE * scale;
+      let vf = Math.round(yoloOnScreen * VIEWFINDER_RATIO);
+      // Cap to visible screen area (minus padding for forest + CTA)
+      const maxSize = Math.min(cw - 32, ch * 0.55);
+      vf = Math.min(vf, maxSize);
+      setViewfinderPx(vf);
+    }
+    calc();
+    window.addEventListener("resize", calc);
+    return () => window.removeEventListener("resize", calc);
+  }, []);
 
   return (
     <div className="absolute inset-0 z-20 flex flex-col items-center justify-center px-6 py-8 select-none animate-[fadeIn_0.3s_ease-out]">
 
+      {/* Top-left: branding (small) */}
+      <div className="absolute top-5 left-5 flex items-center gap-2 z-10">
+        <img src="/logo.svg" alt="wayste logo" className="w-8 h-8" />
+        <span className="text-lg font-bold text-teal-400 tracking-tight">
+          wayste
+        </span>
+      </div>
+
       {/* Top-right controls: voice toggle + language toggle */}
-      <div className="absolute top-6 right-6 flex items-center gap-3 z-10">
+      <div className="absolute top-5 right-5 flex items-center gap-3 z-10">
         <button
           onClick={onToggleVoice}
           className={`px-3 py-1.5 text-xs font-medium transition-colors rounded-lg ${
@@ -103,124 +152,59 @@ export default function IdleScreen({
         </div>
       </div>
 
-      {/* Branding */}
-      <div className="relative z-10 mb-4 flex items-center justify-center gap-3">
-        <img src="/logo.svg" alt="wayste logo" className="w-14 h-14" />
-        <h1 className="text-3xl font-bold text-teal-400 tracking-tight">
-          wayste
-        </h1>
-      </div>
-
-      {/* Stats card */}
-      <div className="relative z-10 bg-neutral-800/50 rounded-2xl px-8 py-5 mb-5 min-w-[280px] text-center">
-        {hasData ? (
-          <>
-            <div className="text-xs font-semibold uppercase tracking-widest text-neutral-500 mb-3">
-              {T("todaysStats")}
+      {/* Accuracy badge — only shown when enough data and high accuracy */}
+      {showAccuracy && (
+        <div className="relative z-10 bg-neutral-800/50 rounded-xl px-5 py-2 mb-3 text-center">
+          <div className="flex items-center gap-2">
+            <div
+              className={`text-2xl font-black ${
+                successPct >= 80
+                  ? "text-emerald-400"
+                  : successPct >= 60
+                    ? "text-amber-400"
+                    : "text-red-400"
+              }`}
+            >
+              {successPct}%
             </div>
-            <div className="flex items-center justify-center gap-6">
-              <div>
-                <div className="text-3xl font-black text-white">
-                  {stats.totalClassifications}
-                </div>
-                <div className="text-xs text-neutral-400 mt-1">
-                  {T("itemsSorted")}
-                </div>
-              </div>
-              <div className="w-px h-10 bg-neutral-700" />
-              <div>
-                <div
-                  className={`text-3xl font-black ${
-                    successPct >= 80
-                      ? "text-emerald-400"
-                      : successPct >= 60
-                        ? "text-amber-400"
-                        : "text-red-400"
-                  }`}
-                >
-                  {successPct}%
-                </div>
-                <div className="text-xs text-neutral-400 mt-1">
-                  {T("successRateLabel")}
-                </div>
-              </div>
+            <div className="text-xs text-neutral-400">
+              {T("accuracyLabel")}
             </div>
-          </>
-        ) : (
-          <div className="text-neutral-300 text-lg font-medium py-2">
-            {T("firstUserWelcome")}
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
-      {/* Camera viewfinder with ROI guide.
-          The massive box-shadow darkens everything outside the viewfinder
-          so the live camera feed (behind this overlay) only shows through here. */}
-      <div
-        className="relative w-full max-w-lg max-h-[55vh] aspect-square flex-shrink-0 rounded-2xl overflow-hidden mb-5"
-        style={{ boxShadow: "0 0 0 9999px rgba(10, 10, 10, 0.50)" }}
-      >
-
-        {/* Middle zone vignette — region between viewfinder edge and YOLO target.
-            Slightly dimmed so the YOLO target zone stands out as the brightest area. */}
-        <div className="absolute inset-0 pointer-events-none">
-          {/* Top strip */}
-          <div
-            className="absolute top-0 left-0 right-0 bg-neutral-950/15"
-            style={{ height: yoloInsetPct }}
-          />
-          {/* Bottom strip */}
-          <div
-            className="absolute bottom-0 left-0 right-0 bg-neutral-950/15"
-            style={{ height: yoloInsetPct }}
-          />
-          {/* Left strip (between top and bottom) */}
-          <div
-            className="absolute bg-neutral-950/15"
-            style={{
-              top: yoloInsetPct,
-              bottom: yoloInsetPct,
-              left: 0,
-              width: yoloInsetPct,
-            }}
-          />
-          {/* Right strip (between top and bottom) */}
-          <div
-            className="absolute bg-neutral-950/15"
-            style={{
-              top: yoloInsetPct,
-              bottom: yoloInsetPct,
-              right: 0,
-              width: yoloInsetPct,
-            }}
+      {/* Forest gamification */}
+      {forest.sortCount > 0 && (
+        <div className="relative z-10 mb-4">
+          <ForestVisualization
+            trees={forest.trees}
+            sortCount={forest.sortCount}
+            isComplete={isForestComplete(forest)}
+            locale={locale}
+            justAdvancedIndex={justAdvancedTreeIndex}
+            onGrowAnimationEnd={onTreeAnimationDone}
           />
         </div>
+      )}
 
-        {/* YOLO target boundary — thin continuous border + glow pulse */}
+      {/* Camera viewfinder — 85% of YOLO's 640×640 on screen.
+          Users aim here → items reliably land within the full YOLO field of view. */}
+      {viewfinderPx > 0 && (
         <div
-          className="absolute pointer-events-none rounded-xl border border-white/20"
+          className="relative flex-shrink-0 rounded-2xl overflow-hidden mb-3"
           style={{
-            inset: yoloInsetPct,
-            animation: "roiGlow 3s ease-in-out infinite",
+            width: viewfinderPx,
+            height: viewfinderPx,
+            boxShadow: "0 0 0 9999px rgba(10, 10, 10, 0.50)",
           }}
         />
+      )}
 
-        {/* YOLO target corner brackets — guide users to hold items here */}
-        <div
-          className="absolute pointer-events-none"
-          style={{ inset: yoloInsetPct }}
-        >
-          <div className="absolute top-0 left-0 w-10 h-10 border-t-[3px] border-l-[3px] rounded-tl-xl border-white/70" />
-          <div className="absolute top-0 right-0 w-10 h-10 border-t-[3px] border-r-[3px] rounded-tr-xl border-white/70" />
-          <div className="absolute bottom-0 left-0 w-10 h-10 border-b-[3px] border-l-[3px] rounded-bl-xl border-white/70" />
-          <div className="absolute bottom-0 right-0 w-10 h-10 border-b-[3px] border-r-[3px] rounded-br-xl border-white/70" />
-        </div>
-
-      </div>
 
       {/* CTA text */}
       <p
-        className="relative z-10 text-4xl text-white font-semibold text-center mb-4"
+        className="relative z-10 text-4xl text-white font-semibold text-center mb-2"
         style={{ animation: "ctaPulse 2.5s ease-in-out infinite" }}
       >
         {T("holdItemUp")}

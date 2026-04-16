@@ -98,7 +98,7 @@ export function resolveYoloDetection(
       itemName: (ja && rule.itemName_ja) ? rule.itemName_ja : rule.itemName,
       wasteStream: rule.wasteStream,
       confidence: detection.confidence,
-      reasoning: rule.reasoning,
+      reasoning: (ja && rule.reasoning_ja) ? rule.reasoning_ja : rule.reasoning,
       preAction: (ja && rule.preAction_ja) ? rule.preAction_ja : rule.preAction,
     },
     siteConfig,

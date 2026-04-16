@@ -18,7 +18,11 @@ export async function GET(request: Request) {
   // Verify cron secret (Vercel sets this automatically for cron jobs)
   const authHeader = request.headers.get("authorization");
   const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+  if (!cronSecret) {
+    console.error("[cron/cleanup] CRON_SECRET is not set — refusing to run.");
+    return NextResponse.json({ error: "Server misconfiguration" }, { status: 500 });
+  }
+  if (authHeader !== `Bearer ${cronSecret}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -34,7 +38,7 @@ export async function GET(request: Request) {
         .map((item) => (typeof item === "string" ? item : JSON.stringify(item)))
         .join("\n");
       await put(`archives/${date}/pilot-log.jsonl`, jsonl, {
-        access: "public",
+        access: "private",
         contentType: "application/jsonl",
         addRandomSuffix: false,
       });

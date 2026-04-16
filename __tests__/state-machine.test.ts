@@ -325,7 +325,11 @@ describe("State machine", () => {
 
   it("UI screen derivation: cooldown maps to idle screen", () => {
     // This tests the uiScreen derivation logic from KioskDisplay
-    function deriveUiScreen(state: PipelineState): "idle" | "camera" | "result" {
+    function deriveUiScreen(
+      state: PipelineState,
+      showSeedling = false,
+    ): "idle" | "camera" | "result" | "seedling" {
+      if (showSeedling) return "seedling";
       return state === "result"
         ? "result"
         : state === "classifying"
@@ -337,5 +341,9 @@ describe("State machine", () => {
     expect(deriveUiScreen("cooldown")).toBe("idle");
     expect(deriveUiScreen("classifying")).toBe("camera");
     expect(deriveUiScreen("result")).toBe("result");
+
+    // Seedling overrides any pipeline state
+    expect(deriveUiScreen("cooldown", true)).toBe("seedling");
+    expect(deriveUiScreen("idle", true)).toBe("seedling");
   });
 });

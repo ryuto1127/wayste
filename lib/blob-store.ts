@@ -3,10 +3,13 @@
  * Returns the blob URL, or undefined if the upload fails or is disabled.
  * Always best-effort — never throws.
  *
- * PRIVACY: @vercel/blob v2 does not support server-side download of private
- * blobs, so images use public access. Security is enforced at the app layer:
+ * PRIVACY: Images are uploaded with `access: "private"` — the Blob URL alone
+ * is not enough to view them. Server-side access requires the BLOB_READ_WRITE_TOKEN.
+ * The /api/pilot-image endpoint proxies images through an authenticated route,
+ * fetching them with the token and streaming to the admin client.
+ *   - access: "private" — URL alone returns 403
  *   - URLs include a random suffix (non-guessable / non-enumerable)
- *   - URLs are only exposed through admin-authenticated routes (/review)
+ *   - Only accessible via admin-authenticated proxy (/api/pilot-image)
  *   - Images are auto-deleted after BLOB_RETENTION_DAYS (default: 90)
  *   - Set BLOB_ENABLED=false to disable image uploads entirely
  */
@@ -31,7 +34,7 @@ export async function uploadFrameToBlob(
     const filename = `pilot-images/${timestamp.replace(/[:.]/g, "-")}-${safe(itemName)}-${safe(wasteStream)}.jpg`;
 
     const blob = await put(filename, buffer, {
-      access: "public",
+      access: "private",
       contentType: "image/jpeg",
       addRandomSuffix: true,
     });

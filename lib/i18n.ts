@@ -94,8 +94,8 @@ const translations = {
 
     // Result screen
     putThisInBin: "Put this in the",
-    nothingDetectedTitle: "Nothing Detected",
-    nothingDetectedDesc: "The system could not identify an item. Please remove the object and try again.",
+    nothingDetectedTitle: "Couldn't Identify Item",
+    nothingDetectedDesc: "Please try again or ask staff.",
 
     // Full review page
     fullReview: "Full Review",
@@ -137,6 +137,14 @@ const translations = {
     separateInto: "Separate into:",
     separationStep: "Step {n}",
     ifPresent: "if attached",
+
+    // Accuracy (idle)
+    accuracyLabel: "Accuracy",
+
+    // Forest gamification
+    forestSortCount: "{count} items sorted today",
+    forestComplete: "Forest complete! Great work today!",
+    thankYou: "Thank you!",
 
     // Loading screen
     loading_model_1: "Loading vision model...",
@@ -240,8 +248,8 @@ const translations = {
 
     // Result screen
     putThisInBin: "こちらへ捨ててください：",
-    nothingDetectedTitle: "検出できませんでした",
-    nothingDetectedDesc: "アイテムを識別できませんでした。アイテムを取り除いてもう一度お試しください。",
+    nothingDetectedTitle: "読み取れませんでした",
+    nothingDetectedDesc: "もう一度お試しいただくか、\nスタッフにお尋ねください。",
 
     // Full review page
     fullReview: "全件レビュー",
@@ -283,6 +291,14 @@ const translations = {
     separateInto: "分解してください：",
     separationStep: "手順 {n}",
     ifPresent: "ついている場合",
+
+    // Accuracy (idle)
+    accuracyLabel: "正確度",
+
+    // Forest gamification
+    forestSortCount: "今日 {count} 件分別済み",
+    forestComplete: "森が完成しました！素晴らしい！",
+    thankYou: "ありがとう！",
 
     // Loading screen
     loading_model_1: "視覚モデルを読み込み中...",

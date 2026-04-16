@@ -137,12 +137,12 @@ export default function ResultScreen({
           </button>
         </div>
 
-        <div className="flex-1 flex flex-col items-center justify-center p-6 gap-6 max-w-md mx-auto w-full text-center">
-          <div className="text-6xl" aria-hidden="true">&#x2753;</div>
-          <div className="text-3xl font-bold text-white">
+        <div className="flex-1 flex flex-col items-center justify-center p-6 gap-6 max-w-lg mx-auto w-full text-center">
+          <div className="text-8xl" aria-hidden="true">&#x1F64F;</div>
+          <div className="text-5xl font-bold text-white">
             {T("nothingDetectedTitle")}
           </div>
-          <p className="text-neutral-400 text-base leading-relaxed">
+          <p className="text-neutral-400 text-xl leading-relaxed whitespace-pre-line">
             {T("nothingDetectedDesc")}
           </p>
         </div>
@@ -221,6 +221,30 @@ export default function ResultScreen({
   );
 }
 
+// ── Reasoning ticker — delayed horizontal scroll ──
+
+function ReasoningTicker({ reasoning, delay = 1200 }: { reasoning: string; delay?: number }) {
+  const [visible, setVisible] = React.useState(false);
+  React.useEffect(() => {
+    if (!reasoning) return;
+    const timer = setTimeout(() => setVisible(true), delay);
+    return () => clearTimeout(timer);
+  }, [delay, reasoning]);
+
+  if (!visible || !reasoning) return null;
+
+  return (
+    <div className="absolute bottom-0 left-0 right-0 bg-black/60 py-3 overflow-hidden animate-[fadeIn_0.3s_ease-out]">
+      <div
+        className="whitespace-nowrap text-white/80 text-lg font-medium px-4"
+        style={{ animation: "tickerScroll 15s linear infinite" }}
+      >
+        {reasoning}
+      </div>
+    </div>
+  );
+}
+
 // ── Fullscreen single-item result ──
 
 function FullscreenResult({
@@ -238,31 +262,15 @@ function FullscreenResult({
   );
 
   const trust = getTrustLevel(result.confidence, result.needsReview);
-  const trustLabel =
-    trust === "high"
-      ? T("confidenceHigh")
-      : trust === "medium"
-        ? T("confidenceMedium")
-        : T("confidenceLow");
-  const trustColor =
-    trust === "high"
-      ? "bg-emerald-600"
-      : trust === "medium"
-        ? "bg-amber-600"
-        : "bg-red-600";
 
   // Resolve the direction arrow from stream position
   const streamDef = streams.find((s) => s.id === result.wasteStream);
   const position = streamDef?.position;
   const directionArrow = position ? T(positionArrowKey[position]) : null;
 
-  // Collect notes to display
-  const noteText = result.specialInstructions || result.preAction;
-  const secondaryNote = null;
-
   return (
     <div
-      className="flex-1 flex flex-col transition-colors duration-300"
+      className="flex-1 flex flex-col relative transition-colors duration-300"
       style={{ backgroundColor: result.binColor }}
     >
       {/* Screen reader summary */}
@@ -271,29 +279,52 @@ function FullscreenResult({
         {result.preAction && ` ${result.preAction}.`}
       </span>
 
-      {/* Top area — item name + confidence on colored background */}
+      {/* Top area — item name + low-confidence warning */}
       <div className="px-6 pt-14 pb-3 flex items-center gap-3">
-        <div className="text-2xl font-bold text-white leading-tight flex-1 truncate">
+        <div className="text-4xl font-bold text-white leading-tight flex-1 truncate">
           {result.itemName}
         </div>
-        <span
-          className={`${trustColor} text-white text-[10px] font-bold uppercase px-2 py-0.5 rounded-md shrink-0`}
-        >
-          {trustLabel}
-        </span>
+        {trust === "low" && (
+          <span
+            className="text-yellow-400 text-4xl shrink-0"
+            aria-label={T("confidenceLow")}
+          >
+            &#x26A0;
+          </span>
+        )}
       </div>
 
-      {/* Center hero — giant arrow + stream name */}
+      {/* Center hero — preAction + boxed arrow + stream name */}
       <div className="flex-1 flex flex-col items-center justify-center px-6">
-        {directionArrow && (
-          <div className="text-[12rem] leading-none font-bold text-white mb-4" aria-hidden="true">
-            {directionArrow}
+        {/* PreAction / Special Instructions — prominent, above arrow.
+            Show specialInstructions only if it differs from preAction (site overrides
+            can produce near-identical text in both fields). */}
+        {(result.preAction || result.specialInstructions) && (
+          <div className="bg-white rounded-2xl px-6 py-4 shadow-lg mb-6 max-w-lg">
+            <p
+              className="text-3xl font-black text-center leading-snug"
+              style={{ color: result.binColor }}
+            >
+              {result.specialInstructions || result.preAction}
+            </p>
           </div>
         )}
-        <div className="text-4xl font-black text-white uppercase text-center">
+
+        {/* Arrow — boxed in rounded rectangle */}
+        {directionArrow && (
+          <div className="bg-white/15 rounded-3xl px-12 py-6 mb-4">
+            <div className="text-[14rem] leading-none font-bold text-white text-center" aria-hidden="true">
+              {directionArrow}
+            </div>
+          </div>
+        )}
+
+        {/* Stream name */}
+        <div className="text-6xl font-black text-white uppercase text-center">
           {streamLabel(locale, result.wasteStream)}
         </div>
-        {/* Physical bin position dots (no direction label) */}
+
+        {/* Physical bin position dots */}
         <BinPositionIndicator
           wasteStream={result.wasteStream}
           streams={streams}
@@ -302,31 +333,17 @@ function FullscreenResult({
         />
       </div>
 
-      {/* Notes banner */}
-      {(noteText || secondaryNote || (result.isCompound && result.components?.length)) && (
-        <div className="px-6 pb-6 space-y-2">
-          {noteText && (
-            <div className="bg-white rounded-2xl px-5 py-4 shadow-lg">
-              <p
-                className="text-2xl font-black text-center"
-                style={{ color: result.binColor }}
-              >
-                {noteText}
-              </p>
-            </div>
-          )}
-          {secondaryNote && (
-            <div className="bg-white/10 rounded-xl px-5 py-3">
-              <p className="text-base text-white/80 text-center">{secondaryNote}</p>
-            </div>
-          )}
-          {result.isCompound && result.components && result.components.length > 0 && (
-            <div className="bg-black/40 border border-white/20 rounded-xl px-5 py-3">
-              <CompoundBreakdown components={result.components} locale={locale} />
-            </div>
-          )}
+      {/* Compound breakdown (bottom area — preAction already moved above) */}
+      {result.isCompound && result.components && result.components.length > 0 && (
+        <div className="px-6 pb-6">
+          <div className="bg-black/40 border border-white/20 rounded-xl px-5 py-3">
+            <CompoundBreakdown components={result.components} locale={locale} />
+          </div>
         </div>
       )}
+
+      {/* Reasoning ticker — appears after 2.5s delay */}
+      <ReasoningTicker reasoning={result.reasoning} />
     </div>
   );
 }
@@ -360,23 +377,12 @@ function SplitScreenCard({
   );
 
   const trust = getTrustLevel(result.confidence, result.needsReview);
-  const trustLabel =
-    trust === "high"
-      ? T("confidenceHigh")
-      : trust === "medium"
-        ? T("confidenceMedium")
-        : T("confidenceLow");
-  const trustColor =
-    trust === "high"
-      ? "bg-emerald-600"
-      : trust === "medium"
-        ? "bg-amber-600"
-        : "bg-red-600";
 
-  // Dynamic font sizes based on scale
-  const itemNameSize = fontScale >= 1 ? "text-lg" : fontScale >= 0.85 ? "text-base" : "text-sm";
-  const binNameSize = fontScale >= 1 ? "text-3xl" : fontScale >= 0.85 ? "text-2xl" : "text-xl";
-  const arrowSize = fontScale >= 1 ? "text-6xl" : fontScale >= 0.85 ? "text-5xl" : "text-4xl";
+  // Dynamic font sizes based on scale (monitor-sized)
+  const itemNameSize = fontScale >= 1 ? "text-2xl" : fontScale >= 0.85 ? "text-xl" : "text-lg";
+  const binNameSize = fontScale >= 1 ? "text-5xl" : fontScale >= 0.85 ? "text-4xl" : "text-3xl";
+  const arrowSize = fontScale >= 1 ? "text-8xl" : fontScale >= 0.85 ? "text-7xl" : "text-6xl";
+  const preActionSize = fontScale >= 1 ? "text-lg" : fontScale >= 0.85 ? "text-base" : "text-sm";
 
   // Resolve direction arrow from stream position
   const streamDef = streams.find((s) => s.id === result.wasteStream);
@@ -396,18 +402,21 @@ function SplitScreenCard({
         {result.preAction && ` ${result.preAction}.`}
       </span>
 
-      {/* Confidence badge — top-right corner */}
-      <div className="absolute top-2 right-3 z-10">
-        <span
-          className={`${trustColor} text-white text-[10px] font-bold uppercase px-2 py-0.5 rounded-md`}
-        >
-          {trustLabel}
-        </span>
-      </div>
+      {/* Low confidence warning — top-right corner */}
+      {trust === "low" && (
+        <div className="absolute top-2 right-3 z-10">
+          <span
+            className="text-yellow-400 text-2xl"
+            aria-label={T("confidenceLow")}
+          >
+            &#x26A0;
+          </span>
+        </div>
+      )}
 
       {/* Entire card on colored background */}
       <div
-        className="flex-1 flex flex-col overflow-hidden transition-colors duration-300"
+        className="flex-1 flex flex-col relative overflow-hidden transition-colors duration-300"
         style={{ backgroundColor: result.binColor }}
       >
         {/* Item name (top) */}
@@ -417,13 +426,29 @@ function SplitScreenCard({
           </div>
         </div>
 
-        {/* Hero — direction arrow + stream name */}
+        {/* Hero — preAction + direction arrow + stream name */}
         <div className="flex-1 flex flex-col items-center justify-center px-4">
-          {directionArrow && (
-            <div className={`${arrowSize} leading-none font-bold text-white mb-2`} aria-hidden="true">
-              {directionArrow}
+          {/* PreAction / Special Instructions — above arrow */}
+          {(result.preAction || result.specialInstructions) && (
+            <div className="bg-white rounded-xl px-3 py-2.5 shadow mb-3 max-w-full">
+              <p
+                className={`${preActionSize} font-black text-center leading-snug`}
+                style={{ color: result.binColor }}
+              >
+                {result.specialInstructions || result.preAction}
+              </p>
             </div>
           )}
+
+          {/* Arrow — boxed */}
+          {directionArrow && (
+            <div className="bg-white/15 rounded-2xl px-6 py-3 mb-2">
+              <div className={`${arrowSize} leading-none font-bold text-white`} aria-hidden="true">
+                {directionArrow}
+              </div>
+            </div>
+          )}
+
           <div className={`${binNameSize} font-black text-white uppercase text-center`}>
             {streamLabel(locale, result.wasteStream)}
           </div>
@@ -437,31 +462,17 @@ function SplitScreenCard({
           />
         </div>
 
-        {/* Notes banner */}
-        {(result.preAction || result.specialInstructions || (result.isCompound && result.components?.length)) && (
-          <div className="px-3 pb-3 space-y-1.5 shrink-0">
-            {(result.preAction || result.specialInstructions) && (
-              <div className="bg-white rounded-xl px-3 py-2.5 shadow">
-                <p
-                  className="text-sm font-black text-center"
-                  style={{ color: result.binColor }}
-                >
-                  {result.preAction || result.specialInstructions}
-                </p>
-              </div>
-            )}
-            {result.preAction && result.specialInstructions && (
-              <div className="bg-white/10 rounded-lg px-3 py-2">
-                <p className="text-xs text-white/80 text-center">{result.specialInstructions}</p>
-              </div>
-            )}
-            {result.isCompound && result.components && result.components.length > 0 && (
-              <div className="bg-black/40 border border-white/20 rounded-lg px-3 py-2">
-                <SplitScreenCompoundBreakdown components={result.components} locale={locale} />
-              </div>
-            )}
+        {/* Compound breakdown */}
+        {result.isCompound && result.components && result.components.length > 0 && (
+          <div className="px-3 pb-3 shrink-0">
+            <div className="bg-black/40 border border-white/20 rounded-lg px-3 py-2">
+              <SplitScreenCompoundBreakdown components={result.components} locale={locale} />
+            </div>
           </div>
         )}
+
+        {/* Reasoning ticker — staggered delay for multi-item */}
+        <ReasoningTicker reasoning={result.reasoning} delay={2500 + animationDelay} />
       </div>
     </div>
   );
@@ -541,7 +552,7 @@ const positionArrowKey: Record<BinPosition, TranslationKey> = {
 
 /**
  * Visual indicator showing which physical bin to use.
- * Renders a row of 5 dots (one per bin position) with the active bin
+ * Renders a row of dots (one per bin position) with the active bin
  * highlighted in its stream color, plus a directional label below.
  */
 function BinPositionIndicator({

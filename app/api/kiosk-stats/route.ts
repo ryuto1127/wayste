@@ -5,6 +5,7 @@ const SAFE_DEFAULT = {
   totalClassifications: 0,
   wrongFeedbackCount: 0,
   successRate: 1.0,
+  reviewedCount: 0,
 };
 
 export async function GET() {

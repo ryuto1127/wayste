@@ -416,7 +416,11 @@ function EntryCard({
       <div>
         <p className="font-semibold text-white truncate">
           {(() => {
-            // 1) T1: use YOLO tier1 names sorted left→right by x
+            // 1) allItems: canonical source for multi-item display
+            if (entry.allItems && entry.allItems.length > 1) {
+              return entry.allItems.map(r => r.itemName).join(", ");
+            }
+            // 2) T1: use YOLO tier1 names sorted left→right by x (legacy)
             const t1 = entry.tierResults?.tier1?.filter(r => !NOT_WASTE.has(r.itemName));
             if (t1 && t1.length > 1) {
               const sorted = [...t1].sort((a, b) =>
@@ -424,11 +428,11 @@ function EntryCard({
               );
               return sorted.map(r => r.itemName).join(", ");
             }
-            // 2) T2 siblings: API-classified items from the same frame
+            // 3) T2 siblings: API-classified items from the same frame
             if (siblingNames && siblingNames.length > 1) {
               return siblingNames.join(", ");
             }
-            // 3) Single item
+            // 4) Single item
             return entry.itemName;
           })()}
         </p>
@@ -452,6 +456,15 @@ function EntryCard({
           </span>
         )}
       </div>
+
+      {/* Blob vs YOLO detection count — diagnostic for multi-item issues */}
+      {entry.blobCount != null && entry.yoloDetectionCount != null && (
+        <div className="flex items-center gap-1.5 text-[11px]">
+          <span className={`bg-neutral-800/80 px-1.5 py-0.5 rounded ${entry.blobCount > entry.yoloDetectionCount ? "text-amber-400" : "text-neutral-400"}`}>
+            blobs: {entry.blobCount} → yolo: {entry.yoloDetectionCount}
+          </span>
+        </div>
+      )}
 
       {/* Tier 1 results (YOLO detections) */}
       {(() => {

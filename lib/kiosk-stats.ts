@@ -14,6 +14,7 @@ export interface KioskDayStats {
   totalClassifications: number;
   wrongFeedbackCount: number;
   successRate: number;
+  reviewedCount: number;
 }
 
 function isToday(isoTimestamp: string): boolean {
@@ -51,5 +52,5 @@ export async function getTodayKioskStats(
       ? correctCount / totalClassifications
       : 1.0;
 
-  return { totalClassifications, wrongFeedbackCount: wrongCount, successRate };
+  return { totalClassifications, wrongFeedbackCount: wrongCount, successRate, reviewedCount: totalClassifications };
 }

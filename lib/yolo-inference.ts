@@ -140,10 +140,10 @@ export async function runYoloInference(
   if (!session || !ort) return [];
 
   try {
-    // ── Preprocess: crop center 640×640 at 1:1 pixels (no scaling) ──
-    // Crop a MODEL_INPUT_SIZE square from the center of the frame without any
-    // resize, so YOLO sees native-resolution pixels. Falls back to short-side
-    // resize only when the video is smaller than 640 in either dimension.
+    // ── Preprocess: short-side square crop → resize to 640×640 ──
+    // Crop the same center square as the review image (short-side based,
+    // e.g. 720×720 from 1280×720), then resize to MODEL_INPUT_SIZE.
+    // This ensures YOLO sees the full field of view shown in the review page.
     const vw = video.videoWidth;
     const vh = video.videoHeight;
 
@@ -151,18 +151,10 @@ export async function runYoloInference(
     const ctx = canvas.getContext("2d");
     if (!ctx) return [];
 
-    if (vw >= MODEL_INPUT_SIZE && vh >= MODEL_INPUT_SIZE) {
-      // 1:1 pixel crop — no scaling
-      const cropX = Math.round((vw - MODEL_INPUT_SIZE) / 2);
-      const cropY = Math.round((vh - MODEL_INPUT_SIZE) / 2);
-      ctx.drawImage(video, cropX, cropY, MODEL_INPUT_SIZE, MODEL_INPUT_SIZE, 0, 0, MODEL_INPUT_SIZE, MODEL_INPUT_SIZE);
-    } else {
-      // Fallback for small video: crop center square and resize
-      const side = Math.min(vw, vh);
-      const roiX = Math.round((vw - side) / 2);
-      const roiY = Math.round((vh - side) / 2);
-      ctx.drawImage(video, roiX, roiY, side, side, 0, 0, MODEL_INPUT_SIZE, MODEL_INPUT_SIZE);
-    }
+    const side = Math.min(vw, vh);
+    const roiX = Math.round((vw - side) / 2);
+    const roiY = Math.round((vh - side) / 2);
+    ctx.drawImage(video, roiX, roiY, side, side, 0, 0, MODEL_INPUT_SIZE, MODEL_INPUT_SIZE);
 
     const imageData = ctx.getImageData(0, 0, MODEL_INPUT_SIZE, MODEL_INPUT_SIZE);
     const { data } = imageData;
@@ -226,9 +218,15 @@ export async function runYoloInference(
         continue;
       }
 
+      const className = WASTE_CLASSES[classId];
+      // "cardboard" is temporarily disabled: skin tone (H 10-35, low saturation)
+      // overlaps with cardboard's color profile and causes frequent misdetection
+      // when hands are in frame. Re-enable once training data includes hand-held samples.
+      if (className === "cardboard") continue;
+
       detections.push({
         classId,
-        className: WASTE_CLASSES[classId],
+        className,
         confidence,
         bbox: [x1, y1, bw, bh],
       });

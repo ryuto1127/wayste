@@ -110,6 +110,12 @@ export interface PilotLogEntry {
   tierResults?: {
     tier1?: { itemName: string; confidence: number; x?: number }[];
   };
+  /** All classified items in this frame (multi-item detection). */
+  allItems?: { itemName: string; wasteStream: string; confidence: number; modelUsed?: string }[];
+  /** Number of qualified blobs detected by frame-analyzer CV. */
+  blobCount?: number;
+  /** Number of YOLO waste-class detections (after filtering non-waste). */
+  yoloDetectionCount?: number;
 }
 
 /**
@@ -193,6 +199,7 @@ export interface YoloClassRule {
   itemName_ja?: string;
   wasteStream: WasteStream;
   reasoning: string;
+  reasoning_ja?: string;
   preAction?: string;
   preAction_ja?: string;
   /**

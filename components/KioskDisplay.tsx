@@ -36,15 +36,17 @@ import {
   type Bbox,
 } from "@/lib/bbox-utils";
 // kioskAuthHeaders replaced by session token (server-generated, HMAC-signed)
+import { recordSort } from "@/lib/forest-state";
 import CameraFeed, { type CameraFeedHandle } from "./CameraFeed";
 import IdleScreen from "./IdleScreen";
 import CameraScreen from "./CameraScreen";
 import ResultScreen from "./ResultScreen";
+import SeedlingAnimation from "./SeedlingAnimation";
 import SystemStatusBadge from "./SystemStatusBadge";
 
 // ── Timing constants ──
 const ANALYSIS_INTERVAL_MS = 30;  // ~33 fps local CV
-const COOLDOWN_MS = 1500; // pause before re-scanning (BG model recovery)
+const COOLDOWN_MS = 3500; // pause before re-scanning (BG model recovery + seedling animation)
 const RESULT_GONE_FRAMES = 5;     // result state exit window (~150ms at 33fps) — balanced against flicker risk
 /** FG frames required to start the YOLO continuous loop. Kept low — YOLO
  *  handles its own quality; FG is just the "someone is approaching" trigger. */
@@ -62,7 +64,7 @@ const API_TIMEOUT_MS = 15_000;
 /** Retry delay after a 429 rate-limit response. */
 const RATE_LIMIT_RETRY_MS = 1_200;
 /** Max time in "classifying" state before forcing a timeout recovery. */
-const CLASSIFYING_TIMEOUT_MS = 20_000;
+const CLASSIFYING_TIMEOUT_MS = 10_000;
 /** Time without meaningful frame changes before escalating to API (ms). */
 const FRAME_STALE_ESCALATION_MS = 700;
 /** Mean pixel diff threshold for "frame has changed significantly" (0–255 scale). */
@@ -76,6 +78,9 @@ const YOLO_GONE_CYCLES = 10;
 const NEW_ITEM_PERSIST_CYCLES = 3;
 /** Frame-change cycles an unresolved new item persists before API escalation from result state. */
 const UNRESOLVED_ESCALATION_CYCLES = 5;
+/** Delay (ms) after entering result state before firing a proactive API sweep
+ *  to catch items outside YOLO's vocabulary. Only fires for T1-only results. */
+const RESULT_API_SWEEP_DELAY_MS = 1_500;
 
 // ── Background adaptation rates (passed to FrameAnalyzer per pipeline state) ──
 // idle / cooldown: full rate — continuously absorb drift and persistent leftovers
@@ -90,8 +95,8 @@ const BG_RATE_FROZEN = 0;
 // frame-analyzer crops center 720×720 from 1280×720 for FG detection.
 // DETECTION_ROI_MARGIN: outer FG detection area (nearly full 720×720).
 // YOLO_TARGET_INSET: inner YOLO analysis zone (640×640 = 89% of 720).
-const DETECTION_ROI_MARGIN = 0.02;
-const YOLO_TARGET_INSET = (1 - 640 / 720) / 2; // ~0.0556
+const DETECTION_ROI_MARGIN = 0.10;
+const YOLO_TARGET_INSET = 0.10;
 
 const ROI_BLOB_DIAGONAL_MIN_AREA = 0.01;
 
@@ -217,6 +222,8 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
   const apiAbortRef = useRef<AbortController | null>(null);
   /** Tracks unresolved new bboxes in result state for API escalation. */
   const unresolvedNewItemsRef = useRef<Map<string, { bbox: Bbox; count: number }>>(new Map());
+  /** Timer for proactive API sweep in result state (catches items outside YOLO's vocabulary). */
+  const resultSweepTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** Latest waste detections from YOLO — used for bbox assignment to API results. */
   const latestWasteDetectionsRef = useRef<YoloDetection[]>([]);
   /** Mirror of stableResults for stale-closure-safe reads in the YOLO loop. */
@@ -227,6 +234,13 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
   /** Last calibration object reference — detect rolling recalibration updates. */
   const lastCalibrationRef = useRef<Calibration | null>(null);
   const errorRef = useRef<string | null>(null);
+
+  // ── Seedling gamification state ──
+  const [showSeedling, setShowSeedling] = useState(false);
+  /** Index of tree that just grew — passed to ForestVisualization for growth animation on idle screen. */
+  const [justAdvancedTreeIndex, setJustAdvancedTreeIndex] = useState<number | null>(null);
+  /** Whether the last classification was a successful sort (not nothing_detected). */
+  const lastResultSuccessRef = useRef(false);
   /** Mirror of `locale` state as a ref for stale-closure-safe reads inside the CV interval. */
   const localeRef = useRef<Locale>(defaultLocale ?? "en");
 
@@ -360,14 +374,14 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
 
   // ── API call (with timeout + 429 retry) ──
   const classify = useCallback(
-    async (frame: string, meta: ClassifyMeta, yoloDetections?: YoloDetectionLog[], multi?: boolean, tierResults?: { tier1?: { itemName: string; confidence: number; x?: number }[] }): Promise<ClassificationResponse & { requestId?: string }> => {
+    async (frame: string, meta: ClassifyMeta, yoloDetections?: YoloDetectionLog[], multi?: boolean, tierResults?: { tier1?: { itemName: string; confidence: number; x?: number }[] }, faceDetected?: boolean): Promise<ClassificationResponse & { requestId?: string }> => {
       const doFetch = async (): Promise<ClassificationResponse & { requestId?: string }> => {
         const fetchStartMs = Date.now();
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
 
         try {
-          const reqBody = { image: frame, meta, locale, yoloDetections, ...(multi && { multi: true }), ...(tierResults && { tierResults }) };
+          const reqBody = { image: frame, meta, locale, yoloDetections, ...(multi && { multi: true }), ...(tierResults && { tierResults }), ...(faceDetected && { faceDetected: true }) };
           const res = await fetch("/api/classify", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -582,12 +596,19 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
 
       if (state === "idle") {
         // FG detection is the "early warning" sensor. When something enters
-        // the wide detection ROI (larger than YOLO's 640×640 zone), start the
-        // YOLO continuous loop so it's already running by the time the hand
-        // reaches the center. No quality or stability gate — YOLO handles that.
+        // the detection ROI, start the YOLO continuous loop so it's already
+        // running by the time the hand reaches the center.
+        // After repeated false triggers (nothing detected), require more
+        // consecutive FG frames before re-entering classifying — this gives
+        // the BG model time to absorb persistent non-waste objects (furniture,
+        // walls, etc.) at idle rate.
         if (roiHasFg) {
           fgPersistRef.current++;
-          if (fgPersistRef.current >= FG_TRIGGER_FRAMES) {
+          const effectiveTrigger = Math.min(
+            FG_TRIGGER_FRAMES + nothingDetectedCountRef.current * 10,
+            60, // cap at ~1.8s — enough for BG model to absorb most drift
+          );
+          if (fgPersistRef.current >= effectiveTrigger) {
             fgPersistRef.current = 0;
             goneCountRef.current = 0;
             detectionGoneMapRef.current.clear();
@@ -599,9 +620,10 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           }
         } else {
           fgPersistRef.current = 0;
-          if (nothingDetectedCountRef.current > 0) {
-            nothingDetectedCountRef.current = 0;
-          }
+          // nothingDetectedCountRef is NOT reset here — only on successful
+          // classification. This ensures repeated false triggers from persistent
+          // objects (sofa, furniture) face increasing delay, giving the BG model
+          // time to absorb them.
         }
         return;
       }
@@ -617,6 +639,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
             stopYoloLoop();
             goneCountRef.current = 0;
             nothingDetectedCountRef.current++;
+            pendingItemRef.current = false;
             analyzer.boostBackgroundAdaptation();
             cooldownStartRef.current = Date.now();
             transition("cooldown");
@@ -628,6 +651,8 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
         if (Date.now() - classifyStartRef.current >= CLASSIFYING_TIMEOUT_MS) {
           console.log(`[classifying] timeout → cooldown`);
           stopYoloLoop();
+          nothingDetectedCountRef.current++;
+          pendingItemRef.current = false;
           analyzer.boostBackgroundAdaptation();
           cooldownStartRef.current = Date.now();
           transition("cooldown");
@@ -643,6 +668,13 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           if (goneCountRef.current >= RESULT_GONE_FRAMES) {
             console.log(`[result] FG gone → cooldown`);
             stopYoloLoop();
+            if (resultSweepTimerRef.current) { clearTimeout(resultSweepTimerRef.current); resultSweepTimerRef.current = null; }
+            // Gamification: record successful sort and show seedling animation
+            if (lastResultSuccessRef.current) {
+              const { advancedIndex } = recordSort();
+              setJustAdvancedTreeIndex(advancedIndex);
+              setShowSeedling(true);
+            }
             analyzer.boostBackgroundAdaptation();
             cooldownStartRef.current = Date.now();
             transition("cooldown");
@@ -653,6 +685,13 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           if (Date.now() - resultEnterTimeRef.current >= RESULT_TIMEOUT_MS) {
             console.log(`[result] timeout → cooldown`);
             stopYoloLoop();
+            if (resultSweepTimerRef.current) { clearTimeout(resultSweepTimerRef.current); resultSweepTimerRef.current = null; }
+            // Gamification: record successful sort and show seedling animation
+            if (lastResultSuccessRef.current) {
+              const { advancedIndex } = recordSort();
+              setJustAdvancedTreeIndex(advancedIndex);
+              setShowSeedling(true);
+            }
             setStableResults([]); setResultRequestIds([]);
             analyzer.boostBackgroundAdaptation();
             cooldownStartRef.current = Date.now();
@@ -664,13 +703,13 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
 
       if (state === "cooldown") {
         const effectiveCooldown = nothingDetectedCountRef.current > 1
-          ? Math.min(COOLDOWN_MS * nothingDetectedCountRef.current, 2_500)
+          ? Math.min(COOLDOWN_MS + nothingDetectedCountRef.current * 1_000, 8_000)
           : COOLDOWN_MS;
         const cooldownElapsed = Date.now() - cooldownStartRef.current >= effectiveCooldown;
         const errorHeld = !errorRef.current || (Date.now() - errorSetAtRef.current >= ERROR_HOLD_MS);
 
         // If a new item is pending, start YOLO loop immediately
-        if (pendingItemRef.current && errorHeld) {
+        if (pendingItemRef.current && errorHeld && nothingDetectedCountRef.current === 0) {
           setStableResults([]); setResultRequestIds([]);
           setError(null);
           pendingItemRef.current = false;
@@ -702,6 +741,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
     return () => {
       clearInterval(interval);
       yoloRunningRef.current = false; // stop YOLO loop on unmount
+      if (resultSweepTimerRef.current) { clearTimeout(resultSweepTimerRef.current); resultSweepTimerRef.current = null; }
     };
 
     // ── YOLO frame-change-triggered loop ──
@@ -742,7 +782,18 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
                 && stateRef.current === "classifying"
                 && !inFlightRef.current) {
               const analysis = lastAnalysisRef.current;
-              triggerApiEscalation(video, analysis);
+              if (analysis && imageQualityBand(analysis) === "good") {
+                triggerApiEscalation(video, analysis);
+              } else {
+                // Quality too poor for API — no point staying in classifying
+                console.log(`[yolo-loop] Frame stale ${staleDuration}ms, quality insufficient → cooldown`);
+                nothingDetectedCountRef.current++;
+                pendingItemRef.current = false;
+                analyzer.boostBackgroundAdaptation();
+                cooldownStartRef.current = Date.now();
+                transition("cooldown");
+                yoloRunningRef.current = false;
+              }
             }
             await new Promise(r => setTimeout(r, 30));
             continue;
@@ -783,7 +834,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       video: HTMLVideoElement,
       analysis: FrameAnalysis | null,
     ) {
-      if (!analysis || imageQualityBand(analysis) !== "good" || inFlightRef.current) return;
+      if (!analysis || inFlightRef.current) return;
       console.log(`[yolo-loop] Frame stale for ${FRAME_STALE_ESCALATION_MS}ms → escalating to API`);
       inFlightRef.current = true;
       const controller = new AbortController();
@@ -802,6 +853,8 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
             handleMultiClassificationResults(apiResults, apiResults.map(() => requestId));
           } else {
             nothingDetectedCountRef.current++;
+            pendingItemRef.current = false;
+            analyzer.boostBackgroundAdaptation();
             cooldownStartRef.current = Date.now();
             transition("cooldown");
             stopYoloLoop();
@@ -815,6 +868,8 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           }
           apiAbortRef.current = null;
           nothingDetectedCountRef.current++;
+          pendingItemRef.current = false;
+          analyzer.boostBackgroundAdaptation();
           cooldownStartRef.current = Date.now();
           transition("cooldown");
           stopYoloLoop();
@@ -853,6 +908,93 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
               return merged;
             });
             setResultRequestIds(prev => [...prev, ...newTracked.map(() => requestId)]);
+          }
+          inFlightRef.current = false;
+        })
+        .catch((err) => {
+          if (err instanceof DOMException && err.name === "AbortError") return;
+          apiAbortRef.current = null;
+          inFlightRef.current = false;
+        });
+    }
+
+    /** Proactive API sweep: fires after a delay in result state to catch items
+     *  outside YOLO's 15-class vocabulary. Runs in parallel with the YOLO loop —
+     *  whichever finds a new item first wins, the other is cancelled. */
+    function triggerResultApiSweep() {
+      resultSweepTimerRef.current = null;
+      if (stateRef.current !== "result") return;
+      if (inFlightRef.current) return;
+
+      const video = cameraRef.current?.getVideo();
+      const analysis = lastAnalysisRef.current;
+      if (!video || !analysis) return;
+
+      // Pass confirmed items as hints so GPT focuses on unidentified items
+      const currentResults = stableResultsRef.current;
+      const tier1Hints = currentResults.map(r => ({
+        itemName: r.itemName,
+        confidence: r.confidence ?? 1,
+        x: r._trackBbox ? r._trackBbox[0] + r._trackBbox[2] / 2 : undefined,
+      }));
+
+      inFlightRef.current = true;
+      const controller = new AbortController();
+      apiAbortRef.current = controller;
+
+      console.log(`[result-sweep] firing API sweep — ${currentResults.length} items already confirmed`);
+
+      classifyViaApiAsync(video, analysis, controller.signal, undefined, true, { tier1: tier1Hints })
+        .then(({ result: r, requestId, multiResults }) => {
+          apiAbortRef.current = null;
+          if (stateRef.current !== "result") { inFlightRef.current = false; return; }
+
+          const apiResults = multiResults ?? (r ? [r] : []);
+          // Filter out items that already match existing results
+          const existing = stableResultsRef.current;
+          const newItems = apiResults.filter(apiR =>
+            !existing.some(e => nameMatchScore(e.itemName, apiR.itemName) > 0.5)
+          );
+
+          if (newItems.length > 0) {
+            const newTracked: TrackedResult[] = newItems.map(item => ({
+              ...item,
+              _trackBbox: (item as ClassificationResponse & { _bbox?: Bbox })._bbox ?? [0, 0, 640, 640] as Bbox,
+              _trackId: nextTrackIdRef.current++,
+              _locked: true,
+            }));
+            setStableResults(prev => {
+              const merged = [...prev, ...newTracked].slice(0, 4);
+              sortByPhysicalPosition(merged);
+              return merged;
+            });
+            setResultRequestIds(prev => [...prev, ...newItems.map(() => requestId)]);
+            console.log(`[result-sweep] added ${newItems.length} new items: ${newItems.map(i => i.itemName).join(", ")}`);
+
+            // Log sweep results — allItems includes original + newly found items
+            const sweepAllItems = [
+              ...existing.map(e => ({ itemName: e.itemName, wasteStream: e.wasteStream, confidence: e.confidence ?? 1, modelUsed: "T1" as const })),
+              ...newItems.map(ni => ({ itemName: ni.itemName, wasteStream: ni.wasteStream, confidence: ni.confidence, modelUsed: "t2" as const })),
+            ];
+            fetch("/api/pilot-log", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                entry: {
+                  modelUsed: "t2",
+                  escalated: true,
+                  itemName: newItems.map(i => i.itemName).join(", "),
+                  wasteStream: newItems[0].wasteStream,
+                  confidence: newItems[0].confidence,
+                  requiresVerification: false,
+                  latencyMs: RESULT_API_SWEEP_DELAY_MS,
+                  meta: lastAnalysisRef.current ? { sharpnessScore: lastAnalysisRef.current.sharpnessScore, imageQuality: imageQualityBand(lastAnalysisRef.current) } : undefined,
+                  allItems: sweepAllItems,
+                },
+              }),
+            }).catch(() => {});
+          } else {
+            console.log(`[result-sweep] no new items found`);
           }
           inFlightRef.current = false;
         })
@@ -920,7 +1062,9 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
 
           if (analysis) {
             logYoloOnlyResult(video, resolvedResults[0], detections, yoloMs, analysis, "T1", undefined, undefined,
-              { tier1: wasteDetections.map(d => ({ itemName: d.className, confidence: d.confidence, x: d.bbox[0] + d.bbox[2] / 2 })).sort((a, b) => b.confidence - a.confidence).slice(0, 5) });
+              { tier1: wasteDetections.map(d => ({ itemName: d.className, confidence: d.confidence, x: d.bbox[0] + d.bbox[2] / 2 })).sort((a, b) => b.confidence - a.confidence).slice(0, 5) },
+              resolvedResults,
+              { blobCount: qualifiedBlobCount, yoloDetectionCount: wasteDetections.length });
           }
 
           handleMultiClassificationResults(resolvedResults, resolvedResults.map(() => undefined));
@@ -944,6 +1088,32 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       if (state === "result") {
         const displayedResults = stableResultsRef.current;
         if (displayedResults.length === 0) return;
+
+        // ── nothing_detected + new YOLO hit → restart classification ──
+        // When the screen shows "couldn't identify", the user may present a
+        // different item (or a better angle). If YOLO now sees something
+        // recognizable, restart the pipeline immediately instead of waiting
+        // for the item to disappear and re-enter.
+        const isNothingDetected = displayedResults.length === 1
+          && displayedResults[0].itemName === "nothing_detected";
+        if (isNothingDetected && wasteDetections.length > 0 && !inFlightRef.current) {
+          const best = wasteDetections[0]; // sorted by confidence
+          if (best.confidence >= th.YOLO_FALLBACK_THRESHOLD) {
+            console.log(`[result] nothing_detected + new YOLO hit (${best.className} ${(best.confidence * 100).toFixed(0)}%) → reclassify`);
+            // Reset state and re-enter classifying with the YOLO loop already running
+            goneCountRef.current = 0;
+            detectionGoneMapRef.current.clear();
+            unresolvedNewItemsRef.current.clear();
+            lastYoloFingerprintRef.current = null;
+            classifyStartRef.current = Date.now();
+            setStableResults([]); setResultRequestIds([]);
+            if (resultSweepTimerRef.current) { clearTimeout(resultSweepTimerRef.current); resultSweepTimerRef.current = null; }
+            transition("classifying");
+            // YOLO loop is already running — process this detection immediately
+            handleYoloCycleResult(detections, 0, video, analysis, analyzer);
+            return;
+          }
+        }
 
         // Build trackable + detection arrays for IoU matching
         const tracked = displayedResults.map(r => ({
@@ -1015,6 +1185,13 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
                     };
                     displayedResults.push(newTracked);
                     needsUpdate = true;
+                    // YOLO found a new item — abort any in-flight API sweep (race: YOLO wins)
+                    if (inFlightRef.current && apiAbortRef.current) {
+                      console.log(`[yolo-loop] YOLO won race — aborting API sweep`);
+                      apiAbortRef.current.abort();
+                      apiAbortRef.current = null;
+                      inFlightRef.current = false;
+                    }
                     console.log(`[yolo-loop] new item added after ${NEW_ITEM_PERSIST_CYCLES} cycles: ${resolved.itemName}`);
                     continue;
                   }
@@ -1062,6 +1239,10 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       _hint?: unknown,
       _refinedFrom?: unknown,
       tierResults?: { tier1?: { itemName: string; confidence: number; x?: number }[] },
+      /** All classified items in this frame (for multi-item logging). */
+      allResults?: ClassificationResponse[],
+      /** CV blob count and YOLO detection count for diagnostics. */
+      counts?: { blobCount: number; yoloDetectionCount: number },
     ) {
       // Capture the same center short-side square that YOLO sees (e.g. 720×720
       // from 1280×720). Log images preserve full resolution for fine-tuning.
@@ -1075,6 +1256,14 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
       ctx.drawImage(video, roiX, roiY, side, side, 0, 0, side, side);
+
+      // Build allItems from all resolved results
+      const allItems = (allResults ?? [result]).map(r => ({
+        itemName: r.itemName,
+        wasteStream: r.wasteStream,
+        confidence: r.confidence,
+        modelUsed: modelUsed as string,
+      }));
 
       canvas.convertToBlob({ type: "image/jpeg", quality: 0.82 }).then((blob) => {
         const reader = new FileReader();
@@ -1100,6 +1289,8 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
                   imageQuality: imageQualityBand(analysis),
                 },
                 ...(tierResults && { tierResults }),
+                allItems,
+                ...(counts && { blobCount: counts.blobCount, yoloDetectionCount: counts.yoloDetectionCount }),
               },
             }),
           }).catch(() => {}); // best-effort
@@ -1198,7 +1389,9 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
             });
             console.log(`[tier1] YOLO HIT: ${resolvedResults.map((r) => r.itemName).join(" + ")} in ${yoloMs}ms`);
             logYoloOnlyResult(video, resolvedResults[0], detections, yoloMs, analysis, "T1", undefined, undefined,
-              { tier1: wasteDetections.map(d => ({ itemName: d.className, confidence: d.confidence, x: d.bbox[0] + d.bbox[2] / 2 })).sort((a, b) => b.confidence - a.confidence).slice(0, 5) });
+              { tier1: wasteDetections.map(d => ({ itemName: d.className, confidence: d.confidence, x: d.bbox[0] + d.bbox[2] / 2 })).sort((a, b) => b.confidence - a.confidence).slice(0, 5) },
+              resolvedResults,
+              { blobCount: qualifiedBlobCount, yoloDetectionCount: wasteDetections.length });
             handleMultiClassificationResults(resolvedResults, resolvedResults.map(() => undefined));
             return;
           }
@@ -1376,6 +1569,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
 
       if (valid.length === 0) {
         nothingDetectedCountRef.current++;
+        lastResultSuccessRef.current = false;
         setStableResults([toTrackedResult({
           itemName: "nothing_detected",
           wasteStream: "burnable",
@@ -1396,6 +1590,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       }
 
       // Successful classification — reset the nothing-detected counter
+      lastResultSuccessRef.current = true;
       nothingDetectedCountRef.current = 0;
       const tracked = valid.map(r => toTrackedResult(r));
 
@@ -1448,6 +1643,14 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       goneCountRef.current = 0;
       resultEnterTimeRef.current = Date.now();
       transition("result");
+
+      // Schedule proactive API sweep for T1-only results (catches items
+      // outside YOLO's vocabulary that YOLO can never detect)
+      if (resultSweepTimerRef.current) clearTimeout(resultSweepTimerRef.current);
+      const isYoloOnly = requestIds.every(id => id === undefined);
+      if (isYoloOnly) {
+        resultSweepTimerRef.current = setTimeout(triggerResultApiSweep, RESULT_API_SWEEP_DELAY_MS);
+      }
 
       for (const result of valid) {
         const cacheKey = `${result.itemName}::${result.wasteStream}`;
@@ -1514,6 +1717,18 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
 
       const base64Ms = Date.now() - procStart - cropMs - blobMs;
 
+      // ── Face detection: block image storage if a face is found ──
+      // Fail-closed: if face detection is unavailable (model failed to load),
+      // assume a face may be present and skip image upload for privacy safety.
+      let faceDetected = false;
+      try {
+        const { containsFace } = await import("@/lib/face-detect");
+        faceDetected = await containsFace(cropCanvas);
+      } catch {
+        console.warn("[classify] Face detection unavailable — skipping image upload (fail-closed)");
+        faceDetected = true;
+      }
+
       const meta: ClassifyMeta = {
         sharpnessScore: analysis.sharpnessScore,
         imageQuality: imageQualityBand(analysis),
@@ -1525,11 +1740,12 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
         base64_ms: base64Ms,
         frameSize_bytes: frame.length,
         totalProcMs: Date.now() - procStart,
+        faceDetected,
       });
 
       if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
 
-      const result = await classify(frame, meta, yoloDetections, multi, tierResults);
+      const result = await classify(frame, meta, yoloDetections, multi, tierResults, faceDetected);
       const multiResults = (result as ClassificationResponse & { _multiResults?: ClassificationResponse[] })._multiResults;
       return { result, requestId: result.requestId, multiResults };
     }
@@ -1559,12 +1775,14 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
     );
   }
 
-  const uiScreen: "idle" | "camera" | "result" =
-    pipelineState === "result"
-      ? "result"
-      : pipelineState === "classifying"
-        ? "camera"
-        : "idle"; // idle + cooldown both show idle screen
+  const uiScreen: "idle" | "camera" | "result" | "seedling" =
+    showSeedling
+      ? "seedling"
+      : pipelineState === "result"
+        ? "result"
+        : pipelineState === "classifying"
+          ? "camera"
+          : "idle"; // idle + cooldown both show idle screen
 
 
   return (
@@ -1599,6 +1817,8 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           onToggleVoice={toggleVoice}
           detectionRoiMargin={DETECTION_ROI_MARGIN}
           yoloTargetInset={YOLO_TARGET_INSET}
+          justAdvancedTreeIndex={justAdvancedTreeIndex}
+          onTreeAnimationDone={() => setJustAdvancedTreeIndex(null)}
         />
       )}
 
@@ -1621,8 +1841,15 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
         />
       )}
 
+      {uiScreen === "seedling" && (
+        <SeedlingAnimation
+          locale={locale}
+          onComplete={() => setShowSeedling(false)}
+        />
+      )}
+
       {/* System status badge — hidden during result screen to avoid overlap */}
-      {uiScreen !== "result" && (
+      {uiScreen !== "result" && uiScreen !== "seedling" && (
         <SystemStatusBadge thermalWarning={thermalWarning} />
       )}
     </div>

@@ -18,6 +18,7 @@ import { generateRequestId } from "@/lib/request-id";
 
 import { recordCalibrationPrediction } from "@/lib/calibration";
 import { isYoloClassNotWaste } from "@/lib/yolo-rules";
+import { verifyKioskRequest } from "@/lib/kiosk-auth";
 
 // ── Shared sub-schemas ──
 const MetaSchema = z.object({
@@ -60,8 +61,11 @@ const TierResultsSchema = z.object({
 }).optional();
 
 // ── Request validation (single-item format — backward compatible) ──
+// Max ~3.75 MB base64 (≈ 2.8 MB raw image) — prevents memory exhaustion DoS
+const IMAGE_MAX_LENGTH = 5_000_000;
+
 const SingleRequestSchema = z.object({
-  image: z.string().min(100),
+  image: z.string().min(100).max(IMAGE_MAX_LENGTH),
   siteId: z.string().optional(),
   locale: z.enum(["en", "ja"]).optional(),
   meta: MetaSchema,
@@ -73,11 +77,13 @@ const SingleRequestSchema = z.object({
   tier1Context: Tier1ContextSchema,
   /** Client-provided intermediate tier results (T1/T2 detections for pilot-log). */
   tierResults: TierResultsSchema,
+  /** When true, a face was detected in the frame — skip image storage for privacy. */
+  faceDetected: z.boolean().optional(),
 });
 
 // ── Batch item schema ──
 const BatchItemSchema = z.object({
-  image: z.string().min(100),
+  image: z.string().min(100).max(IMAGE_MAX_LENGTH),
   yoloHint: z.string().nullable().optional(),
   materialHint: MaterialHintSchema,
   cropBox: z.tuple([z.number(), z.number(), z.number(), z.number()]).optional(),
@@ -90,6 +96,7 @@ const BatchRequestSchema = z.object({
   locale: z.enum(["en", "ja"]).optional(),
   meta: MetaSchema,
   tierResults: TierResultsSchema,
+  faceDetected: z.boolean().optional(),
 });
 
 // ── Union schema: accepts either format ──
@@ -312,6 +319,13 @@ async function callModelMulti(
 }
 
 export async function POST(request: Request) {
+  // ── Kiosk authentication ──
+  // Requires `kiosk_session` cookie or `Authorization: Bearer <KIOSK_API_TOKEN>`.
+  // Closes the cost-exhaustion DoS vector (unauthenticated OpenAI Vision calls)
+  // and the open image-upload vector.
+  const auth = await verifyKioskRequest(request);
+  if (!auth.ok) return auth.response;
+
   // ── Redis-based rate limiting ──
   const clientId =
     request.headers.get("x-real-ip")
@@ -358,10 +372,15 @@ export async function POST(request: Request) {
   const siteId = data.siteId;
   const locale = data.locale ?? "en";
   const meta = data.meta;
+  const faceDetected = data.faceDetected === true;
   const siteConfig = loadSiteConfig(siteId ?? process.env.SITE_ID ?? "japan-office");
   const openai = new OpenAI();
   const startMs = Date.now();
   const requestId = generateRequestId();
+
+  /** Upload image to blob unless a face was detected (privacy). */
+  const safeUpload = (image: string, itemName: string, wasteStream: string, ts: string): Promise<string | undefined> =>
+    faceDetected ? Promise.resolve(undefined) : uploadFrameToBlob(image, itemName, wasteStream, ts);
 
   /** Apply conditional override if the model's reasoning mentions the condition keyword. */
   function applyConditionalOverride(
@@ -457,15 +476,21 @@ export async function POST(request: Request) {
       const totalServerMs = Date.now() - startMs;
       console.log(`[${requestId}] batch classified ${batchResults.length} items in ${totalServerMs}ms`);
 
-      // Background logging for first item
+      // Background logging — includes all items in the frame
       const first = batchResults[0];
       if (first) {
         const logTimestamp = new Date().toISOString();
         const batchTierResults = data.tierResults as { tier1?: { itemName: string; confidence: number }[] } | undefined;
+        const allItems = batchResults.map(b => ({
+          itemName: b.result.itemName,
+          wasteStream: b.result.wasteStream,
+          confidence: b.result.confidence,
+          modelUsed: b.modelUsed,
+        }));
         runInBackground(
           Promise.all([
             recordCalibrationPrediction(first.result.confidence, first.modelUsed),
-            uploadFrameToBlob(data.items[0].image, first.result.itemName, first.result.wasteStream, logTimestamp),
+            safeUpload(data.items[0].image, first.result.itemName, first.result.wasteStream, logTimestamp),
           ]).then(([, imageUrl]) =>
             logPilotEntry({
               timestamp: logTimestamp,
@@ -482,6 +507,7 @@ export async function POST(request: Request) {
               meta: meta as ClassifyMeta | undefined,
               overrideApplied: first.result.wasteStream !== first.raw.wasteStream,
               tierResults: batchTierResults,
+              allItems,
             })
           )
         );
@@ -523,10 +549,16 @@ export async function POST(request: Request) {
             const yd = (data as z.infer<typeof SingleRequestSchema>).yoloDetections as YoloDetectionLog[] | undefined;
             return yd?.length ? { tier1: yd.map(d => ({ itemName: d.className, confidence: d.confidence })) } : undefined;
           })();
+        const allItems = multiResults.map(m => ({
+          itemName: m.result.itemName,
+          wasteStream: m.result.wasteStream,
+          confidence: m.result.confidence,
+          modelUsed: "t2",
+        }));
         runInBackground(
           Promise.all([
             recordCalibrationPrediction(multiResults[0].result.confidence, "t2"),
-            uploadFrameToBlob(image, multiResults[0].result.itemName, multiResults[0].result.wasteStream, logTimestamp),
+            safeUpload(image, multiResults[0].result.itemName, multiResults[0].result.wasteStream, logTimestamp),
           ]).then(([, imageUrl]) =>
             Promise.all(multiResults.map((item, i) =>
               logPilotEntry({
@@ -544,6 +576,7 @@ export async function POST(request: Request) {
                 meta: meta as ClassifyMeta | undefined,
                 overrideApplied: item.result.wasteStream !== item.raw.wasteStream,
                 tierResults: clientTierResults,
+                allItems,
               })
             ))
           )
@@ -592,7 +625,7 @@ export async function POST(request: Request) {
     runInBackground(
       Promise.all([
         recordCalibrationPrediction(result.confidence, modelUsed),
-        uploadFrameToBlob(image, result.itemName, result.wasteStream, logTimestamp),
+        safeUpload(image, result.itemName, result.wasteStream, logTimestamp),
       ]).then(([, imageUrl]) =>
         logPilotEntry({
           timestamp: logTimestamp,
@@ -610,6 +643,7 @@ export async function POST(request: Request) {
           yoloDetections: yoloDetections as YoloDetectionLog[] | undefined,
           overrideApplied: result.wasteStream !== raw.wasteStream,
           tierResults,
+          allItems: [{ itemName: result.itemName, wasteStream: result.wasteStream, confidence: result.confidence, modelUsed }],
           ...(materialHint && {
             rgbAnalysis: {
               dominantHue: (materialHint as MaterialHint).dominantHue,

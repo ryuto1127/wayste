@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { z } from "zod/v4";
 import { redis, KEYS } from "@/lib/redis";
 import { logPilotEntry } from "@/lib/pilot-log";
 import { uploadFrameToBlob } from "@/lib/blob-store";
@@ -6,8 +7,33 @@ import { runInBackground } from "@/lib/background-task";
 import { generateRequestId } from "@/lib/request-id";
 import { del as deleteBlob } from "@vercel/blob";
 import type { PilotLogEntry } from "@/lib/types";
+import { verifyKioskRequest } from "@/lib/kiosk-auth";
 
 import { checkAndSendMilestoneNotification } from "@/lib/milestone-check";
+
+// ── POST body validation ──
+// Size cap matches /api/classify (≈ 3.75 MB base64) to prevent memory DoS.
+const IMAGE_MAX_LENGTH = 5_000_000;
+// Constrain itemName/wasteStream to alphanumerics + a few separators — these
+// values are used to build the Blob object path, so path-traversal characters
+// must be rejected even though `uploadFrameToBlob` sanitizes them.
+const SAFE_TOKEN = z.string().min(1).max(128).regex(/^[\w\-\s.]+$/);
+
+const PilotLogPostSchema = z.object({
+  image: z.string().min(100).max(IMAGE_MAX_LENGTH).optional(),
+  entry: z.object({
+    modelUsed: z.enum(["t2", "T1"]).optional(),
+    itemName: SAFE_TOKEN.optional(),
+    wasteStream: SAFE_TOKEN.optional(),
+    confidence: z.number().min(0).max(1).optional(),
+    requiresVerification: z.boolean().optional(),
+    latencyMs: z.number().min(0).max(60_000).optional(),
+    meta: z.unknown().optional(),
+    yoloDetections: z.unknown().optional(),
+    rgbAnalysis: z.unknown().optional(),
+    tierResults: z.unknown().optional(),
+  }),
+});
 
 export async function GET(_request: Request) {
   // GET is read-only (review page) — no auth required.
@@ -37,6 +63,10 @@ export async function GET(_request: Request) {
  * Called by the client when YOLO wins the race and the API is aborted.
  */
 export async function POST(request: Request) {
+  // ── Kiosk authentication ──
+  const auth = await verifyKioskRequest(request);
+  if (!auth.ok) return auth.response;
+
   let body: unknown;
   try {
     body = await request.json();
@@ -44,10 +74,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid JSON." }, { status: 400 });
   }
 
-  const { image, entry } = body as { image?: string; entry?: Partial<PilotLogEntry> };
-  if (!entry) {
-    return NextResponse.json({ error: "Missing entry." }, { status: 400 });
+  const parsed = PilotLogPostSchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: "Invalid request.", details: parsed.error.issues },
+      { status: 400 },
+    );
   }
+  const { image, entry } = parsed.data;
 
   const requestId = generateRequestId();
   const timestamp = new Date().toISOString();
@@ -76,10 +110,10 @@ export async function POST(request: Request) {
         imageUrl,
         blobUploadFailed: image ? !imageUrl : undefined,
         requestId,
-        meta: entry.meta,
-        yoloDetections: entry.yoloDetections,
-        rgbAnalysis: entry.rgbAnalysis,
-        tierResults: entry.tierResults,
+        meta: entry.meta as PilotLogEntry["meta"],
+        yoloDetections: entry.yoloDetections as PilotLogEntry["yoloDetections"],
+        rgbAnalysis: entry.rgbAnalysis as PilotLogEntry["rgbAnalysis"],
+        tierResults: entry.tierResults as PilotLogEntry["tierResults"],
       });
 
       // Check for milestone notification (non-blocking, best-effort)

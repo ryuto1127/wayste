@@ -23,6 +23,7 @@ import { put } from "@vercel/blob";
 import { redis, KEYS } from "@/lib/redis";
 import { Readable } from "node:stream";
 import type { PilotLogEntry } from "@/lib/types";
+import { isAllowedBlobUrl } from "@/lib/blob-url";
 
 /** Mirror the threshold from /api/review/export */
 const CORRECT_CONFIDENCE_THRESHOLD = 0.80;
@@ -33,7 +34,11 @@ const BATCH_SIZE = 10;
 export async function GET(request: Request) {
   const authHeader = request.headers.get("authorization");
   const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+  if (!cronSecret) {
+    console.error("[cron/export-finetuning] CRON_SECRET is not set — refusing to run.");
+    return NextResponse.json({ error: "Server misconfiguration" }, { status: 500 });
+  }
+  if (authHeader !== `Bearer ${cronSecret}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -101,11 +106,21 @@ export async function GET(request: Request) {
     const archiver = (await import("archiver")).default;
     const archive = archiver("zip", { zlib: { level: 1 } });
 
+    // Use BLOB_READ_WRITE_TOKEN to fetch private blobs
+    const blobToken = process.env.BLOB_READ_WRITE_TOKEN;
+    const blobHeaders: HeadersInit = blobToken ? { Authorization: `Bearer ${blobToken}` } : {};
+
     for (let i = 0; i < toExport.length; i += BATCH_SIZE) {
       const batch = toExport.slice(i, i + BATCH_SIZE);
       const results = await Promise.allSettled(
         batch.map(async ({ url, filename }) => {
-          const res = await fetch(url);
+          // Reject URLs that don't point at our own blob store — stored
+          // pilot-log entries could otherwise exfiltrate BLOB_READ_WRITE_TOKEN.
+          if (!isAllowedBlobUrl(url)) {
+            console.warn(`[cron/export-finetuning] Skipping disallowed blob URL for ${filename}`);
+            return null;
+          }
+          const res = await fetch(url, { headers: blobHeaders });
           if (!res.ok) return null;
           const buf = Buffer.from(await res.arrayBuffer());
           return { filename, buf };
@@ -127,7 +142,7 @@ export async function GET(request: Request) {
 
     const date = new Date().toISOString().slice(0, 10);
     const blob = await put(`archives/finetuning/${date}.zip`, webStream, {
-      access: "public",
+      access: "private",
       contentType: "application/zip",
       addRandomSuffix: false,
     });

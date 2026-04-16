@@ -4,8 +4,14 @@
  * Protected paths:
  *   /review                        — admin review UI
  *   /api/review, /api/review/*     — review data + export
- *   /api/pilot-log GET             — pilot log viewer
+ *   /api/pilot-log GET / DELETE    — pilot log viewer + purge
  *   /api/pilot-image               — captured frame images
+ *   /api/health                    — service health check
+ *   /api/calibration               — model calibration data
+ *
+ * Kiosk-facing endpoints (/api/classify, /api/pilot-log POST,
+ * /api/kiosk/session) are NOT gated here — they use kiosk-auth at route level
+ * (see lib/kiosk-auth.ts).
  *
  * Auth method: HTTP Basic Auth (first login) → session cookie (subsequent)
  *   Username: admin (or anything)
@@ -14,14 +20,15 @@
  * After successful Basic Auth, a session cookie (admin_session) is set so the
  * browser won't prompt for credentials again until the cookie expires (7 days).
  *
- * If ADMIN_API_KEY is not set (dev mode), all requests pass through.
+ * Dev mode: ADMIN_API_KEY not set → auth skipped ONLY on localhost.
+ * In production (Vercel), missing ADMIN_API_KEY returns 500.
  */
 
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
 const SESSION_COOKIE = "admin_session";
-const SESSION_MAX_AGE = 60 * 60 * 24 * 7; // 7 days
+const SESSION_MAX_AGE = 60 * 60 * 4; // 4 hours
 
 /** Paths that require admin Basic Auth. */
 const ADMIN_PATHS = [
@@ -29,6 +36,8 @@ const ADMIN_PATHS = [
   "/api/review",
   "/api/pilot-log",
   "/api/pilot-image",
+  "/api/health",
+  "/api/calibration",
 ];
 
 function isAdminPath(pathname: string): boolean {
@@ -60,8 +69,17 @@ export async function middleware(request: NextRequest) {
 
   const adminKey = process.env.ADMIN_API_KEY;
 
-  // Dev mode: no key configured → allow everything
-  if (!adminKey) return NextResponse.next();
+  if (!adminKey) {
+    // Only skip auth on localhost (dev mode). In production, refuse to run unprotected.
+    const host = request.headers.get("host") ?? "";
+    if (host.startsWith("localhost") || host.startsWith("127.0.0.1")) {
+      return NextResponse.next();
+    }
+    return new NextResponse(
+      "Server misconfiguration: ADMIN_API_KEY is not set.",
+      { status: 500 }
+    );
+  }
 
   const expectedToken = await makeSessionToken(adminKey);
 
@@ -123,5 +141,7 @@ export const config = {
     "/api/review/:path*",
     "/api/pilot-log",
     "/api/pilot-image/:path*",
+    "/api/health",
+    "/api/calibration",
   ],
 };

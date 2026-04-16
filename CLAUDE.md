@@ -49,7 +49,9 @@
 - Image uploads and Redis logging run via `waitUntil()` — never block the response
 - i18n keys live in `lib/i18n.ts`; API accepts `locale` param for response language
 - Site configs are JSON-only — no code changes needed to add/modify waste rules
-- Session tokens: HMAC-SHA256, 4h TTL, max 200 requests per token
+- Admin sessions: SHA-256(ADMIN_API_KEY + salt), 4h cookie TTL — rotate `ADMIN_API_KEY` to invalidate all sessions
+- Kiosk sessions: HMAC-SHA256 keyed by `KIOSK_API_TOKEN` → HttpOnly `kiosk_session` cookie (30d). Unlock via `POST /api/kiosk/session` with `Authorization: Bearer <KIOSK_API_TOKEN>` or via the `/kiosk/unlock` UI. See `lib/kiosk-auth.ts`.
+- Blob URL allow-listing: every `fetch()` of a Vercel Blob URL goes through `isAllowedBlobUrl()` which requires hostname to match `BLOB_STORE_HOST` exactly — prevents `BLOB_READ_WRITE_TOKEN` being sent to an attacker-controlled store via a planted log entry.
 
 ## Design Rationale
 - Users walk up holding trash — there is no "place item on surface" step; the system must classify within seconds of approach → speed-first pipeline design

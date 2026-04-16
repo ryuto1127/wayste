@@ -17,6 +17,7 @@
 import { NextResponse } from "next/server";
 import { redis, KEYS } from "@/lib/redis";
 import type { PilotLogEntry } from "@/lib/types";
+import { isAllowedBlobUrl } from "@/lib/blob-url";
 // Dynamic import: archiver is CommonJS, avoid top-level ESM issues
 import { Readable } from "node:stream";
 
@@ -108,13 +109,22 @@ export async function GET(request: Request) {
       return deduped;
     };
 
-    // Fetch images in parallel (batches of 10) and append to archive
+    // Fetch images in parallel (batches of 10) and append to archive.
+    // Uses BLOB_READ_WRITE_TOKEN for private blob access. URLs are validated
+    // against BLOB_STORE_HOST to prevent the bearer token from ever being
+    // sent to an attacker-controlled blob store (see lib/blob-url.ts).
+    const blobToken = process.env.BLOB_READ_WRITE_TOKEN;
+    const blobHeaders: HeadersInit = blobToken ? { Authorization: `Bearer ${blobToken}` } : {};
     const BATCH_SIZE = 10;
     for (let i = 0; i < toExport.length; i += BATCH_SIZE) {
       const batch = toExport.slice(i, i + BATCH_SIZE);
       const results = await Promise.allSettled(
         batch.map(async ({ url, filename }) => {
-          const res = await fetch(url);
+          if (!isAllowedBlobUrl(url)) {
+            console.warn(`[review/export] Skipping disallowed blob URL for ${filename}`);
+            return null;
+          }
+          const res = await fetch(url, { headers: blobHeaders });
           if (!res.ok) return null;
           const buf = Buffer.from(await res.arrayBuffer());
           return { filename, buf };

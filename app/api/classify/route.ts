@@ -19,6 +19,7 @@ import { generateRequestId } from "@/lib/request-id";
 import { recordCalibrationPrediction } from "@/lib/calibration";
 import { isYoloClassNotWaste } from "@/lib/yolo-rules";
 import { verifyKioskRequest } from "@/lib/kiosk-auth";
+import { serverFaceDetected } from "@/lib/face-detect-server";
 
 // ── Shared sub-schemas ──
 const MetaSchema = z.object({
@@ -372,15 +373,46 @@ export async function POST(request: Request) {
   const siteId = data.siteId;
   const locale = data.locale ?? "en";
   const meta = data.meta;
-  const faceDetected = data.faceDetected === true;
+  const clientFaceDetected = data.faceDetected === true;
   const siteConfig = loadSiteConfig(siteId ?? process.env.SITE_ID ?? "japan-office");
   const openai = new OpenAI();
   const startMs = Date.now();
   const requestId = generateRequestId();
 
+  /**
+   * Server-side face detection lazily evaluated the first time we're about to
+   * upload. We run it against whichever image is being stored — for batch mode
+   * that's `items[0].image`; for single/multi it's `singleData.image`. The
+   * result is cached per-request so the ONNX pass only runs once even if
+   * safeUpload is called from multiple background log paths.
+   *
+   * The client-supplied `faceDetected` flag is treated as a speed hint: if the
+   * client already detected a face we skip the server pass (client said
+   * "definitely has face" — trust the positive). If the client said "no face",
+   * we re-check server-side because the client may be an attacker lying.
+   */
+  let serverFaceCheck: Promise<boolean> | null = null;
+  const shouldBlockUpload = (image: string): Promise<boolean> => {
+    if (clientFaceDetected) return Promise.resolve(true);
+    if (!serverFaceCheck) {
+      serverFaceCheck = serverFaceDetected(image).catch((err) => {
+        console.warn(`[${requestId}] server face detection error, failing closed:`, err);
+        return true;
+      });
+    }
+    return serverFaceCheck;
+  };
+
   /** Upload image to blob unless a face was detected (privacy). */
-  const safeUpload = (image: string, itemName: string, wasteStream: string, ts: string): Promise<string | undefined> =>
-    faceDetected ? Promise.resolve(undefined) : uploadFrameToBlob(image, itemName, wasteStream, ts);
+  const safeUpload = async (
+    image: string,
+    itemName: string,
+    wasteStream: string,
+    ts: string,
+  ): Promise<string | undefined> => {
+    if (await shouldBlockUpload(image)) return undefined;
+    return uploadFrameToBlob(image, itemName, wasteStream, ts);
+  };
 
   /** Apply conditional override if the model's reasoning mentions the condition keyword. */
   function applyConditionalOverride(

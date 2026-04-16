@@ -11,6 +11,17 @@ const nextConfig: NextConfig = {
     },
   },
 
+  // Mark onnxruntime-node as an external so Vercel's file tracer pulls in the
+  // native binary instead of trying to bundle the .node file.
+  serverExternalPackages: ["onnxruntime-node", "sharp"],
+
+  // Ensure the face-detector ONNX model is bundled with serverless functions.
+  // Without this, `lib/models/face-detector.onnx` is left outside the function
+  // deployment and `fs.readFile` at runtime returns ENOENT.
+  outputFileTracingIncludes: {
+    "/api/classify": ["./lib/models/face-detector.onnx"],
+  },
+
   // Security headers
   async headers() {
     return [

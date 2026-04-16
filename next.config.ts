@@ -36,6 +36,15 @@ const nextConfig: NextConfig = {
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
           // Opt out of Google's FLoC / Topics API
           { key: "Permissions-Policy", value: "interest-cohort=()" },
+          // Force HTTPS for this host + all subdomains for 2 years.
+          // Vercel serves only HTTPS in production anyway; this prevents
+          // downgrade attacks if a kiosk is ever on a hostile network.
+          // `preload` is intentionally omitted — opt in later via
+          // hstspreload.org after confirming the policy is stable.
+          {
+            key: "Strict-Transport-Security",
+            value: "max-age=63072000; includeSubDomains",
+          },
           // CSP: allow self + ONNX WASM eval + MediaPipe CDN + Vercel Blob
           {
             key: "Content-Security-Policy",

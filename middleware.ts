@@ -27,6 +27,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { hmacHex, timingSafeEqualStr } from "@/lib/crypto-utils";
+import { recordAudit, callerSource } from "@/lib/audit-log";
 
 const SESSION_COOKIE = "admin_session";
 const SESSION_MAX_AGE = 60 * 60 * 4; // 4 hours
@@ -96,6 +97,7 @@ export async function middleware(request: NextRequest) {
   // 2. Check x-api-key header (for programmatic access / curl)
   const apiKey = request.headers.get("x-api-key");
   if (apiKey && (await timingSafeEqualStr(apiKey, adminKey))) {
+    recordAudit({ type: "admin.login", source: callerSource(request), path: pathname, extra: { method: "x-api-key" } });
     const res = NextResponse.next();
     res.cookies.set(SESSION_COOKIE, expectedToken, {
       httpOnly: true,
@@ -114,6 +116,7 @@ export async function middleware(request: NextRequest) {
       const decoded = atob(authHeader.slice(6));
       const password = decoded.includes(":") ? decoded.split(":").slice(1).join(":") : decoded;
       if (await timingSafeEqualStr(password, adminKey)) {
+        recordAudit({ type: "admin.login", source: callerSource(request), path: pathname, extra: { method: "basic" } });
         const res = NextResponse.next();
         res.cookies.set(SESSION_COOKIE, expectedToken, {
           httpOnly: true,
@@ -130,6 +133,10 @@ export async function middleware(request: NextRequest) {
   }
 
   // Deny: return 401 with WWW-Authenticate to trigger browser login dialog
+  // Only audit when credentials were actually presented (ignore unauthenticated probes)
+  if (apiKey || authHeader?.startsWith("Basic ")) {
+    recordAudit({ type: "admin.login_fail", source: callerSource(request), path: pathname });
+  }
   return new NextResponse("Authentication required", {
     status: 401,
     headers: {

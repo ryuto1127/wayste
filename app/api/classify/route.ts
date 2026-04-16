@@ -20,6 +20,8 @@ import { recordCalibrationPrediction } from "@/lib/calibration";
 import { isYoloClassNotWaste } from "@/lib/yolo-rules";
 import { verifyKioskRequest } from "@/lib/kiosk-auth";
 import { serverFaceDetected } from "@/lib/face-detect-server";
+import { consumeOpenAICall } from "@/lib/daily-budget";
+import { sendErrorNotification } from "@/lib/notifications";
 
 // ── Shared sub-schemas ──
 const MetaSchema = z.object({
@@ -347,6 +349,18 @@ export async function POST(request: Request) {
   } catch (err) {
     console.warn("[classify] Redis rate-limit unavailable, allowing request:", err);
     // requestId not yet generated at this point
+  }
+
+  // ── Daily OpenAI budget ceiling ──
+  // Hard cap on Vision API calls per UTC day. Prevents a leaked kiosk
+  // session from draining the OpenAI quota via rotating IPs.
+  const budget = await consumeOpenAICall();
+  if (!budget.allowed) {
+    console.warn(`[classify] Daily budget exceeded: ${budget.used}/${budget.cap}`);
+    return NextResponse.json(
+      { error: "daily_budget_exceeded", message: "Daily classification limit reached. Please try again tomorrow." },
+      { status: 503 },
+    );
   }
 
   // ── Parse request ──
@@ -694,6 +708,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ ...result, requestId });
   } catch (err: unknown) {
     console.error(`[${requestId}] Classification error:`, err);
+    const details = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
     // Surface quota exhaustion distinctly so the UI can show an actionable message
     if (
       err &&
@@ -701,11 +716,14 @@ export async function POST(request: Request) {
       "code" in err &&
       (err as { code: string }).code === "insufficient_quota"
     ) {
+      // sendErrorNotification has a 30-min dedup window — safe to call every time
+      runInBackground(sendErrorNotification("openai_quota_exceeded", details));
       return NextResponse.json(
         { error: "API quota exceeded. Please add credits to your OpenAI account." },
         { status: 402 }
       );
     }
+    runInBackground(sendErrorNotification("classify_failure", details));
     return NextResponse.json(
       { error: "Classification service unavailable." },
       { status: 502 }

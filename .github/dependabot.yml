@@ -1,0 +1,35 @@
+# GitHub Dependabot — weekly pull requests for dependency updates.
+# Free with any public or private GitHub repo.
+# https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+version: 2
+updates:
+  # Node.js application dependencies
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Asia/Tokyo"
+    open-pull-requests-limit: 5
+    # Group low-risk dev / type / lint updates into a single PR
+    groups:
+      dev-dependencies:
+        dependency-type: "development"
+        update-types: ["minor", "patch"]
+      types:
+        patterns:
+          - "@types/*"
+    # Flag ecosystem-critical packages so they're never auto-merged blindly
+    labels:
+      - "dependencies"
+
+  # GitHub Actions (when we add any)
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    labels:
+      - "dependencies"
+      - "github-actions"

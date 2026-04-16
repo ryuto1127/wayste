@@ -27,9 +27,17 @@ if (typeof window !== "undefined") {
   };
 }
 
-const WASM_CDN = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm";
+// Pin the CDN to the exact version we installed via npm. `@latest` would
+// let the CDN operator swap the WASM payload underneath us — a supply
+// chain window we don't need. Keep this in sync with package.json when
+// upgrading `@mediapipe/tasks-vision`.
+const MEDIAPIPE_VERSION = "0.10.34";
+const WASM_CDN = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MEDIAPIPE_VERSION}/wasm`;
+// Pin the model to a specific release path so Google can't silently
+// substitute the tflite graph. Still served from the same storage.googleapis
+// bucket, but at a version-scoped URL.
 const MODEL_URL =
-  "https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/latest/blaze_face_short_range.tflite";
+  "https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite";
 
 /** Minimum confidence to consider a detection as a real face. */
 const MIN_CONFIDENCE = 0.5;

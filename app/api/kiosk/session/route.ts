@@ -21,6 +21,7 @@ import {
   makeKioskSessionToken,
   verifyKioskRequest,
 } from "@/lib/kiosk-auth";
+import { recordAudit, callerSource } from "@/lib/audit-log";
 
 export async function POST(request: Request) {
   const auth = await verifyKioskRequest(request);
@@ -33,6 +34,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true, devBypass: true });
   }
 
+  recordAudit({ type: "kiosk.session_mint", source: callerSource(request) });
   const sessionValue = await makeKioskSessionToken(kioskToken);
   const res = NextResponse.json({ ok: true });
   const url = new URL(request.url);

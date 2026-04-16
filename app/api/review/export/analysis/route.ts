@@ -21,6 +21,7 @@
 import { NextResponse } from "next/server";
 import { redis, KEYS } from "@/lib/redis";
 import type { PilotLogEntry } from "@/lib/types";
+import { parsePilotLogEntry } from "@/lib/pilot-log-schema";
 
 export const dynamic = "force-dynamic";
 
@@ -69,14 +70,8 @@ export async function GET(request: Request) {
     const entries: AnalysisEntry[] = [];
 
     for (const item of pilotRaw) {
-      let entry: PilotLogEntry;
-      try {
-        entry = (typeof item === "string" ? JSON.parse(item) : item) as PilotLogEntry;
-      } catch {
-        continue;
-      }
-
-      if (!entry.requestId) continue;
+      const entry: PilotLogEntry | null = parsePilotLogEntry(item);
+      if (!entry || !entry.requestId) continue;
 
       const verdict = verdicts?.[entry.requestId] ?? null;
 
@@ -223,10 +218,24 @@ export async function GET(request: Request) {
   }
 }
 
-/** Escape a value for CSV (wrap in quotes if it contains commas or quotes). */
+/**
+ * Escape a value for CSV.
+ *
+ * Wraps in quotes if it contains commas, quotes, or newlines (RFC 4180).
+ *
+ * Defangs spreadsheet formula injection: Excel/Sheets/Numbers will execute
+ * any cell that begins with =, +, -, @, tab, or carriage return. Item names
+ * come from GPT model output and could be crafted to inject formulas like
+ * `=HYPERLINK("evil.com")` or worse. Prefix such values with a single quote
+ * — the spreadsheet displays the cell as text without the leading quote.
+ */
 function csvEscape(value: string): string {
-  if (value.includes(",") || value.includes('"') || value.includes("\n")) {
-    return `"${value.replace(/"/g, '""')}"`;
+  let v = value;
+  if (/^[=+\-@\t\r]/.test(v)) {
+    v = "'" + v;
   }
-  return value;
+  if (v.includes(",") || v.includes('"') || v.includes("\n")) {
+    return `"${v.replace(/"/g, '""')}"`;
+  }
+  return v;
 }

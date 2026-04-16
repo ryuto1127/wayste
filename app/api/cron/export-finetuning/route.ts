@@ -24,6 +24,7 @@ import { redis, KEYS } from "@/lib/redis";
 import { Readable } from "node:stream";
 import type { PilotLogEntry } from "@/lib/types";
 import { isAllowedBlobUrl } from "@/lib/blob-url";
+import { parsePilotLogEntry } from "@/lib/pilot-log-schema";
 
 /** Mirror the threshold from /api/review/export */
 const CORRECT_CONFIDENCE_THRESHOLD = 0.80;
@@ -68,14 +69,8 @@ export async function GET(request: Request) {
     };
 
     for (const item of pilotRaw) {
-      let entry: PilotLogEntry;
-      try {
-        entry = (typeof item === "string" ? JSON.parse(item) : item) as PilotLogEntry;
-      } catch {
-        continue;
-      }
-
-      if (!entry.requestId || !entry.imageUrl) continue;
+      const entry: PilotLogEntry | null = parsePilotLogEntry(item);
+      if (!entry || !entry.requestId || !entry.imageUrl) continue;
 
       const verdict = verdicts[entry.requestId];
       if (!verdict) continue;

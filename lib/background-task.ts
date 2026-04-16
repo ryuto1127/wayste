@@ -24,3 +24,17 @@ export function runInBackground(promise: Promise<unknown>): void {
     );
   }
 }
+
+/**
+ * Wrap a background promise so that a rejection only logs (with a label) and
+ * resolves to `fallback`. Use for grouping independent operations under a
+ * single `runInBackground(Promise.all([...]))` call when one's failure
+ * MUST NOT short-circuit the others — e.g. a Blob upload error must not
+ * skip the Redis log write that records the failure.
+ */
+export function isolated<T>(label: string, promise: Promise<T>, fallback: T): Promise<T> {
+  return promise.catch((err) => {
+    console.error(`[bg:${label}]`, err);
+    return fallback;
+  });
+}

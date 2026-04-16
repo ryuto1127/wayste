@@ -53,8 +53,14 @@ const nextConfig: NextConfig = {
               "media-src 'self' blob:",
               // Workers: self + blob (ONNX web workers)
               "worker-src 'self' blob:",
-              // No iframes
+              // No iframes (clickjacking)
               "frame-ancestors 'none'",
+              // Disallow Flash / Java / other plugin objects
+              "object-src 'none'",
+              // Lock <base href="…"> so injected markup can't redirect relative URLs
+              "base-uri 'self'",
+              // Restrict <form action="…"> to same origin
+              "form-action 'self'",
             ].join("; "),
           },
         ],

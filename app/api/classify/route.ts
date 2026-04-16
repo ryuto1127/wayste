@@ -11,7 +11,7 @@ import {
   applyOverrides,
 } from "@/lib/waste-rules";
 import { logPilotEntry } from "@/lib/pilot-log";
-import { runInBackground } from "@/lib/background-task";
+import { runInBackground, isolated } from "@/lib/background-task";
 import { uploadFrameToBlob } from "@/lib/blob-store";
 import { redis } from "@/lib/redis";
 import { generateRequestId } from "@/lib/request-id";
@@ -521,10 +521,10 @@ export async function POST(request: Request) {
         }));
         runInBackground(
           Promise.all([
-            recordCalibrationPrediction(first.result.confidence, first.modelUsed),
-            safeUpload(data.items[0].image, first.result.itemName, first.result.wasteStream, logTimestamp),
+            isolated("calibration", recordCalibrationPrediction(first.result.confidence, first.modelUsed), undefined),
+            isolated("blob-upload", safeUpload(data.items[0].image, first.result.itemName, first.result.wasteStream, logTimestamp), undefined),
           ]).then(([, imageUrl]) =>
-            logPilotEntry({
+            isolated("pilot-log", logPilotEntry({
               timestamp: logTimestamp,
               modelUsed: first.modelUsed,
               escalated: false,
@@ -540,7 +540,7 @@ export async function POST(request: Request) {
               overrideApplied: first.result.wasteStream !== first.raw.wasteStream,
               tierResults: batchTierResults,
               allItems,
-            })
+            }), undefined)
           )
         );
       }
@@ -589,11 +589,11 @@ export async function POST(request: Request) {
         }));
         runInBackground(
           Promise.all([
-            recordCalibrationPrediction(multiResults[0].result.confidence, "t2"),
-            safeUpload(image, multiResults[0].result.itemName, multiResults[0].result.wasteStream, logTimestamp),
+            isolated("calibration", recordCalibrationPrediction(multiResults[0].result.confidence, "t2"), undefined),
+            isolated("blob-upload", safeUpload(image, multiResults[0].result.itemName, multiResults[0].result.wasteStream, logTimestamp), undefined),
           ]).then(([, imageUrl]) =>
             Promise.all(multiResults.map((item, i) =>
-              logPilotEntry({
+              isolated("pilot-log", logPilotEntry({
                 timestamp: logTimestamp,
                 modelUsed: "t2",
                 escalated: false,
@@ -609,7 +609,7 @@ export async function POST(request: Request) {
                 overrideApplied: item.result.wasteStream !== item.raw.wasteStream,
                 tierResults: clientTierResults,
                 allItems,
-              })
+              }), undefined)
             ))
           )
         );
@@ -656,10 +656,10 @@ export async function POST(request: Request) {
 
     runInBackground(
       Promise.all([
-        recordCalibrationPrediction(result.confidence, modelUsed),
-        safeUpload(image, result.itemName, result.wasteStream, logTimestamp),
+        isolated("calibration", recordCalibrationPrediction(result.confidence, modelUsed), undefined),
+        isolated("blob-upload", safeUpload(image, result.itemName, result.wasteStream, logTimestamp), undefined),
       ]).then(([, imageUrl]) =>
-        logPilotEntry({
+        isolated("pilot-log", logPilotEntry({
           timestamp: logTimestamp,
           modelUsed,
           escalated: false,
@@ -687,7 +687,7 @@ export async function POST(request: Request) {
               }),
             },
           }),
-        })
+        }), undefined)
       )
     );
 

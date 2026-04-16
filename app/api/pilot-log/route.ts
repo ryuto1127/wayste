@@ -8,6 +8,7 @@ import { generateRequestId } from "@/lib/request-id";
 import { del as deleteBlob } from "@vercel/blob";
 import type { PilotLogEntry } from "@/lib/types";
 import { verifyKioskRequest } from "@/lib/kiosk-auth";
+import { parsePilotLogEntry } from "@/lib/pilot-log-schema";
 
 import { checkAndSendMilestoneNotification } from "@/lib/milestone-check";
 
@@ -36,18 +37,12 @@ const PilotLogPostSchema = z.object({
 });
 
 export async function GET(_request: Request) {
-  // GET is read-only (review page) — no auth required.
-
+  // Auth is enforced by middleware.ts (admin Basic Auth / x-api-key).
+  // /api/pilot-log is in ADMIN_PATHS — do NOT remove that entry.
   try {
     const raw = await redis.lrange(KEYS.pilotLog, 0, -1);
     const entries: PilotLogEntry[] = raw
-      .map((item) => {
-        try {
-          return (typeof item === "string" ? JSON.parse(item) : item) as PilotLogEntry;
-        } catch {
-          return null;
-        }
-      })
+      .map(parsePilotLogEntry)
       .filter((e): e is PilotLogEntry => e !== null)
       .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
 
@@ -155,13 +150,12 @@ export async function DELETE(request: Request) {
 
   try {
     // ── Load all entries ──
+    // Note: corrupted/malformed entries fail parsing and are silently dropped
+    // — the rebuild below excludes them from the new list, which is the
+    // desired side-effect (cleanup of any stray bad data).
     const raw = await redis.lrange(KEYS.pilotLog, 0, -1);
     const allEntries: PilotLogEntry[] = raw
-      .map((item) => {
-        try {
-          return (typeof item === "string" ? JSON.parse(item) : item) as PilotLogEntry;
-        } catch { return null; }
-      })
+      .map(parsePilotLogEntry)
       .filter((e): e is PilotLogEntry => e !== null);
 
     // ── Partition: entries to keep vs delete ──

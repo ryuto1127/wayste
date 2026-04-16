@@ -12,6 +12,7 @@ import { z } from "zod/v4";
 import { redis, KEYS } from "@/lib/redis";
 import type { PilotLogEntry } from "@/lib/types";
 import { recordCalibrationVerdict } from "@/lib/calibration";
+import { parsePilotLogEntry } from "@/lib/pilot-log-schema";
 
 /** Human review verdicts for pilot log entries: requestId → "correct" | "wrong" | "false_detection" */
 const VERDICTS_KEY = "recycling:review-verdicts";
@@ -26,11 +27,7 @@ export async function GET() {
     ]);
 
     const entries = pilotRaw
-      .map((item) => {
-        try {
-          return (typeof item === "string" ? JSON.parse(item) : item) as PilotLogEntry;
-        } catch { return null; }
-      })
+      .map(parsePilotLogEntry)
       .filter((e): e is PilotLogEntry => e !== null)
       .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
       .map((entry) => ({
@@ -64,21 +61,16 @@ export async function DELETE(request: Request) {
     try {
       const allRaw: string[] = await redis.lrange(KEYS.pilotLog, 0, -1);
       let removed = false;
-      for (const item of allRaw) {
-        try {
-          const entry = (typeof item === "string" ? JSON.parse(item) : item) as PilotLogEntry;
-          if (entry.requestId === requestId) {
-            const idx = allRaw.indexOf(item);
-            const sentinel = `__DELETED__${Date.now()}`;
-            const pipe = redis.pipeline();
-            pipe.lset(KEYS.pilotLog, idx, sentinel);
-            pipe.lrem(KEYS.pilotLog, 1, sentinel);
-            await pipe.exec();
-            removed = true;
-            break;
-          }
-        } catch {
-          // skip malformed
+      for (let idx = 0; idx < allRaw.length; idx++) {
+        const entry = parsePilotLogEntry(allRaw[idx]);
+        if (entry?.requestId === requestId) {
+          const sentinel = `__DELETED__${Date.now()}`;
+          const pipe = redis.pipeline();
+          pipe.lset(KEYS.pilotLog, idx, sentinel);
+          pipe.lrem(KEYS.pilotLog, 1, sentinel);
+          await pipe.exec();
+          removed = true;
+          break;
         }
       }
       await redis.hdel(VERDICTS_KEY, requestId);
@@ -177,8 +169,8 @@ export async function POST(request: Request) {
     try {
       const allRaw: string[] = await redis.lrange(KEYS.pilotLog, 0, 200);
       for (const item of allRaw) {
-        const entry = (typeof item === "string" ? JSON.parse(item) : item) as PilotLogEntry;
-        if (entry.requestId === requestId) {
+        const entry = parsePilotLogEntry(item);
+        if (entry?.requestId === requestId) {
           await recordCalibrationVerdict(
             entry.confidence,
             verdict === "correct",

@@ -18,6 +18,7 @@ import { NextResponse } from "next/server";
 import { redis, KEYS } from "@/lib/redis";
 import type { PilotLogEntry } from "@/lib/types";
 import { isAllowedBlobUrl } from "@/lib/blob-url";
+import { parsePilotLogEntry } from "@/lib/pilot-log-schema";
 // Dynamic import: archiver is CommonJS, avoid top-level ESM issues
 import { Readable } from "node:stream";
 
@@ -49,14 +50,8 @@ export async function GET(request: Request) {
     const toExport: { url: string; filename: string; entry: PilotLogEntry; verdict: string }[] = [];
 
     for (const item of pilotRaw) {
-      let entry: PilotLogEntry;
-      try {
-        entry = (typeof item === "string" ? JSON.parse(item) : item) as PilotLogEntry;
-      } catch {
-        continue;
-      }
-
-      if (!entry.requestId || !entry.imageUrl) continue;
+      const entry = parsePilotLogEntry(item);
+      if (!entry || !entry.requestId || !entry.imageUrl) continue;
 
       // Date range filter
       const entryMs = new Date(entry.timestamp).getTime();

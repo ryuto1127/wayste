@@ -15,6 +15,7 @@
  * All comparisons use constant-time digest comparison to avoid timing oracles.
  */
 import { NextResponse } from "next/server";
+import { hmacHex, timingSafeEqualStr } from "@/lib/crypto-utils";
 
 export const KIOSK_SESSION_COOKIE = "kiosk_session";
 /** 30 days — kiosks are long-lived trusted devices. Rotate KIOSK_API_TOKEN to revoke. */
@@ -28,32 +29,7 @@ const SESSION_INFO = "wayste-kiosk-session-v1";
  * leaked token — compromise requires rotating KIOSK_API_TOKEN.
  */
 export async function makeKioskSessionToken(kioskToken: string): Promise<string> {
-  const enc = new TextEncoder();
-  const key = await crypto.subtle.importKey(
-    "raw",
-    enc.encode(kioskToken),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
-  );
-  const sig = await crypto.subtle.sign("HMAC", key, enc.encode(SESSION_INFO));
-  return Array.from(new Uint8Array(sig))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-}
-
-/** Constant-time comparison of two strings via SHA-256 digest equality. */
-async function timingSafeEqualStr(a: string, b: string): Promise<boolean> {
-  const enc = new TextEncoder();
-  const [digA, digB] = await Promise.all([
-    crypto.subtle.digest("SHA-256", enc.encode(a)),
-    crypto.subtle.digest("SHA-256", enc.encode(b)),
-  ]);
-  const va = new Uint8Array(digA);
-  const vb = new Uint8Array(digB);
-  let diff = 0;
-  for (let i = 0; i < va.length; i++) diff |= va[i] ^ vb[i];
-  return diff === 0;
+  return hmacHex(kioskToken, SESSION_INFO);
 }
 
 function isLocalhostHost(host: string | null): boolean {

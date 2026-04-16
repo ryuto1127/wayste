@@ -26,9 +26,11 @@
 
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { hmacHex, timingSafeEqualStr } from "@/lib/crypto-utils";
 
 const SESSION_COOKIE = "admin_session";
 const SESSION_MAX_AGE = 60 * 60 * 4; // 4 hours
+const SESSION_INFO = "wayste-admin-session-v1";
 
 /** Paths that require admin Basic Auth. */
 const ADMIN_PATHS = [
@@ -47,13 +49,15 @@ function isAdminPath(pathname: string): boolean {
 }
 
 /**
- * Simple HMAC-like session token using Web Crypto.
- * Token = hex(SHA-256(adminKey + ":admin-session-salt"))
+ * Proper HMAC-SHA256 session token. The cookie value is deterministic
+ * (HMAC of a fixed label keyed by ADMIN_API_KEY), so rotating
+ * ADMIN_API_KEY invalidates every existing admin session at once.
+ *
+ * For per-session revocation in the future, replace this with a random
+ * token + Redis-backed session table.
  */
 async function makeSessionToken(adminKey: string): Promise<string> {
-  const data = new TextEncoder().encode(adminKey + ":admin-session-salt");
-  const hash = await crypto.subtle.digest("SHA-256", data);
-  return Array.from(new Uint8Array(hash)).map((b) => b.toString(16).padStart(2, "0")).join("");
+  return hmacHex(adminKey, SESSION_INFO);
 }
 
 export async function middleware(request: NextRequest) {
@@ -85,13 +89,13 @@ export async function middleware(request: NextRequest) {
 
   // 1. Check session cookie first (no password prompt)
   const sessionCookie = request.cookies.get(SESSION_COOKIE)?.value;
-  if (sessionCookie === expectedToken) {
+  if (sessionCookie && (await timingSafeEqualStr(sessionCookie, expectedToken))) {
     return NextResponse.next();
   }
 
   // 2. Check x-api-key header (for programmatic access / curl)
   const apiKey = request.headers.get("x-api-key");
-  if (apiKey === adminKey) {
+  if (apiKey && (await timingSafeEqualStr(apiKey, adminKey))) {
     const res = NextResponse.next();
     res.cookies.set(SESSION_COOKIE, expectedToken, {
       httpOnly: true,
@@ -109,7 +113,7 @@ export async function middleware(request: NextRequest) {
     try {
       const decoded = atob(authHeader.slice(6));
       const password = decoded.includes(":") ? decoded.split(":").slice(1).join(":") : decoded;
-      if (password === adminKey) {
+      if (await timingSafeEqualStr(password, adminKey)) {
         const res = NextResponse.next();
         res.cookies.set(SESSION_COOKIE, expectedToken, {
           httpOnly: true,

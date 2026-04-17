@@ -1,9 +1,10 @@
 "use client";
 
-import React, { useCallback } from "react";
+import React, { useCallback, useEffect, useRef } from "react";
 import type { ClassificationResponse, StreamDefinition, BinPosition } from "@/lib/types";
 import type { Locale, TranslationKey } from "@/lib/i18n";
 import { t } from "@/lib/i18n";
+import type { CameraFeedHandle } from "./CameraFeed";
 
 /** Map a waste stream ID to its localised display label. */
 function streamLabel(locale: Locale, streamId: string): string {
@@ -34,18 +35,90 @@ function getTrustLevel(confidence: number, needsReview: boolean): TrustLevel {
 interface ResultScreenProps {
   results: ClassificationResponse[];
   locale: Locale;
-  onToggleLocale: () => void;
   voiceEnabled?: boolean;
   /** Stream definitions from site config — used to look up physical bin positions. */
   streams?: StreamDefinition[];
+  /**
+   * Reference to the main CameraFeed — used to mirror the live stream into
+   * the top-right mini viewfinder so users can verify the camera is still
+   * tracking their item.
+   */
+  cameraRef?: React.RefObject<CameraFeedHandle | null>;
+  /** Whether the camera feed is horizontally mirrored. Keeps mini view consistent. */
+  mirrorCamera?: boolean;
+}
+
+/**
+ * Small live camera preview shown at the top-right of the result screen.
+ * Mirrors the main camera's MediaStream via a second `<video>` element so
+ * the user can see their item is still being tracked while they read the
+ * result — without stealing attention from the center hero.
+ */
+function MiniViewfinder({
+  cameraRef,
+  mirror,
+}: {
+  cameraRef: React.RefObject<CameraFeedHandle | null>;
+  mirror: boolean;
+}) {
+  const miniVideoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    function tryAttach() {
+      if (cancelled) return;
+      const source = cameraRef.current?.getVideo();
+      const mini = miniVideoRef.current;
+      if (source?.srcObject && mini && mini.srcObject !== source.srcObject) {
+        mini.srcObject = source.srcObject;
+      }
+    }
+    tryAttach();
+    // Poll briefly in case the main camera isn't ready yet at mount time.
+    const interval = setInterval(tryAttach, 300);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [cameraRef]);
+
+  return (
+    <div
+      className="absolute top-5 right-5 z-30 rounded-xl overflow-hidden border-2 border-white/70 shadow-lg"
+      style={{ width: "14vw", aspectRatio: "16 / 9" }}
+      aria-hidden="true"
+    >
+      <video
+        ref={miniVideoRef}
+        autoPlay
+        playsInline
+        muted
+        className="w-full h-full object-cover bg-neutral-900"
+        style={mirror ? { transform: "scaleX(-1)" } : undefined}
+      />
+    </div>
+  );
+}
+
+/** Top-left wayste branding — visual anchor matching the idle screen. */
+function BrandingCorner() {
+  return (
+    <div className="absolute top-5 left-5 z-30 flex items-center gap-2">
+      <img src="/logo.svg" alt="wayste logo" className="w-8 h-8" />
+      <span className="text-lg font-bold text-teal-400 tracking-tight">
+        wayste
+      </span>
+    </div>
+  );
 }
 
 export default function ResultScreen({
   results,
   locale,
-  onToggleLocale,
   voiceEnabled = false,
   streams = [],
+  cameraRef,
+  mirrorCamera = false,
 }: ResultScreenProps) {
   const T = useCallback(
     (key: TranslationKey) => t(locale, key),
@@ -112,30 +185,8 @@ export default function ResultScreen({
         aria-live="assertive"
         aria-atomic="true"
       >
-        <div className="absolute top-6 right-6 z-30 flex items-center bg-neutral-800/60 rounded-lg overflow-hidden">
-          <button
-            onClick={locale === "ja" ? onToggleLocale : undefined}
-            className={`px-3.5 py-1.5 text-xs font-bold transition-colors ${
-              locale === "en"
-                ? "bg-teal-600/30 text-teal-300"
-                : "text-neutral-500 hover:text-neutral-300"
-            }`}
-            aria-pressed={locale === "en"}
-          >
-            EN
-          </button>
-          <button
-            onClick={locale === "en" ? onToggleLocale : undefined}
-            className={`px-3.5 py-1.5 text-xs font-bold transition-colors ${
-              locale === "ja"
-                ? "bg-teal-600/30 text-teal-300"
-                : "text-neutral-500 hover:text-neutral-300"
-            }`}
-            aria-pressed={locale === "ja"}
-          >
-            日本語
-          </button>
-        </div>
+        <BrandingCorner />
+        {cameraRef && <MiniViewfinder cameraRef={cameraRef} mirror={mirrorCamera} />}
 
         <div className="flex-1 flex flex-col items-center justify-center p-6 gap-6 max-w-lg mx-auto w-full text-center">
           <div className="text-8xl" aria-hidden="true">&#x1F64F;</div>
@@ -157,31 +208,8 @@ export default function ResultScreen({
       aria-live="assertive"
       aria-atomic="true"
     >
-      {/* Language toggle — dual-button */}
-      <div className="absolute top-6 right-6 z-30 flex items-center bg-neutral-800/60 rounded-lg overflow-hidden">
-        <button
-          onClick={locale === "ja" ? onToggleLocale : undefined}
-          className={`px-3.5 py-1.5 text-xs font-bold transition-colors ${
-            locale === "en"
-              ? "bg-teal-600/30 text-teal-300"
-              : "text-neutral-500 hover:text-neutral-300"
-          }`}
-          aria-pressed={locale === "en"}
-        >
-          EN
-        </button>
-        <button
-          onClick={locale === "en" ? onToggleLocale : undefined}
-          className={`px-3.5 py-1.5 text-xs font-bold transition-colors ${
-            locale === "ja"
-              ? "bg-teal-600/30 text-teal-300"
-              : "text-neutral-500 hover:text-neutral-300"
-          }`}
-          aria-pressed={locale === "ja"}
-        >
-          日本語
-        </button>
-      </div>
+      <BrandingCorner />
+      {cameraRef && <MiniViewfinder cameraRef={cameraRef} mirror={mirrorCamera} />}
 
       {isMulti ? (
         /* Multi-item: responsive grid — 2 cols for 2 items, 3 cols for 3, 2×2 grid for 4 */

@@ -36,12 +36,11 @@ import {
   type Bbox,
 } from "@/lib/bbox-utils";
 // kioskAuthHeaders replaced by session token (server-generated, HMAC-signed)
-import { recordSort } from "@/lib/forest-state";
+import { recordSort } from "@/lib/kiosk-counter";
 import CameraFeed, { type CameraFeedHandle } from "./CameraFeed";
 import IdleScreen from "./IdleScreen";
 import CameraScreen from "./CameraScreen";
 import ResultScreen from "./ResultScreen";
-import SeedlingAnimation from "./SeedlingAnimation";
 import SystemStatusBadge from "./SystemStatusBadge";
 
 // ── Timing constants ──
@@ -177,24 +176,16 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
   // Keep stableResultsRef in sync for stale-closure-safe reads in YOLO loop
   useEffect(() => { stableResultsRef.current = stableResults; }, [stableResults]);
 
-  /** Track whether the user has manually toggled the language. */
-  const userHasToggledRef = useRef(false);
   /** Incremented each time the pipeline returns to idle after a classification.
    *  Drives idle-screen stats refresh. */
   const [statsVersion, setStatsVersion] = useState(0);
 
-  // ── Voice guidance state (persisted in localStorage) ──
-  const [voiceEnabled, setVoiceEnabled] = useState(() => {
-    if (typeof window === "undefined") return false;
-    try { return localStorage.getItem("rb-voice") === "1"; } catch { return false; }
-  });
-  const toggleVoice = useCallback(() => {
-    setVoiceEnabled((v) => {
-      const next = !v;
-      try { localStorage.setItem("rb-voice", next ? "1" : "0"); } catch {}
-      return next;
-    });
-  }, []);
+  // ── Voice guidance (site-config driven — end-users cannot toggle) ──
+  const [voiceEnabled, setVoiceEnabled] = useState(false);
+  /** Whether the camera feed is horizontally mirrored — read from site config. */
+  const [mirrorCamera, setMirrorCamera] = useState(
+    process.env.NEXT_PUBLIC_MIRROR_CAMERA === "true"
+  );
 
   // ── CV counters (refs to avoid re-renders) ──
   const goneCountRef = useRef(0);
@@ -235,10 +226,6 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
   const lastCalibrationRef = useRef<Calibration | null>(null);
   const errorRef = useRef<string | null>(null);
 
-  // ── Seedling gamification state ──
-  const [showSeedling, setShowSeedling] = useState(false);
-  /** Index of tree that just grew — passed to ForestVisualization for growth animation on idle screen. */
-  const [justAdvancedTreeIndex, setJustAdvancedTreeIndex] = useState<number | null>(null);
   /** Whether the last classification was a successful sort (not nothing_detected). */
   const lastResultSuccessRef = useRef(false);
   /** Mirror of `locale` state as a ref for stale-closure-safe reads inside the CV interval. */
@@ -316,17 +303,31 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           if (data.streams) setSiteStreams(data.streams);
           // Initialize thresholds from site sensitivity (calibration applied later)
           thresholdsRef.current = computeThresholds(data.sensitivity ?? 0.5);
+          // Voice and mirror are site-config driven — no end-user toggle.
+          setVoiceEnabled(data.voiceEnabled ?? false);
+          if (typeof data.mirrorCamera === "boolean") {
+            setMirrorCamera(data.mirrorCamera);
+          }
         })
         .catch(() => {}),
     ]);
+
+    // Preload the BlazeFace face detector so the first real classification
+    // (classify or T1 pilot-log) doesn't pay the ~5 MB WASM + 200 KB model
+    // download cost. Not gated into overallReady — if this fails the kiosk
+    // still works; call sites fail-closed (treat as "face present") so
+    // privacy is preserved even without the detector.
+    import("@/lib/face-detect")
+      .then((m) => m.warmupFaceDetector())
+      .catch(() => {});
   }, []);
 
-  // Fetch defaultLocale from site-config API as a fallback
+  // Fetch defaultLocale from site-config API as a fallback when no prop was passed.
   useEffect(() => {
     if (defaultLocale) return;
     const check = () => {
       const cfg = siteConfigRef.current;
-      if (cfg?.defaultLocale && cfg.defaultLocale !== locale && !userHasToggledRef.current) {
+      if (cfg?.defaultLocale && cfg.defaultLocale !== locale) {
         setLocale(cfg.defaultLocale as Locale);
       }
     };
@@ -336,11 +337,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       fetch("/api/site-config")
         .then((r) => r.json())
         .then((data: { defaultLocale?: string }) => {
-          if (
-            data.defaultLocale &&
-            data.defaultLocale !== locale &&
-            !userHasToggledRef.current
-          ) {
+          if (data.defaultLocale && data.defaultLocale !== locale) {
             setLocale(data.defaultLocale as Locale);
           }
         })
@@ -361,11 +358,6 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
     (key: Parameters<typeof t>[1]) => t(locale, key),
     [locale]
   );
-
-  const toggleLocale = useCallback(() => {
-    userHasToggledRef.current = true;
-    setLocale((l) => (l === "en" ? "ja" : "en"));
-  }, []);
 
   const transition = useCallback((next: PipelineState) => {
     stateRef.current = next;
@@ -669,12 +661,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
             console.log(`[result] FG gone → cooldown`);
             stopYoloLoop();
             if (resultSweepTimerRef.current) { clearTimeout(resultSweepTimerRef.current); resultSweepTimerRef.current = null; }
-            // Gamification: record successful sort and show seedling animation
-            if (lastResultSuccessRef.current) {
-              const { advancedIndex } = recordSort();
-              setJustAdvancedTreeIndex(advancedIndex);
-              setShowSeedling(true);
-            }
+            if (lastResultSuccessRef.current) recordSort();
             analyzer.boostBackgroundAdaptation();
             cooldownStartRef.current = Date.now();
             transition("cooldown");
@@ -686,12 +673,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
             console.log(`[result] timeout → cooldown`);
             stopYoloLoop();
             if (resultSweepTimerRef.current) { clearTimeout(resultSweepTimerRef.current); resultSweepTimerRef.current = null; }
-            // Gamification: record successful sort and show seedling animation
-            if (lastResultSuccessRef.current) {
-              const { advancedIndex } = recordSort();
-              setJustAdvancedTreeIndex(advancedIndex);
-              setShowSeedling(true);
-            }
+            if (lastResultSuccessRef.current) recordSort();
             setStableResults([]); setResultRequestIds([]);
             analyzer.boostBackgroundAdaptation();
             cooldownStartRef.current = Date.now();
@@ -1229,7 +1211,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
 
     /** Log a YOLO-only classification to the server (fire-and-forget).
      *  Needed because YOLO wins skip the /api/classify route entirely. */
-    function logYoloOnlyResult(
+    async function logYoloOnlyResult(
       video: HTMLVideoElement,
       result: ClassificationResponse,
       detections: YoloDetection[],
@@ -1252,10 +1234,25 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       const roiX = Math.round((vw - side) / 2);
       const roiY = Math.round((vh - side) / 2);
 
-      const canvas = new OffscreenCanvas(side, side);
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return;
-      ctx.drawImage(video, roiX, roiY, side, side, 0, 0, side, side);
+      // ── Client-side face detection gate ──
+      // BlazeFace is destructive to OffscreenCanvas (transferToImageBitmap),
+      // so draw to a dedicated canvas for the face check. Fail-closed: if
+      // the detector errors, treat as "face present" so the image is not
+      // stored — the server-side check still runs and provides the authoritative
+      // floor against a compromised kiosk.
+      const faceCanvas = new OffscreenCanvas(side, side);
+      const faceCtx = faceCanvas.getContext("2d");
+      if (!faceCtx) return;
+      faceCtx.drawImage(video, roiX, roiY, side, side, 0, 0, side, side);
+
+      let faceDetected = false;
+      try {
+        const { containsFace } = await import("@/lib/face-detect");
+        faceDetected = await containsFace(faceCanvas);
+      } catch {
+        console.warn("[pilot-log] Face detection unavailable — skipping image upload (fail-closed)");
+        faceDetected = true;
+      }
 
       // Build allItems from all resolved results
       const allItems = (allResults ?? [result]).map(r => ({
@@ -1265,38 +1262,62 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
         modelUsed: modelUsed as string,
       }));
 
-      canvas.convertToBlob({ type: "image/jpeg", quality: 0.82 }).then((blob) => {
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          const frame = (reader.result as string).split(",")[1];
-          if (!frame) return;
-          fetch("/api/pilot-log", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              image: frame,
-              entry: {
-                modelUsed,
-                escalated: false,
-                itemName: result.itemName,
-                wasteStream: result.wasteStream,
-                confidence: result.confidence,
-                requiresVerification: result.needsReview ?? false,
-                latencyMs,
-                yoloDetections: toDetectionLogs(detections),
-                meta: {
-                  sharpnessScore: analysis.sharpnessScore,
-                  imageQuality: imageQualityBand(analysis),
-                },
-                ...(tierResults && { tierResults }),
-                allItems,
-                ...(counts && { blobCount: counts.blobCount, yoloDetectionCount: counts.yoloDetectionCount }),
-              },
-            }),
-          }).catch(() => {}); // best-effort
-        };
-        reader.readAsDataURL(blob);
-      }).catch(() => {});
+      const entry = {
+        modelUsed,
+        escalated: false,
+        itemName: result.itemName,
+        wasteStream: result.wasteStream,
+        confidence: result.confidence,
+        requiresVerification: result.needsReview ?? false,
+        latencyMs,
+        yoloDetections: toDetectionLogs(detections),
+        meta: {
+          sharpnessScore: analysis.sharpnessScore,
+          imageQuality: imageQualityBand(analysis),
+        },
+        ...(tierResults && { tierResults }),
+        allItems,
+        ...(counts && { blobCount: counts.blobCount, yoloDetectionCount: counts.yoloDetectionCount }),
+      };
+
+      // Face present → skip image capture entirely, log metadata only.
+      if (faceDetected) {
+        fetch("/api/pilot-log", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ faceDetected: true, entry }),
+        }).catch(() => {});
+        return;
+      }
+
+      // No face → capture and upload. `faceCanvas` was drained by
+      // `transferToImageBitmap` inside `containsFace`, so redraw the ROI
+      // onto a fresh canvas for the JPEG encode. Pass faceDetected: false
+      // so the server knows the client already checked — server still
+      // re-runs its own detector (`/api/pilot-log/route.ts`) as the
+      // authoritative floor, matching the pattern in `/api/classify`.
+      try {
+        const uploadCanvas = new OffscreenCanvas(side, side);
+        const uploadCtx = uploadCanvas.getContext("2d");
+        if (!uploadCtx) return;
+        uploadCtx.drawImage(video, roiX, roiY, side, side, 0, 0, side, side);
+        const blob = await uploadCanvas.convertToBlob({ type: "image/jpeg", quality: 0.82 });
+        const dataUrl: string = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
+        const frame = dataUrl.split(",")[1];
+        if (!frame) return;
+        fetch("/api/pilot-log", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ image: frame, faceDetected: false, entry }),
+        }).catch(() => {});
+      } catch {
+        // best-effort
+      }
     }
 
     // ── Trigger classification (Tiered Pipeline — all on-demand) ──
@@ -1762,7 +1783,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
         {/* Logo */}
         <img
           src="/logo.svg"
-          alt="Wayste"
+          alt="wayste"
           className="w-28 h-28 mb-8 animate-pulse"
         />
         {/* Spinner */}
@@ -1775,14 +1796,12 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
     );
   }
 
-  const uiScreen: "idle" | "camera" | "result" | "seedling" =
-    showSeedling
-      ? "seedling"
-      : pipelineState === "result"
-        ? "result"
-        : pipelineState === "classifying"
-          ? "camera"
-          : "idle"; // idle + cooldown both show idle screen
+  const uiScreen: "idle" | "camera" | "result" =
+    pipelineState === "result"
+      ? "result"
+      : pipelineState === "classifying"
+        ? "camera"
+        : "idle"; // idle + cooldown both show idle screen
 
 
   return (
@@ -1793,7 +1812,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       >
         <CameraFeed
           ref={cameraRef}
-          mirror={process.env.NEXT_PUBLIC_MIRROR_CAMERA === "true"}
+          mirror={mirrorCamera}
         />
       </div>
 
@@ -1811,14 +1830,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       {uiScreen === "idle" && (
         <IdleScreen
           locale={locale}
-          onToggleLocale={toggleLocale}
           statsVersion={statsVersion}
-          voiceEnabled={voiceEnabled}
-          onToggleVoice={toggleVoice}
-          detectionRoiMargin={DETECTION_ROI_MARGIN}
-          yoloTargetInset={YOLO_TARGET_INSET}
-          justAdvancedTreeIndex={justAdvancedTreeIndex}
-          onTreeAnimationDone={() => setJustAdvancedTreeIndex(null)}
         />
       )}
 
@@ -1826,7 +1838,6 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
         <CameraScreen
           pipelineState={pipelineState}
           locale={locale}
-          detectionRoiMargin={DETECTION_ROI_MARGIN}
           yoloTargetInset={YOLO_TARGET_INSET}
         />
       )}
@@ -1835,21 +1846,15 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
         <ResultScreen
           results={stableResults}
           locale={locale}
-          onToggleLocale={toggleLocale}
           voiceEnabled={voiceEnabled}
           streams={siteStreams}
-        />
-      )}
-
-      {uiScreen === "seedling" && (
-        <SeedlingAnimation
-          locale={locale}
-          onComplete={() => setShowSeedling(false)}
+          cameraRef={cameraRef}
+          mirrorCamera={mirrorCamera}
         />
       )}
 
       {/* System status badge — hidden during result screen to avoid overlap */}
-      {uiScreen !== "result" && uiScreen !== "seedling" && (
+      {uiScreen !== "result" && (
         <SystemStatusBadge thermalWarning={thermalWarning} />
       )}
     </div>

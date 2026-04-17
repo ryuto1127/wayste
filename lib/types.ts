@@ -116,6 +116,14 @@ export interface PilotLogEntry {
   blobCount?: number;
   /** Number of YOLO waste-class detections (after filtering non-waste). */
   yoloDetectionCount?: number;
+  /**
+   * OpenAI token usage for this classification (GPT path only — `modelUsed === "t2"`).
+   * Undefined for YOLO-only entries (`modelUsed === "T1"`) and for older entries
+   * written before this field was introduced. The dashboard computes GPT cost
+   * from `tokenUsage` when present, and falls back to a constant per-call
+   * estimate when absent.
+   */
+  tokenUsage?: { promptTokens: number; completionTokens: number };
 }
 
 /**
@@ -220,6 +228,12 @@ export interface SiteConfig {
   siteId: string;
   siteName: string;
   defaultLocale?: "en" | "ja";
+  /**
+   * Whether voice announcements play on the result screen.
+   * Site-level setting — end-users cannot toggle this at runtime.
+   * Default: false (silent kiosk, recommended for offices).
+   */
+  voiceEnabled?: boolean;
   streams: StreamDefinition[];
   overrides: ItemOverride[];
   defaultStream: WasteStream;

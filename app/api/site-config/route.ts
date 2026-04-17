@@ -15,6 +15,7 @@ export async function GET() {
 
   return NextResponse.json({
     defaultLocale: config.defaultLocale ?? "en",
+    voiceEnabled: config.voiceEnabled ?? false,
     streams: config.streams,
     sensitivity: config.sensitivity,
     tips: config.tips ?? [],

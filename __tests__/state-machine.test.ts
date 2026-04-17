@@ -327,9 +327,7 @@ describe("State machine", () => {
     // This tests the uiScreen derivation logic from KioskDisplay
     function deriveUiScreen(
       state: PipelineState,
-      showSeedling = false,
-    ): "idle" | "camera" | "result" | "seedling" {
-      if (showSeedling) return "seedling";
+    ): "idle" | "camera" | "result" {
       return state === "result"
         ? "result"
         : state === "classifying"
@@ -341,9 +339,5 @@ describe("State machine", () => {
     expect(deriveUiScreen("cooldown")).toBe("idle");
     expect(deriveUiScreen("classifying")).toBe("camera");
     expect(deriveUiScreen("result")).toBe("result");
-
-    // Seedling overrides any pipeline state
-    expect(deriveUiScreen("cooldown", true)).toBe("seedling");
-    expect(deriveUiScreen("idle", true)).toBe("seedling");
   });
 });

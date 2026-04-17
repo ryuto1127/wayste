@@ -20,6 +20,7 @@ const nextConfig: NextConfig = {
   // deployment and `fs.readFile` at runtime returns ENOENT.
   outputFileTracingIncludes: {
     "/api/classify": ["./lib/models/face-detector.onnx"],
+    "/api/pilot-log": ["./lib/models/face-detector.onnx"],
   },
 
   // Security headers
@@ -50,8 +51,13 @@ const nextConfig: NextConfig = {
             key: "Content-Security-Policy",
             value: [
               "default-src 'self'",
-              // Scripts: self + wasm-unsafe-eval for ONNX Runtime Web
-              "script-src 'self' 'wasm-unsafe-eval'",
+              // Scripts: self + wasm-unsafe-eval for ONNX Runtime Web.
+              // In dev mode Next.js emits inline bootstrap scripts for the RSC
+              // payload and HMR — allow 'unsafe-inline' then so hydration works.
+              // Production builds use nonces and keep the strict policy.
+              process.env.NODE_ENV === "development"
+                ? "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'"
+                : "script-src 'self' 'wasm-unsafe-eval'",
               // Styles: self + inline (Tailwind)
               "style-src 'self' 'unsafe-inline'",
               // Images: self + blob (canvas) + Vercel Blob storage

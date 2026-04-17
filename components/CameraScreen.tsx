@@ -8,14 +8,12 @@ import { t } from "@/lib/i18n";
 interface CameraScreenProps {
   pipelineState: PipelineState;
   locale: Locale;
-  detectionRoiMargin: number;
   yoloTargetInset: number;
 }
 
 export default function CameraScreen({
   pipelineState,
   locale,
-  detectionRoiMargin: _detectionRoiMargin,
   yoloTargetInset,
 }: CameraScreenProps) {
   const T = useCallback(
@@ -78,12 +76,20 @@ export default function CameraScreen({
       )}
 
       {/* Corner scan markers — placed inside a center-square container
-          that matches the YOLO/analyzer crop area (short-side based). */}
+          that matches the YOLO/analyzer crop area (short-side based).
+          While classifying, the marker wrapper breathes (scales subtly in/out)
+          to give a visual "thinking" signal during the 1–2s inference wait. */}
       <div className="absolute inset-0 flex items-center justify-center">
         <div className="relative h-full aspect-square max-w-full">
           <div
             className="absolute pointer-events-none"
-            style={{ inset: verticalInset }}
+            style={{
+              inset: verticalInset,
+              transformOrigin: "center",
+              animation: isClassifying
+                ? "breathe 2.4s ease-in-out infinite"
+                : undefined,
+            }}
           >
             <div
               className={`absolute top-0 left-0 w-10 h-10 border-t-2 border-l-2 rounded-tl-lg transition-colors duration-300 ${borderColor}`}

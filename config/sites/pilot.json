@@ -2,6 +2,7 @@
   "siteId": "pilot",
   "siteName": "実証実験サイト",
   "defaultLocale": "ja",
+  "voiceEnabled": false,
   "mirrorCamera": false,
   "reviewThreshold": 0.55,
   "sensitivity": 0.5,

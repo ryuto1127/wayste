@@ -2,6 +2,7 @@
   "siteId": "airport",
   "siteName": "Airport Terminal — wayste",
   "defaultLocale": "en",
+  "voiceEnabled": true,
   "sensitivity": 0.5,
   "streams": [
     {

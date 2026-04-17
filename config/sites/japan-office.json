@@ -2,6 +2,7 @@
   "siteId": "japan-office",
   "siteName": "オフィス（日本）",
   "defaultLocale": "ja",
+  "voiceEnabled": false,
   "reviewThreshold": 0.55,
   "sensitivity": 0.5,
   "streams": [

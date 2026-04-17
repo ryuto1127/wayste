@@ -35,7 +35,6 @@
 - `lib/yolo-inference.ts` — YOLO26m wrapper (Tier 1: 15 custom waste classes; instant result when confidence ≥ YOLO_FALLBACK_THRESHOLD = 0.75 at default sensitivity); WebGPU primary, WASM fallback
 - `lib/rgb-material-analyzer.ts` — Post-YOLO RGB/texture analysis: color (HSV), transparency, metallicity, bbox aspect ratio, LBP texture → refines YOLO class names + feeds MaterialHint to GPT
 - `lib/inference-backend.ts` — 2-tier orchestration (YOLO → GPT-5.4 mini); sequential model startup with `overallReady` gate
-- `lib/yolo-world-inference.ts` — **Currently unused.** Legacy YOLO World wrapper kept in the repo but no longer imported by any runtime path.
 - `lib/waste-rules-core.ts` — Word-boundary pattern matching + override engine (browser-safe)
 - `lib/waste-rules.ts` — Site config loader + GPT prompt builder (5-min cache)
 - `components/KioskDisplay.tsx` — State machine: loading → idle → object_detected → classifying → result → cooldown; multi-item blob-to-detection matching (up to 4), three-way routing (YOLO match above threshold → instant result, YOLO match below threshold → GPT-5.4 mini, unmatched+object → GPT-5.4 mini, unmatched+noise → discard)
@@ -57,11 +56,12 @@
 - Users walk up holding trash — there is no "place item on surface" step; the system must classify within seconds of approach → speed-first pipeline design
 - Local-first for three reasons: cost, latency, **and privacy** — frames never leave the browser
 - UX is optimized for "glance and go": show the correct bin instantly, hide details behind a collapsible tap; too much info causes confusion
-- "Wrong" button submits immediately without asking for the correct stream — asking kills feedback rate; corrections happen on the /review dashboard
+- No end-user feedback loop at the kiosk — relying on a Wrong button in the field proved unreliable, so it was removed. All quality evaluation comes through the admin `/review` dashboard only (single source of truth).
 - YOLO inference is on-demand, not a continuous loop — lightweight CV runs at ~33fps, heavy inference fires only when object + quality gates pass
-- Result screen stays until the item disappears from view — no auto-dismiss timeout; users need time to read and give feedback
+- Result screen stays until the item disappears from view — no auto-dismiss timeout; users need time to read the result before walking away
 - All detection thresholds derive from `sensitivity` in site config via `lib/threshold-config.ts` — never hardcode individual thresholds; change sensitivity or the derivation formula instead
 - Auto-calibration during BG settling overrides ROI_FG_THRESHOLD with environment-specific noise floor; always test with both calibrated and uncalibrated paths
+- No user-facing settings on the kiosk — language/voice/etc. live in `config/sites/*.json`. Toggles conflict with the 2-second glance assumption and create inconsistent state across users.
 
 ## Do NOT
 - Skip reading `node_modules/next/dist/docs/` before using Next.js 16 APIs — breaking changes from training data

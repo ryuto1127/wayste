@@ -11,7 +11,7 @@ Built for office and public-space pilots, with full English and Japanese support
 - Detects objects held up to the camera using local computer vision — no cloud needed for detection
 - Runs a **2-tier inference pipeline** — local YOLO first, cloud GPT only when needed:
   - **Tier 1 — YOLO26m (on-demand, browser):** custom 15-class waste detection model (`15class_v1.onnx`, 39 MB) covering bottles, cans, cups, bags, batteries, food waste, and other common items. Runs when the CV pipeline triggers classification; high-confidence detections are resolved instantly with no server call.
-  - **Tier 2 — OpenAI `gpt-5.4-mini`:** fires when YOLO confidence is below the fallback threshold (0.75 at default sensitivity), or when a foreground blob exists with no matching YOLO detection. Single-model path — no nano escalation.
+  - **Tier 2 — OpenAI `gpt-5.4-mini`:** fires when YOLO confidence is below the sensitivity-derived fallback threshold (~0.725 at default sensitivity 0.5), or when a foreground blob exists with no matching YOLO detection. Single-model path — no nano escalation.
 - **RGB material analysis** refines YOLO class names using bounding-box color, transparency, metallicity, shape (aspect ratio), and LBP texture analysis — disambiguates "bottle" → "glass bottle" / "PET bottle" / "aluminum can" etc. before waste-rule matching
 - Material hints (hue, saturation, transparency, texture surface) are forwarded to GPT in Tier 2 for improved cloud classification
 - Shows a **clear directive** based on confidence level — no raw percentages shown to users:
@@ -45,8 +45,9 @@ Built for office and public-space pilots, with full English and Japanese support
 | URL | Purpose |
 |-----|---------|
 | `/` | The kiosk itself |
-| `/dashboard` | Live accuracy stats, most-corrected items |
+| `/insights` | Operations dashboard — pipeline funnel, top misclassifications, daily time series |
 | `/review` | Human review — browse all classifications, mark each as Correct/Wrong/Nothing (false detection), download ZIP of flagged images for annotation |
+| `/kiosk/unlock` | Unlock UI for new kiosk devices — sets the long-lived `kiosk_session` cookie |
 
 ---
 
@@ -62,7 +63,7 @@ Built for office and public-space pilots, with full English and Japanese support
 | Local detection | OffscreenCanvas background subtraction at 120×120 (square), ~33 fps, multi-blob analysis (up to 4), auto-calibrating thresholds |
 | Response validation | Zod schema validation on all model output |
 | API security | HMAC-signed session tokens + two-tier auth (kiosk token / admin key) |
-| Database | Upstash Redis (pilot logs + feedback) |
+| Database | Upstash Redis (pilot logs + admin review verdicts) |
 | Image storage | Vercel Blob (captured frames, daily JSONL archives) |
 | Hosting | Vercel |
 
@@ -140,7 +141,7 @@ vercel env pull
 | `OPENAI_DAILY_BUDGET` | No | Hard cap on OpenAI classification calls per UTC day. Recommended: `500` for pilot, `5000` for production. Unset = no cap. |
 | `KIOSK_API_TOKEN` | Production | **Server-only** bearer token required by kiosk endpoints (`/api/classify`, `/api/pilot-log` POST). Omit on localhost to skip auth in dev. Never expose via `NEXT_PUBLIC_*`. Unlock a new kiosk device at `/kiosk/unlock`. |
 | `BLOB_STORE_HOST` | Production | Your Vercel Blob store's full hostname (e.g. `abc123.public.blob.vercel-storage.com`). Prevents the blob bearer token from being sent to an attacker-controlled store. |
-| `ADMIN_API_KEY` | No | API key required by admin endpoints (overrides, review). Omit to skip auth in dev. |
+| `ADMIN_API_KEY` | No | Password required by admin pages (`/insights`, `/review`) via HTTP Basic Auth → 4-hour session cookie. Omit to skip auth in dev. Rotate to invalidate every issued session. |
 | `CRON_SECRET` | No | Vercel Cron authentication secret for `/api/cron/cleanup`. |
 | `BLOB_RETENTION_DAYS` | No | How many days to keep captured images before the cron job deletes them (default: `90`). |
 | `NEXT_PUBLIC_INFERENCE_BACKEND` | No | `onnx` (default, browser ONNX Runtime) or `http` (local inference server). |
@@ -169,7 +170,7 @@ RGB material analysis runs on best detection bounding box:
   · refineClassName disambiguates generic YOLO labels
     (e.g. "bottle" → "glass bottle", "PET bottle", or "aluminum can")
         ↓
-If YOLO26m confidence ≥ YOLO_FALLBACK_THRESHOLD (0.75 at default sensitivity)
+If YOLO26m confidence ≥ YOLO_FALLBACK_THRESHOLD (~0.725 at default sensitivity 0.5)
         → result returned immediately (instant, no server call)
         → YOLO-only log sent to /api/pilot-log (non-blocking)
         ↓
@@ -211,7 +212,7 @@ Frame upload to Blob + Redis logging happen asynchronously (non-blocking)
 | **Differentiated errors** | Timeout errors show "connection slow" message; other failures show "classification failed" — never silently swallowed |
 | **Config hot-reload** | Site config is cached for 5 minutes — override updates propagate without restart |
 | **Pending-item queue** | One-slot queue remembers an item detected while busy; cooldown exits directly to `object_detected` so the next scan starts without re-presentation |
-| **Session tokens** | HMAC-signed tokens issued at page load limit classify API abuse; client auto-refreshes via `/api/session` before expiry |
+| **Kiosk session cookie** | Long-lived HMAC-signed `kiosk_session` cookie (30 days) authorises classify + pilot-log POSTs; rotating `KIOSK_API_TOKEN` revokes every cookie |
 | **Model startup gate** | YOLO model loads + warms up at startup; loading screen blocks kiosk input until `overallReady` is true |
 | **Thermal throttling** | CV analysis duration is tracked continuously; when average exceeds 2× baseline (M1/M2 Mac thermal throttle), the frame rate halves automatically and a warning badge appears |
 
@@ -221,14 +222,14 @@ Frame upload to Blob + Redis logging happen asynchronously (non-blocking)
 
 ### Session token system
 
-On page load the server component generates an HMAC-SHA256-signed session token and passes it to the kiosk client. Every classify and pilot-log request includes the token in the `x-session-token` header. The server validates the signature and enforces a per-token request limit. The client refreshes the token via `GET /api/session` every few hours without a full page reload.
+A new kiosk device exchanges the bearer `KIOSK_API_TOKEN` for an HMAC-SHA256-signed `kiosk_session` cookie via `POST /api/kiosk/session` (or via the `/kiosk/unlock` UI). The cookie lasts 30 days; rotating `KIOSK_API_TOKEN` invalidates every issued cookie. Every classify and pilot-log POST verifies either the cookie or the bearer token before doing any work.
 
 ### Two-tier auth
 
 | Tier | Env var | Mechanism | Endpoints protected |
 |------|---------|-----------|---------------------|
-| Kiosk | `KIOSK_API_TOKEN` | Bearer token in route handler | `/api/classify`, `/api/feedback`, `/api/pilot-log` (POST) |
-| Admin | `ADMIN_API_KEY` | HTTP Basic Auth → session cookie (middleware) | `/dashboard`, `/review`, `/api/review/*`, `/api/stats-stream`, `/api/pilot-log` (DELETE) |
+| Kiosk | `KIOSK_API_TOKEN` | `kiosk_session` cookie OR `Authorization: Bearer <token>` | `/api/classify`, `/api/pilot-log` (POST) |
+| Admin | `ADMIN_API_KEY` | HTTP Basic Auth → 4-hour session cookie (middleware) | `/insights`, `/review`, `/api/review/*`, `/api/dashboard-metrics`, `/api/pilot-log` (DELETE) |
 
 Both default to open (no auth) when the env var is unset, so local development requires no configuration. Admin auth is handled entirely by middleware — after the initial Basic Auth prompt, a session cookie (4 hours) eliminates further password prompts.
 
@@ -311,29 +312,27 @@ Patterns use **word-boundary matching** — a pattern of `"cup"` matches `"paper
 
 After a real-world test:
 
-1. Go to `/dashboard` to see accuracy rate and most-corrected items
+1. Go to `/insights` to see the pipeline funnel, top misclassifications, and daily time series
 2. Go to `/review` — **all classifications** appear with their captured images in a filterable grid, with model name and sharpness score per entry
 3. Mark each entry as **Correct**, **Wrong** (model's class name doesn't match what's in the image), or **Nothing** (false detection)
 4. Download a **ZIP archive** of flagged images (Wrong + low-confidence Correct) for use in annotation tools
 5. Use insights to add override rules in `config/sites/*.json`
 
-> **Note:** Dashboard stats reflect only items with explicit human feedback — either kiosk user taps (Correct/Wrong) or admin review verdicts. Unreviewed items are excluded so stats reflect confirmed data only.
+> **Note:** Insights stats reflect only items that have been admin-reviewed at `/review` — there is no in-kiosk feedback button. Unreviewed items are excluded so stats reflect confirmed data only.
 
 All raw data is in your Upstash console:
 - `recycling:pilot-log` — every classification (item, stream, confidence, model used, latency, image URL)
-- `recycling:feedback` — every kiosk user response (correct / wrong + actual stream if provided)
 - `recycling:review-verdicts` — admin review verdicts (correct / wrong / false_detection) keyed by requestId
-
 
 ### Data retention
 
 A Vercel Cron job runs daily at 03:00 UTC (`/api/cron/cleanup`). It:
-1. Archives the current pilot log and feedback data as JSONL files to `archives/YYYY-MM-DD/` in Blob
+1. Archives the current pilot log as a JSONL file to `archives/YYYY-MM-DD/` in Blob
 2. Deletes captured images older than `BLOB_RETENTION_DAYS` days (default: 90)
 
 A second weekly cron (`/api/cron/export-finetuning`) exports the pilot log as a structured fine-tuning dataset to Blob, ready for model retraining.
 
-You can also trigger manual purges from the dashboard using the date-range data management UI, which calls `DELETE /api/pilot-log`.
+You can also trigger manual purges from the insights dashboard using the date-range data management UI, which calls `DELETE /api/pilot-log`.
 
 ---
 
@@ -342,83 +341,109 @@ You can also trigger manual purges from the dashboard using the date-range data 
 ```
 ├── app/
 │   ├── api/
-│   │   ├── calibration/    # Model calibration prediction tracking
-│   │   ├── classify/       # Classification endpoint (YOLO + OpenAI + waste rules + rate limiting)
+│   │   ├── calibration/         # Calibration prediction tracking (Redis-backed)
+│   │   ├── classify/            # Single + batch classification (GPT-5.4 mini, overrides, Blob upload)
 │   │   ├── cron/
-│   │   │   ├── cleanup/             # Daily cron: archive data to Blob, delete old images
+│   │   │   ├── cleanup/             # Daily cron: archive pilot log to Blob, delete old images
 │   │   │   └── export-finetuning/   # Weekly cron: export pilot log as fine-tuning dataset to Blob
-│   │   ├── feedback/       # User feedback endpoint
-│   │   ├── health/         # Service health check
-│   │   ├── kiosk-stats/    # Today's classification success rate
-│   │   ├── overrides/      # Dynamic override management
-│   │   ├── pilot-image/    # Signed URL proxy for private blob images
-│   │   ├── pilot-log/      # Pilot log read/write/purge (GET/POST/DELETE)
-│   │   ├── review/         # Review verdicts, entry deletion, data export
-│   │   ├── session/        # Session token issuance (rate limited)
-│   │   └── site-config/    # Returns site defaultLocale + streams for client use
-│   ├── dashboard/          # Live stats (accuracy rate, most-corrected items)
-│   ├── review/             # Human review — Correct/Wrong/Nothing verdicts, ZIP export for annotation
-│   └── page.tsx            # Kiosk entry point (server component, passes site config to client)
+│   │   ├── dashboard-metrics/   # GET aggregation for /insights (funnel + top-misclass + timeseries)
+│   │   ├── health/              # Service health check
+│   │   ├── kiosk/
+│   │   │   └── session/         # POST: exchange KIOSK_API_TOKEN for kiosk_session cookie
+│   │   ├── kiosk-stats/         # Today's classification success rate (admin-reviewed only)
+│   │   ├── pilot-image/         # Signed URL proxy for blob-hosted captured frames
+│   │   ├── pilot-log/           # Pilot log read/write/purge (GET/POST/DELETE)
+│   │   ├── review/              # Review verdicts, entry deletion, ZIP/CSV export
+│   │   └── site-config/         # Returns site defaultLocale + streams for client use
+│   ├── demo/screens/            # Internal screen-state showcase (not user-facing)
+│   ├── insights/                # Operations dashboard (funnel, misclassifications, time series)
+│   ├── kiosk/unlock/            # Page that exchanges KIOSK_API_TOKEN for the long-lived cookie
+│   ├── review/                  # Human review — Correct/Wrong/Nothing verdicts, ZIP export
+│   └── page.tsx                 # Kiosk entry point (server component, passes site config to client)
 ├── components/
-│   ├── AdminNav.tsx        # Shared admin navigation (dashboard ↔ review)
-│   ├── CameraFeed.tsx      # Camera initialisation + frame capture (mirror prop)
-│   ├── CameraScreen.tsx    # Camera view state (scanning / detecting)
-│   ├── ErrorBoundary.tsx   # Crash recovery with auto-reload
-│   ├── IdleScreen.tsx      # Idle / attract screen
-│   ├── KioskDisplay.tsx    # 6-state CV pipeline + state machine orchestrator
-│   ├── ResultScreen.tsx    # Fullscreen/split-screen bin result display (1–4 items, 2×2 grid) with bin position indicator
-│   └── SystemStatusBadge.tsx  # YOLO model + thermal warning status indicator
+│   ├── AdminNav.tsx             # Shared admin nav (insights ↔ review ↔ kiosk)
+│   ├── CameraFeed.tsx           # Camera initialisation + frame capture (mirror prop)
+│   ├── CameraScreen.tsx         # Camera view state (scanning / detecting)
+│   ├── ErrorBoundary.tsx        # Crash recovery with auto-reload
+│   ├── IdleScreen.tsx           # Idle / attract screen
+│   ├── KioskDisplay.tsx         # CV pipeline + state machine orchestrator
+│   ├── PerformancePanel.tsx     # Per-tab perf charts (CV, YOLO, thermal) — review-page tooling
+│   ├── ResultScreen.tsx         # Fullscreen / split-screen bin result (1–4 items, 2×2 grid)
+│   ├── SystemStatusBadge.tsx    # YOLO model + thermal warning status indicator
+│   └── insights/                # /insights view + chart subcomponents
+│       ├── InsightsView.tsx
+│       ├── MetricsTimeseries.tsx
+│       ├── MisclassTopChart.tsx
+│       └── PipelineFunnel.tsx
 ├── config/
-│   └── sites/              # Per-location waste rule JSON files
-│       ├── default.json
-│       ├── office-hq.json
+│   └── sites/                   # Per-location waste rule JSON files
 │       ├── airport.json
-│       ├── pilot.json
-│       └── japan-office.json  # Japanese streams (burnable/non-burnable/recyclable/plastic)
+│       ├── japan-office.json    # Default site — Japanese streams (burnable / non-burnable / recyclable / plastic / special)
+│       ├── office-hq.json
+│       └── pilot.json
 ├── public/
-│   └── models/
-│       └── yolo-world-rules.json  # Legacy 53-class YOLO World rules (model is no longer used at runtime)
-├── kiosk/                  # Kiosk deployment scripts
-│   ├── setup-mac.sh              # macOS M1/M2 setup (screensaver, updates, LaunchAgent)
-│   ├── start-kiosk-mac.sh        # Auto-restart Chrome kiosk mode
-│   ├── setup-pi.sh               # Raspberry Pi setup
-│   ├── start-kiosk.sh            # Generic Linux kiosk startup
-│   ├── backup-data.sh            # Data backup script
-│   └── kiosk.desktop             # Linux desktop entry
-├── training/               # Model training and export scripts
-│   ├── export_yolo_world.py       # Export yolov8s-worldv2 to ONNX with pre-baked embeddings
-│   ├── finetune_yolo26n.ipynb     # Fine-tune YOLO26n on recycling dataset
-│   ├── prepare_dataset.py         # Dataset prep (OIDv6 + TACO)
-│   ├── prepare_pilot_data.py      # Convert pilot log images to training data
-│   └── supplement_and_train.py    # Supplement and retrain pipeline
-├── __tests__/              # Jest unit tests
+│   └── models/                  # Browser-served ONNX assets
+│       ├── 15class_v1.onnx          # YOLO26m FP16 — runtime detection model
+│       └── yolo-rules.json          # YOLO class → waste-stream mapping
+├── kiosk/                       # Kiosk deployment scripts
+│   ├── setup-mac.sh                 # macOS M1/M2 setup (screensaver, updates, LaunchAgent)
+│   ├── start-kiosk-mac.sh           # Auto-restart Chrome kiosk mode
+│   ├── setup-pi.sh                  # Raspberry Pi setup
+│   ├── start-kiosk.sh               # Generic Linux kiosk startup
+│   ├── backup-data.sh               # Data backup script
+│   └── kiosk.desktop                # Linux desktop entry
+├── training/                    # Offline dataset prep + model training (Python; not runtime)
+│   ├── finetune_yolo26n.ipynb       # Fine-tune YOLO26n on the recycling dataset
+│   ├── train_clean.py               # Clean-data training entry point
+│   ├── prepare_dataset.py           # Dataset prep (OIDv6 + TACO)
+│   ├── prepare_pilot_data.py        # Convert pilot-log images into training data
+│   ├── build_*_dataset.py           # Class-set-specific dataset builders (39/42/46-class)
+│   ├── ai_curate.py / ai_verify_class.py / filter_quality.py  # Quality + class verification
+│   └── ...                          # Other notebooks, exporters, and helper scripts
+├── __tests__/                   # Jest unit tests (see "Running tests" below)
+├── middleware.ts                # Admin Basic Auth → 4-hour session cookie
+├── instrumentation.ts           # Next.js instrumentation hook (env validation on boot)
 └── lib/
-    ├── auth.ts              # Two-tier API auth (kiosk token + admin key)
-    ├── empty-module.js      # Stub for ONNX Runtime server-side imports
-    ├── auto-override.ts     # Automatic override suggestion from feedback data
-    ├── background-task.ts   # waitUntil wrapper for post-response work
-    ├── calibration.ts       # Calibration prediction tracking
-    ├── blob-store.ts        # Vercel Blob upload helper (private by default)
-    ├── feedback-analysis.ts # Feedback aggregation + override suggestions
-    ├── frame-analyzer.ts    # Local CV pipeline (background model, multi-blob detection with quality scoring)
-    ├── i18n.ts              # EN/JA translations
-    ├── inference-backend.ts # YOLO inference backend abstraction (ONNX or HTTP)
-    ├── kiosk-auth-client.ts # Client-side session token management
-    ├── kiosk-stats.ts       # Today's success rate computation
-    ├── offline-cache.ts     # Browser localStorage result cache (50 items, 24h TTL)
-    ├── pilot-log.ts         # Redis logging
-    ├── redis.ts             # Upstash Redis client
-    ├── request-id.ts        # Per-request UUID for log correlation
-    ├── rgb-material-analyzer.ts # Post-YOLO RGB/texture material analysis (color, LBP, shape)
-    ├── session-token.ts     # HMAC-signed session token generation + validation
-    ├── site-streams-context.tsx # React context providing site streams to client components
-    ├── threshold-config.ts  # Master sensitivity → threshold derivation (auto-calibration aware)
-    ├── types.ts             # Shared TypeScript types
-    ├── waste-rules-core.ts  # Core rules engine (pattern matching, stream resolution)
-    ├── waste-rules.ts       # Rules engine public API (overrides, result building)
-    ├── yolo-inference.ts    # YOLO26m FP16 ONNX Runtime Web inference (on-demand)
-    ├── yolo-world-inference.ts # Legacy YOLO World S wrapper — kept in repo, no longer imported at runtime
-    └── yolo-rules.ts        # COCO-80 class → waste stream mapping rules
+    ├── audit-log.ts                 # Append-only admin action log
+    ├── auth.ts                      # (Legacy / unused) — replaced by kiosk-auth.ts + middleware
+    ├── background-task.ts           # waitUntil wrapper for post-response work
+    ├── bbox-utils.ts                # IoU, frame fingerprint, greedy bbox matching
+    ├── blob-store.ts                # Vercel Blob upload helper
+    ├── blob-url.ts                  # Allow-list check for blob URL hostnames
+    ├── calibration.ts               # Calibration prediction tracking (Redis)
+    ├── crypto-utils.ts              # HMAC + constant-time string compare
+    ├── daily-budget.ts              # Per-UTC-day OpenAI call cap
+    ├── dashboard-metrics.ts         # Pure funcs that build the /insights response
+    ├── empty-module.js              # Stub for ONNX Runtime server-side imports
+    ├── env-validation.ts            # Boot-time env-var validation
+    ├── face-detect.ts               # Browser face-detect (privacy filter)
+    ├── face-detect-server.ts        # Server-side face-detect (privacy filter)
+    ├── frame-analyzer.ts            # Local CV pipeline (background model, multi-blob detection)
+    ├── i18n.ts                      # EN/JA translations
+    ├── inference-backend.ts         # YOLO inference backend abstraction (ONNX or HTTP)
+    ├── insights-helpers.ts          # Client helpers for the /insights view
+    ├── kiosk-auth.ts                # HMAC-signed `kiosk_session` cookie + bearer-token verify
+    ├── kiosk-counter.ts             # Per-stream sort counter (live idle-screen stats)
+    ├── kiosk-stats.ts               # Today's success rate (admin-reviewed only)
+    ├── material-vocabulary.ts       # Material visual cues for the GPT sub-classification prompt
+    ├── milestone-check.ts           # Milestone notifications (Resend) on review thresholds
+    ├── models/                      # Bundled ONNX assets used server-side (face detector)
+    ├── notifications.ts             # Resend email helper
+    ├── offline-cache.ts             # Browser localStorage result cache (50 items, 24h TTL)
+    ├── openai-pricing.ts            # Token-usage → USD conversion for budget tracking
+    ├── perf-monitor.ts              # In-tab perf monitor + BroadcastChannel sync
+    ├── pilot-log.ts                 # Redis logging (recycling:pilot-log list)
+    ├── pilot-log-schema.ts          # Zod schema for pilot-log entries
+    ├── redis.ts                     # Upstash Redis client + key constants
+    ├── request-id.ts                # Per-request UUID for log correlation
+    ├── rgb-material-analyzer.ts     # Post-YOLO RGB/texture material analysis (color, LBP, shape)
+    ├── site-streams-context.tsx     # React context providing site streams to client components
+    ├── threshold-config.ts          # Master sensitivity → threshold derivation
+    ├── types.ts                     # Shared TypeScript types
+    ├── waste-rules-core.ts          # Core rules engine (pattern matching, stream resolution)
+    ├── waste-rules.ts               # Rules engine public API (overrides, result building, GPT prompts)
+    ├── yolo-inference.ts            # YOLO26m FP16 ONNX Runtime Web inference (on-demand)
+    └── yolo-rules.ts                # YOLO class-name → waste-stream mapping (loads /models/yolo-rules.json)
 ```
 
 ---
@@ -429,7 +454,7 @@ You can also trigger manual purges from the dashboard using the date-range data 
 npm test
 ```
 
-267 unit tests across 14 suites covering the state machine, CV pipeline thresholds, threshold sensitivity derivation, HSV skin detection, override pattern matching, Japanese site config, offline cache, notifications, classification API route, RGB material/texture analysis, multi-item blob detection, blob-to-detection matching, sequential model loading, bbox utilities, and API batch classification.
+442 unit tests across 18 suites covering the state machine, CV pipeline thresholds, threshold sensitivity derivation, override pattern matching, offline cache, notifications, classification API route, RGB material/texture analysis, multi-item blob detection, sequential model loading, bbox utilities, dashboard metrics + integration, insights helpers, OpenAI pricing/budget, and analysis exports.
 
 ---
 

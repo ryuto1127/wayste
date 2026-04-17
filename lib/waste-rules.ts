@@ -197,18 +197,19 @@ If isCompound is true, populate components like:
 }
 
 /**
- * Material identification prompt for Tier 3 — used when Tier 1 detected a
- * class with `needsSubclassification: true` at ≥ 80% confidence but Tier 2
- * (YOLO World) was inconclusive (below acceptance threshold).
+ * Material-identification prompt — Tier-2 sub-classification path.
  *
- * Asks GPT to determine the MATERIAL of the item (not the item type, which
- * is already known from Tier 1) using visual cues and the cropped image.
+ * Fired when Tier-1 (YOLO) confidently identifies the item *type* but the
+ * material is still ambiguous (e.g. paper vs. plastic cup). GPT is asked
+ * to decide the MATERIAL only, using the cropped image and the visual
+ * cues defined in lib/material-vocabulary.ts.
  */
 export function buildMaterialIdentificationPrompt(
   siteConfig: SiteConfig,
   locale: string,
   tier1Class: string,
   tier1Confidence: number,
+  /** Legacy slot for prior-tier results (kept for callers; pass [] in the current pipeline). */
   tier2Results: { className: string; confidence: number }[],
 ): string {
   const streamIds = siteConfig.streams.map((s) => s.id);

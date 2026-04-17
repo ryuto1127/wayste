@@ -21,7 +21,8 @@ export interface PerfSample {
   frameCount: number;
   /** YOLO Tier 1 inference time (ms), or null if not fired */
   yoloMs: number | null;
-  /** YOLO World Tier 2 inference time (ms), or null if not fired */
+  /** Legacy second-stage local inference time (ms). Always null in the
+   *  current 2-tier pipeline; kept so historical samples still parse. */
   worldMs: number | null;
   /** Whether thermal throttling was active */
   throttling: boolean;

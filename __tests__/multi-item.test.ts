@@ -276,10 +276,10 @@ describe("Result merging", () => {
     };
   }
 
-  it("merges Tier 1 and Tier 3 results without duplicates", () => {
+  it("merges Tier 1 and Tier 2 results without duplicates", () => {
     const tier1 = [makeDetResult("bottle", 100)];
-    const tier3 = [makeDetResult("cup", 300)];
-    const merged = [...tier1, ...tier3];
+    const tier2 = [makeDetResult("cup", 300)];
+    const merged = [...tier1, ...tier2];
     merged.sort((a, b) => (a._bboxX ?? Infinity) - (b._bboxX ?? Infinity));
     const capped = merged.slice(0, 4);
 
@@ -290,8 +290,8 @@ describe("Result merging", () => {
 
   it("caps merged results at 4", () => {
     const tier1 = [makeDetResult("a", 100), makeDetResult("b", 200), makeDetResult("c", 300)];
-    const tier3 = [makeDetResult("d", 400), makeDetResult("e", 500)];
-    const merged = [...tier1, ...tier3];
+    const tier2 = [makeDetResult("d", 400), makeDetResult("e", 500)];
+    const merged = [...tier1, ...tier2];
     merged.sort((a, b) => (a._bboxX ?? Infinity) - (b._bboxX ?? Infinity));
     const capped = merged.slice(0, 4);
 

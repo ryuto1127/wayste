@@ -1,23 +1,17 @@
 /**
- * Material sub-classification vocabulary and confidence pooling.
+ * Material sub-classification vocabulary and visual cues.
  *
- * Maps COCO-80 Tier 1 classes to narrowed YOLO World vocabularies for
- * material identification. Used by:
- *   - KioskDisplay.tsx (Tier 2 routing: filter YOLO World detections)
- *   - waste-rules.ts (Tier 3 prompt: list possible materials with visual cues)
+ * Used by waste-rules.ts when building the GPT material-identification
+ * prompt: a Tier-1 YOLO detection identified the item type with high
+ * confidence but the material (e.g. paper cup vs. plastic cup) is still
+ * ambiguous. The cue list narrows what GPT should look for.
  *
- * LIMITATION: The YOLO World ONNX model is exported with pre-baked class
- * embeddings (53 classes). Dynamic vocabulary injection at runtime is not
- * feasible without model re-export. Instead, the full 53-class vocabulary
- * runs and results are filtered to the relevant material subset here.
- * Classes marked with (*) are NOT in the current YOLO World model and can
- * only be resolved via Tier 3 (GPT material identification prompt).
+ * The vocabulary/pooling exports below are legacy artifacts from the
+ * removed YOLO World tier and are no longer wired into runtime; only
+ * MATERIAL_VISUAL_CUES is consumed by the current 2-tier pipeline.
  */
 
-/**
- * YOLO World classes relevant to each Tier 1 COCO class.
- * All classes listed here exist in the re-exported YOLO World model (53 classes).
- */
+/** Material candidates per Tier-1 class (legacy — not used at runtime). */
 export const MATERIAL_VOCABULARY: Record<string, string[]> = {
   bottle:       ["plastic bottle", "glass bottle", "glass jar", "aluminium beverage can", "steel beverage can"],
   cup:          ["paper cup", "plastic cup", "styrofoam cup", "ceramic mug", "coffee cup"],
@@ -29,8 +23,8 @@ export const MATERIAL_VOCABULARY: Record<string, string[]> = {
 };
 
 /**
- * Visual cue descriptions per Tier 1 class, used in the Tier 3
- * material identification prompt.
+ * Visual cue descriptions per Tier-1 class, used in the GPT
+ * material-identification prompt (buildMaterialIdentificationPrompt).
  */
 export const MATERIAL_VISUAL_CUES: Record<string, { material: string; cues: string }[]> = {
   bottle: [
@@ -72,11 +66,10 @@ export const MATERIAL_VISUAL_CUES: Record<string, { material: string; cues: stri
 };
 
 /**
- * Confidence pooling groups: YOLO World classes that represent the same
- * material category and should have their confidence pooled.
+ * Confidence pooling groups (legacy — not used at runtime).
  *
- * When Tier 2 returns multiple detections from the same group, their
- * confidence is combined using the complement method:
+ * Originally used to merge multiple YOLO World detections that represented
+ * the same material category. Pooling formula (kept here for reference):
  *   pooled = 1 - ∏(1 - d.confidence)
  * The class name of the highest-confidence member is used.
  */
@@ -87,7 +80,7 @@ export const CONFIDENCE_POOL_GROUPS: string[][] = [
 ];
 
 /**
- * Pool YOLO World detections that belong to the same confidence group.
+ * Pool detections that belong to the same confidence group (legacy helper).
  * Returns a new array with pooled detections replacing individual members.
  * Non-grouped detections are passed through unchanged.
  */

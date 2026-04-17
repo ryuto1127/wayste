@@ -1,20 +1,18 @@
 /**
- * Authentication guards for API endpoints.
+ * Legacy authentication guards — NOT WIRED INTO THE CURRENT PIPELINE.
  *
- * Two tiers:
- *   1. Kiosk token — lightweight bearer token for kiosk endpoints (classify, feedback, pilot-log).
- *      Set KIOSK_API_TOKEN in env. If unset, auth is skipped (dev mode).
- *      Kiosk devices send `Authorization: Bearer <token>` header.
+ * Kiosk auth is now handled by `verifyKioskRequest` in lib/kiosk-auth.ts
+ * (HMAC-signed `kiosk_session` cookie + `KIOSK_API_TOKEN` bearer token),
+ * and admin auth is enforced by middleware.ts (HTTP Basic → 4-hour cookie).
  *
- *   2. Admin API key — for admin endpoints (overrides, review).
- *      Set ADMIN_API_KEY in env. If unset, auth is skipped (dev mode).
- *      Admins send `x-api-key: <key>` header.
+ * The two helpers below are kept only for reference; remove once no caller
+ * is reachable from anywhere (currently nothing imports this file).
  */
 
 import { NextResponse } from "next/server";
 
 /**
- * Guard for kiosk-facing endpoints (classify, feedback, pilot-log).
+ * @deprecated Use `verifyKioskRequest` from lib/kiosk-auth.ts instead.
  * Returns null if authorized, otherwise returns a 401 response.
  * Skipped in dev mode when KIOSK_API_TOKEN is not set.
  */
@@ -38,7 +36,7 @@ export function requireKioskAuth(request: Request): NextResponse | null {
 }
 
 /**
- * Guard for admin endpoints (overrides, review export).
+ * @deprecated Admin auth runs via middleware.ts (HTTP Basic → session cookie).
  * Returns null if authorized, otherwise returns a 401 response.
  * Skipped in dev mode when ADMIN_API_KEY is not set.
  */

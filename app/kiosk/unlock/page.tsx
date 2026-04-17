@@ -13,26 +13,31 @@
  * browser history, and referer headers. Staff pastes it into the form.
  */
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 export default function KioskUnlockPage() {
-  const [token, setToken] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
   const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!token.trim()) return;
+    const token = inputRef.current?.value.trim() ?? "";
+    if (!token) {
+      setStatus("error");
+      setErrorMsg("Please enter a token. / トークンを入力してください。");
+      return;
+    }
     setStatus("loading");
     setErrorMsg(null);
     try {
       const res = await fetch("/api/kiosk/session", {
         method: "POST",
-        headers: { Authorization: `Bearer ${token.trim()}` },
+        headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
         setStatus("success");
-        setToken("");
+        if (inputRef.current) inputRef.current.value = "";
       } else if (res.status === 401) {
         setStatus("error");
         setErrorMsg("Invalid token. Please check and try again. / トークンが正しくありません。");
@@ -75,9 +80,8 @@ export default function KioskUnlockPage() {
             <label className="block">
               <span className="text-sm text-neutral-300">Kiosk Token / トークン</span>
               <input
+                ref={inputRef}
                 type="password"
-                value={token}
-                onChange={(e) => setToken(e.target.value)}
                 autoComplete="off"
                 autoCapitalize="off"
                 autoCorrect="off"
@@ -96,7 +100,7 @@ export default function KioskUnlockPage() {
 
             <button
               type="submit"
-              disabled={status === "loading" || !token.trim()}
+              disabled={status === "loading"}
               className="w-full rounded-md bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-700 disabled:text-neutral-400 text-white py-2 font-medium"
             >
               {status === "loading" ? "Unlocking..." : "Unlock / アンロック"}

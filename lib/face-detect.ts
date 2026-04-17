@@ -71,6 +71,21 @@ async function getDetector(): Promise<FaceDetector | null> {
 }
 
 /**
+ * Preload the face detector so the first real `containsFace()` call doesn't
+ * pay the ~5 MB WASM + 200 KB model download. Safe to call multiple times —
+ * initialization is deduplicated via the module-level `initPromise`.
+ *
+ * The kiosk calls this during its boot/warmup phase so legitimate users only
+ * see warm-path latency (~10-30 ms) instead of cold-start (~1-3 s).
+ *
+ * Returns when the model is ready (or failed to init — fail is swallowed;
+ * `containsFace` will fall back to the same error path on next call).
+ */
+export async function warmupFaceDetector(): Promise<void> {
+  await getDetector();
+}
+
+/**
  * Returns true if one or more faces are detected in the image source.
  *
  * Accepts HTMLCanvasElement, HTMLImageElement, HTMLVideoElement, or

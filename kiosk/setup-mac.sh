@@ -1,6 +1,6 @@
 #!/bin/bash
 # ──────────────────────────────────────────────────────────────
-# Wayste Kiosk — macOS 初期セットアップ (M1/M2 Mac 向け)
+# wayste Kiosk — macOS 初期セットアップ (M1/M2 Mac 向け)
 #
 # 実行: bash kiosk/setup-mac.sh
 #
@@ -21,7 +21,7 @@ PLIST_PATH="$HOME/Library/LaunchAgents/${PLIST_NAME}.plist"
 
 # ── 復元モード ──
 if [ "$1" = "--restore" ]; then
-  echo "=== Wayste Kiosk: macOS 設定の復元 ==="
+  echo "=== wayste Kiosk: macOS 設定の復元 ==="
 
   echo "[1/3] スクリーンセーバー・ロックを元に戻します..."
   defaults delete com.apple.screensaver idleTime 2>/dev/null || true
@@ -40,7 +40,7 @@ if [ "$1" = "--restore" ]; then
   exit 0
 fi
 
-echo "=== Wayste Kiosk: macOS Setup ==="
+echo "=== wayste Kiosk: macOS Setup ==="
 echo ""
 
 # ── 1. スクリーンセーバー・自動ロックの無効化 ──

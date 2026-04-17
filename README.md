@@ -1,4 +1,4 @@
-# Wayste
+# wayste
 
 A real-time AI-powered waste sorting kiosk. Hold any item in front of the camera and it tells you which bin it belongs in — no app, no phone, no buttons required.
 
@@ -9,14 +9,11 @@ Built for office and public-space pilots, with full English and Japanese support
 ## What it does
 
 - Detects objects held up to the camera using local computer vision — no cloud needed for detection
-- Runs a **3-tier local inference pipeline** entirely in the browser before touching any cloud API:
-  - **Tier 1 — YOLO26m (on-demand):** runs when the CV pipeline triggers classification; COCO-80 items with high confidence are resolved instantly (no server call)
-  - **Tier 2 — YOLO World S (on-demand):** 23 consolidated recycling-specific classes (metal cans, cardboard, napkins, styrofoam, straws, etc.) that COCO-80 misses; pre-loaded sequentially at startup (47.9 MB) and run when Tier 1 confidence is below 0.65
-  - **Tier 3 — OpenAI API:** last resort when both local models fail or confidence stays below 0.30
+- Runs a **2-tier inference pipeline** — local YOLO first, cloud GPT only when needed:
+  - **Tier 1 — YOLO26m (on-demand, browser):** custom 15-class waste detection model (`15class_v1.onnx`, 39 MB) covering bottles, cans, cups, bags, batteries, food waste, and other common items. Runs when the CV pipeline triggers classification; high-confidence detections are resolved instantly with no server call.
+  - **Tier 2 — OpenAI `gpt-5.4-mini`:** fires when YOLO confidence is below the fallback threshold (0.75 at default sensitivity), or when a foreground blob exists with no matching YOLO detection. Single-model path — no nano escalation.
 - **RGB material analysis** refines YOLO class names using bounding-box color, transparency, metallicity, shape (aspect ratio), and LBP texture analysis — disambiguates "bottle" → "glass bottle" / "PET bottle" / "aluminum can" etc. before waste-rule matching
-- Material hints (hue, saturation, transparency, texture surface) are forwarded to GPT in Tier 3 for improved cloud classification
-- **YOLO26m covers all 80 COCO classes** — non-waste detections (person, car, furniture, animals) resolve to `not_waste` and return `nothing_detected` instantly, skipping YOLO World and the API entirely
-- When Tier 1 confidence is below 0.30, the API fires in parallel with YOLO World so the slower path never adds extra latency
+- Material hints (hue, saturation, transparency, texture surface) are forwarded to GPT in Tier 2 for improved cloud classification
 - Shows a **clear directive** based on confidence level — no raw percentages shown to users:
   - High confidence → **"Put this in Recycling"**
   - Medium confidence → **"This looks like it goes in Landfill"** + a soft note to check the bin label
@@ -25,7 +22,7 @@ Built for office and public-space pilots, with full English and Japanese support
 - Supports **English and Japanese** with configurable default locale per site
 - Detects **compound items** (e.g. a coffee cup with a plastic lid) and breaks them down into per-component disposal instructions
 - Detects **up to 4 simultaneous items** via multi-blob analysis with per-blob quality scoring (sharpness, contrast, skin ratio); shows a responsive split-screen layout (2-column, 3-column, or 2×2 grid) with staggered fade-in animations
-- **Startup loading screen** with sequential model loading — both YOLO models are fully loaded and warmed up before the kiosk accepts input; shows a branded loading screen with progress indicator ("Loading vision model 1/2..." → "2/2..." → "Ready")
+- **Startup loading screen** — the YOLO model is fully loaded and warmed up before the kiosk accepts input; shows a branded loading screen with a progress indicator until the model is ready
 - **Thermal throttling detection** on the kiosk device — when CV analysis times out 2× above baseline, the pipeline automatically halves its frame rate to stay responsive
 - Logs every scan to Redis for post-pilot analysis
 - Saves captured images to **Vercel Blob** with public access + random-suffix URLs (non-guessable, non-enumerable); only exposed through admin-authenticated routes
@@ -37,7 +34,7 @@ Built for office and public-space pilots, with full English and Japanese support
 
 1. Open the kiosk URL on any device with a camera
 2. Hold one item (or multiple items) in front of the camera
-3. Wait for the result — instant for common items (YOLO26m), ~200–800 ms for recycling-specific items (YOLO World), or 1–3 seconds (API fallback)
+3. Wait for the result — instant for common items (YOLO26m), or ~1–3 seconds when GPT-5.4 mini is needed
 4. Dispose of the item in the indicated bin — a physical bin position indicator shows where the bin sits in the row
 5. Walk away or tap **Done** to return to the idle screen early
 
@@ -57,11 +54,10 @@ Built for office and public-space pilots, with full English and Japanese support
 
 | Layer | Technology |
 |-------|-----------|
-| Framework | Next.js 16.2.1 (App Router, TypeScript) |
+| Framework | Next.js 16.2.4 (App Router, TypeScript) |
 | Styling | Tailwind CSS v4 |
-| Local inference (Tier 1) | YOLO26m FP16 (COCO-80, 39 MB) via ONNX Runtime Web — on-demand |
-| Local inference (Tier 2) | YOLO World S (23 consolidated recycling classes, 47.9 MB) via ONNX Runtime Web — on-demand fallback |
-| AI classification | OpenAI GPT-5.4 — `gpt-5.4-nano` (fast) with `gpt-5.4-mini` escalation (compound items / low confidence) |
+| Local inference (Tier 1) | YOLO26m FP16 — custom 15-class waste model (`15class_v1.onnx`, 39 MB) via ONNX Runtime Web — on-demand |
+| AI classification (Tier 2) | OpenAI `gpt-5.4-mini` (single-model path) |
 | Material analysis | RGB color analysis + LBP texture analysis on YOLO bounding boxes — refines class names and feeds hints to GPT |
 | Local detection | OffscreenCanvas background subtraction at 120×120 (square), ~33 fps, multi-blob analysis (up to 4), auto-calibrating thresholds |
 | Response validation | Zod schema validation on all model output |
@@ -137,7 +133,7 @@ vercel env pull
 | `KV_REST_API_URL` | Production | Upstash Redis REST URL |
 | `KV_REST_API_TOKEN` | Production | Upstash Redis token |
 | `BLOB_READ_WRITE_TOKEN` | Production | Vercel Blob token |
-| `SITE_ID` | No | Site config to load (default: `default`). The site config's `defaultLocale` sets the UI language. |
+| `SITE_ID` | No | Site config to load (default: `japan-office`). The site config's `defaultLocale` sets the UI language. |
 | `BLOB_ENABLED` | No | Set to `false` to disable all image uploads entirely (default: enabled). |
 | `NEXT_PUBLIC_MIRROR_CAMERA` | No | Set to `true` for front-facing / selfie cameras. Omit or set `false` for outward-facing kiosk cameras. |
 | `RATE_LIMIT_MAX` | No | Max classifications per IP per minute (default: `15`) |
@@ -162,9 +158,10 @@ Local CV pipeline detects object
         ↓
 5 quality frames accumulated (motion + sharpness gated)
         ↓
-── Tier 1: YOLO26m FP16 (on-demand) ─────────────────────────────────────
-YOLO26m runs on-demand when the CV pipeline triggers classification.
-Rules cover all 80 COCO classes.
+── Tier 1: YOLO26m FP16 (on-demand, browser) ────────────────────────────
+YOLO26m (custom 15-class waste model) runs on-demand when the CV pipeline
+triggers classification. All 15 classes are waste items (bottles, cans, cups,
+bags, batteries, food waste, etc.) — every detection maps to a disposal stream.
         ↓
 RGB material analysis runs on best detection bounding box:
   · Color (HSV), transparency, metallicity, bbox aspect ratio
@@ -172,33 +169,17 @@ RGB material analysis runs on best detection bounding box:
   · refineClassName disambiguates generic YOLO labels
     (e.g. "bottle" → "glass bottle", "PET bottle", or "aluminum can")
         ↓
-If YOLO26m class resolves to not_waste (person, car, furniture, animals…)
-        → nothing_detected returned instantly — no YOLO World, no API call
-        ↓
-If YOLO26m confidence ≥ 0.65 AND class has a waste-stream rule
+If YOLO26m confidence ≥ YOLO_FALLBACK_THRESHOLD (0.75 at default sensitivity)
         → result returned immediately (instant, no server call)
         → YOLO-only log sent to /api/pilot-log (non-blocking)
         ↓
-── Tier 2: YOLO World S (on-demand) ──────────────────────────────────────
-If YOLO26m confidence < 0.65 (or no waste rule for the class):
-  · YOLO World S is pre-loaded sequentially at startup (47.9 MB, ONNX Runtime Web)
-  · Runs on ROI crop — ~200–800 ms on CPU
-  · 23 consolidated recycling classes: metal cans, cardboard, napkins,
-    styrofoam, straws, food containers, milk cartons, etc.
-If YOLO World confidence ≥ 0.45
-        → result returned immediately (no server call)
-        ↓
-── Tier 3: OpenAI API (last resort) ──────────────────────────────────────
-If both local models yield confidence < 0.30 — API fires in parallel with
-YOLO World (no extra wait). Otherwise falls through here when
-YOLO World confidence < 0.45.
+── Tier 2: OpenAI gpt-5.4-mini ───────────────────────────────────────────
+Fires when YOLO confidence is below the fallback threshold, or when a
+foreground blob exists with no matching YOLO detection.
   · Center short-side square crop (e.g. 720×720 from 1280×720) sent to /api/classify
   · MaterialHint (color, transparency, texture) included when available —
     GPT prompt says "Local analysis detected: transparent=true, metallic=false, …"
-  · GPT-5.4 nano classifies item + optional preAction guidance (fast path, ~1s)
-  · If confidence < 0.5 or item flagged for review
-        → escalates to GPT-5.4 mini (accurate path, ~2–4s)
-        → mini result used only if it improves on nano
+  · gpt-5.4-mini classifies item + optional preAction guidance (single-model path)
   · Zod validates model JSON output; unknown stream IDs fall back to needs_review
   · Compound items (multi-part objects) are detected and broken down into per-component disposal instructions
         ↓
@@ -231,8 +212,7 @@ Frame upload to Blob + Redis logging happen asynchronously (non-blocking)
 | **Config hot-reload** | Site config is cached for 5 minutes — override updates propagate without restart |
 | **Pending-item queue** | One-slot queue remembers an item detected while busy; cooldown exits directly to `object_detected` so the next scan starts without re-presentation |
 | **Session tokens** | HMAC-signed tokens issued at page load limit classify API abuse; client auto-refreshes via `/api/session` before expiry |
-| **Sequential model startup** | Both YOLO models load sequentially at startup (no GPU/memory contention); loading screen blocks input until ready; if YOLO World fails, Tier 2 degrades gracefully |
-| **Parallel API race** | When YOLO26m confidence < 0.30, the API fires in parallel with YOLO World — whichever finishes first wins, so low-confidence items never block on two sequential inferences |
+| **Model startup gate** | YOLO model loads + warms up at startup; loading screen blocks kiosk input until `overallReady` is true |
 | **Thermal throttling** | CV analysis duration is tracked continuously; when average exceeds 2× baseline (M1/M2 Mac thermal throttle), the frame rate halves automatically and a warning badge appears |
 
 ---
@@ -250,14 +230,14 @@ On page load the server component generates an HMAC-SHA256-signed session token 
 | Kiosk | `KIOSK_API_TOKEN` | Bearer token in route handler | `/api/classify`, `/api/feedback`, `/api/pilot-log` (POST) |
 | Admin | `ADMIN_API_KEY` | HTTP Basic Auth → session cookie (middleware) | `/dashboard`, `/review`, `/api/review/*`, `/api/stats-stream`, `/api/pilot-log` (DELETE) |
 
-Both default to open (no auth) when the env var is unset, so local development requires no configuration. Admin auth is handled entirely by middleware — after the initial Basic Auth prompt, a session cookie (7 days) eliminates further password prompts.
+Both default to open (no auth) when the env var is unset, so local development requires no configuration. Admin auth is handled entirely by middleware — after the initial Basic Auth prompt, a session cookie (4 hours) eliminates further password prompts.
 
 ### Image privacy
 
 Captured images are uploaded to Vercel Blob with public access (required by `@vercel/blob` v2 for server-side reads). Privacy is enforced at the application layer:
 - URLs include a random suffix — non-guessable and non-enumerable
 - URLs are only exposed through admin-authenticated routes (`/review`, `/api/pilot-image`)
-- Images are auto-deleted after `BLOB_RETENTION_DAYS` (default: 7 days)
+- Images are auto-deleted after `BLOB_RETENTION_DAYS` (default: 90 days)
 - Set `BLOB_ENABLED=false` to disable image uploads entirely
 
 ---
@@ -311,7 +291,7 @@ Rules live in JSON files in `config/sites/`. No code changes needed.
 }
 ```
 
-To create rules for a new location, copy `config/sites/default.json` to `config/sites/your-site.json`, edit it, and set `SITE_ID=your-site` in your Vercel environment variables. Set `defaultLocale` to `"ja"` for Japanese-first sites.
+To create rules for a new location, copy `config/sites/japan-office.json` (the default) or `config/sites/office-hq.json` to `config/sites/your-site.json`, edit it, and set `SITE_ID=your-site` in your Vercel environment variables. Set `defaultLocale` to `"ja"` for Japanese-first sites or `"en"` for English-first sites.
 
 ### Japanese waste streams
 
@@ -397,7 +377,7 @@ You can also trigger manual purges from the dashboard using the date-range data 
 │       └── japan-office.json  # Japanese streams (burnable/non-burnable/recyclable/plastic)
 ├── public/
 │   └── models/
-│       └── yolo-world-rules.json  # 30-class YOLO World → waste stream mapping
+│       └── yolo-world-rules.json  # Legacy 53-class YOLO World rules (model is no longer used at runtime)
 ├── kiosk/                  # Kiosk deployment scripts
 │   ├── setup-mac.sh              # macOS M1/M2 setup (screensaver, updates, LaunchAgent)
 │   ├── start-kiosk-mac.sh        # Auto-restart Chrome kiosk mode
@@ -437,7 +417,7 @@ You can also trigger manual purges from the dashboard using the date-range data 
     ├── waste-rules-core.ts  # Core rules engine (pattern matching, stream resolution)
     ├── waste-rules.ts       # Rules engine public API (overrides, result building)
     ├── yolo-inference.ts    # YOLO26m FP16 ONNX Runtime Web inference (on-demand)
-    ├── yolo-world-inference.ts # YOLO World S ONNX Runtime Web inference (on-demand fallback)
+    ├── yolo-world-inference.ts # Legacy YOLO World S wrapper — kept in repo, no longer imported at runtime
     └── yolo-rules.ts        # COCO-80 class → waste stream mapping rules
 ```
 
@@ -449,7 +429,7 @@ You can also trigger manual purges from the dashboard using the date-range data 
 npm test
 ```
 
-281 unit tests across 11 suites covering the state machine, CV pipeline thresholds, threshold sensitivity derivation, HSV skin detection, override pattern matching, Japanese site config, offline cache, notifications, classification API route, RGB material/texture analysis, multi-item blob detection, blob-to-detection matching, and API batch classification.
+267 unit tests across 14 suites covering the state machine, CV pipeline thresholds, threshold sensitivity derivation, HSV skin detection, override pattern matching, Japanese site config, offline cache, notifications, classification API route, RGB material/texture analysis, multi-item blob detection, blob-to-detection matching, sequential model loading, bbox utilities, and API batch classification.
 
 ---
 

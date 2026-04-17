@@ -1,6 +1,6 @@
 #!/bin/bash
 # ──────────────────────────────────────────────────────────────
-# Wayste Kiosk — macOS 起動スクリプト (M1/M2 Mac 向け)
+# wayste Kiosk — macOS 起動スクリプト (M1/M2 Mac 向け)
 #
 # 使い方:
 #   1. chmod +x start-kiosk-mac.sh
@@ -18,7 +18,7 @@ KIOSK_URL="${KIOSK_URL:-https://wayste-kiosk.vercel.app/}"
 LOG_FILE="/tmp/wayste-kiosk.log"
 CHROME_APP="/Applications/Google Chrome.app"
 
-echo "[$(date)] Starting Wayste Kiosk..." | tee "$LOG_FILE"
+echo "[$(date)] Starting wayste Kiosk..." | tee "$LOG_FILE"
 echo "[$(date)] URL: $KIOSK_URL" | tee -a "$LOG_FILE"
 
 # ── Chrome がインストールされているか確認 ──

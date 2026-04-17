@@ -3,8 +3,8 @@
  *
  * Used as a fallback when YOLO26m (COCO-80) has low confidence or the
  * detected class is not waste-relevant. The model is exported with pre-baked
- * recycling-specific class embeddings (36 classes) — no CLIP encoder needed
- * at runtime.
+ * recycling-specific class embeddings (53 classes: 36 original + 17 material
+ * sub-classification) — no CLIP encoder needed at runtime.
  *
  * Heavier than YOLO26m (~50 MB vs 39 MB), so loaded on-demand and not run
  * continuously. Inference takes ~50-200ms on WebGPU, ~200-800ms on WASM fallback.

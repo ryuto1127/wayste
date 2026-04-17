@@ -81,6 +81,12 @@ export const PilotLogEntrySchema = z.object({
   allItems: AllItemsSchema.max(16).optional(),
   blobCount: z.number().min(0).max(64).optional(),
   yoloDetectionCount: z.number().min(0).max(64).optional(),
+  tokenUsage: z
+    .object({
+      promptTokens: z.number().min(0).max(1_000_000),
+      completionTokens: z.number().min(0).max(1_000_000),
+    })
+    .optional(),
 });
 
 /**

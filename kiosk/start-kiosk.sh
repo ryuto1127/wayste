@@ -1,6 +1,6 @@
 #!/bin/bash
 # ──────────────────────────────────────────────────────────────
-# Wayste Kiosk — Raspberry Pi 起動スクリプト
+# wayste Kiosk — Raspberry Pi 起動スクリプト
 #
 # 使い方:
 #   1. このファイルを Raspberry Pi にコピー
@@ -13,7 +13,7 @@
 KIOSK_URL="${KIOSK_URL:-https://wayste-kiosk.vercel.app/}"
 LOG_FILE="/tmp/kiosk.log"
 
-echo "[$(date)] Starting Wayste Kiosk..." > "$LOG_FILE"
+echo "[$(date)] Starting wayste Kiosk..." > "$LOG_FILE"
 echo "[$(date)] URL: $KIOSK_URL" >> "$LOG_FILE"
 
 export DISPLAY=:0

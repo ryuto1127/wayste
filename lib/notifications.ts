@@ -77,7 +77,7 @@ async function sendEmail(
 
   try {
     await resend.emails.send({
-      from: "Wayste Kiosk <onboarding@resend.dev>",
+      from: "wayste Kiosk <onboarding@resend.dev>",
       to,
       subject,
       html,
@@ -124,7 +124,7 @@ export async function sendErrorNotification(
   }
 
   const timestamp = new Date().toISOString();
-  const subject = `Wayste Kiosk Alert: ${errorType}`;
+  const subject = `wayste Kiosk Alert: ${errorType}`;
   const html = `
     <div style="font-family: sans-serif; max-width: 600px;">
       <h2 style="color: #dc2626;">Service Alert</h2>
@@ -133,7 +133,7 @@ export async function sendErrorNotification(
       <p><strong>Time:</strong> ${timestamp}</p>
       <hr style="border: none; border-top: 1px solid #e5e7eb;" />
       <p style="color: #6b7280; font-size: 12px;">
-        This is an automated alert from the Wayste Kiosk monitoring system.
+        This is an automated alert from the wayste Kiosk monitoring system.
         You will not receive another alert for this error type within 30 minutes.
       </p>
     </div>
@@ -195,18 +195,18 @@ export async function sendMilestoneNotification(data: {
     ? `<p><strong>Most common item:</strong> ${escapeHtml(data.mostCommonItem)}</p>`
     : "";
 
-  const subject = `Wayste Kiosk: ${milestoneNumber} items classified!`;
+  const subject = `wayste Kiosk: ${milestoneNumber} items classified!`;
   const html = `
     <div style="font-family: sans-serif; max-width: 600px;">
       <h2 style="color: #059669;">Milestone Reached!</h2>
-      <p>The Wayste Kiosk has classified <strong>${milestoneNumber}</strong> items.</p>
+      <p>The wayste Kiosk has classified <strong>${milestoneNumber}</strong> items.</p>
       <p><strong>Total items:</strong> ${data.total}</p>
       ${accuracyLine}
       ${commonItemLine}
       <p><strong>Time:</strong> ${timestamp}</p>
       <hr style="border: none; border-top: 1px solid #e5e7eb;" />
       <p style="color: #6b7280; font-size: 12px;">
-        This is an automated notification from the Wayste Kiosk pilot system.
+        This is an automated notification from the wayste Kiosk pilot system.
       </p>
     </div>
   `;

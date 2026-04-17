@@ -1,6 +1,6 @@
 #!/bin/bash
 # ──────────────────────────────────────────────────────────────
-# Wayste — 実証実験データ一括バックアップ
+# wayste — 実証実験データ一括バックアップ
 #
 # Vercel 上のログ（Redis）と画像（Blob）をローカルにダウンロードします。
 # ファインチューニング用のデータセット収集に使います。
@@ -62,7 +62,7 @@ fi
 
 AUTH_HEADER="x-api-key: ${ADMIN_API_KEY}"
 
-echo "=== Wayste Data Backup ==="
+echo "=== wayste Data Backup ==="
 echo "URL:    ${KIOSK_URL}"
 echo "出力先: ${BACKUP_DIR}"
 if [ -n "$DATE_FROM" ] || [ -n "$DATE_TO" ]; then

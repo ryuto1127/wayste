@@ -143,6 +143,21 @@ interface RawClassification {
   horizontalPosition?: "left" | "center" | "right";
 }
 
+/** Token usage extracted from the OpenAI response (omit when usage is missing). */
+type TokenUsage = { promptTokens: number; completionTokens: number };
+
+/** Extract `{ promptTokens, completionTokens }` from a Chat Completion response.
+ *  Returns undefined when the API did not include `usage` (older models or errors). */
+function extractTokenUsage(
+  usage: { prompt_tokens?: number | null; completion_tokens?: number | null } | null | undefined,
+): TokenUsage | undefined {
+  if (!usage) return undefined;
+  const p = usage.prompt_tokens;
+  const c = usage.completion_tokens;
+  if (typeof p !== "number" || typeof c !== "number") return undefined;
+  return { promptTokens: p, completionTokens: c };
+}
+
 // ── Multi-item raw response validation ──
 const RawMultiClassificationSchema = z.object({
   items: z.array(RawClassificationSchema).max(4),
@@ -154,7 +169,7 @@ async function callModel(
   model: string,
   image: string,
   prompt: string
-): Promise<RawClassification> {
+): Promise<{ raw: RawClassification; usage?: TokenUsage }> {
   const response = await openai.chat.completions.create({
     model,
     max_completion_tokens: 4096,
@@ -212,6 +227,7 @@ async function callModel(
   if (!text) throw new Error("No text response from model");
 
   const parsed = JSON.parse(text);
+  const usage = extractTokenUsage(response.usage);
 
   // Validate and provide defaults for missing fields
   const validated = RawClassificationSchema.safeParse(parsed);
@@ -219,17 +235,20 @@ async function callModel(
     console.warn("[callModel] Schema validation failed, using raw parse:", validated.error.issues);
     const raw = parsed as Record<string, unknown>;
     return {
-      itemName: typeof raw.itemName === "string" ? raw.itemName : "unknown",
-      wasteStream: typeof raw.wasteStream === "string" ? raw.wasteStream : "needs_review",
-      confidence: typeof raw.confidence === "number" ? Math.max(0, Math.min(1, raw.confidence)) : 0,
-      reasoning: typeof raw.reasoning === "string" ? raw.reasoning : "",
-      preAction: typeof raw.preAction === "string" ? raw.preAction : "",
-      isCompound: raw.isCompound === true,
-      components: Array.isArray(raw.components) ? (raw.components as ComponentPart[]) : undefined,
+      raw: {
+        itemName: typeof raw.itemName === "string" ? raw.itemName : "unknown",
+        wasteStream: typeof raw.wasteStream === "string" ? raw.wasteStream : "needs_review",
+        confidence: typeof raw.confidence === "number" ? Math.max(0, Math.min(1, raw.confidence)) : 0,
+        reasoning: typeof raw.reasoning === "string" ? raw.reasoning : "",
+        preAction: typeof raw.preAction === "string" ? raw.preAction : "",
+        isCompound: raw.isCompound === true,
+        components: Array.isArray(raw.components) ? (raw.components as ComponentPart[]) : undefined,
+      },
+      usage,
     };
   }
 
-  return validated.data as RawClassification;
+  return { raw: validated.data as RawClassification, usage };
 }
 
 
@@ -239,7 +258,7 @@ async function callModelMulti(
   model: string,
   image: string,
   prompt: string
-): Promise<RawClassification[]> {
+): Promise<{ items: RawClassification[]; usage?: TokenUsage }> {
   const response = await openai.chat.completions.create({
     model,
     max_completion_tokens: 4096,
@@ -308,17 +327,18 @@ async function callModelMulti(
   if (!text) throw new Error("No text response from model");
 
   const parsed = JSON.parse(text);
+  const usage = extractTokenUsage(response.usage);
   const validated = RawMultiClassificationSchema.safeParse(parsed);
   if (!validated.success) {
     console.warn("[callModelMulti] Schema validation failed:", validated.error.issues);
     // Attempt to extract items array from raw parse
     if (Array.isArray(parsed?.items)) {
-      return (parsed.items as RawClassification[]).slice(0, 4);
+      return { items: (parsed.items as RawClassification[]).slice(0, 4), usage };
     }
-    return [];
+    return { items: [], usage };
   }
 
-  return validated.data.items as RawClassification[];
+  return { items: validated.data.items as RawClassification[], usage };
 }
 
 export async function POST(request: Request) {
@@ -468,13 +488,13 @@ export async function POST(request: Request) {
         tier1Ctx.confidence,
         [],
       );
-      const raw = await callModel(openai, "gpt-5.4-mini", image, prompt);
+      const { raw, usage } = await callModel(openai, "gpt-5.4-mini", image, prompt);
       const modelUsed = "t2" as const;
       const result = buildClassificationResult(raw, siteConfig, locale);
       result.modelUsed = modelUsed;
 
       applyConditionalOverride(result, raw);
-      return { result, raw, modelUsed };
+      return { result, raw, modelUsed, tokenUsage: usage };
     }
 
     // ── Standard classification path ──
@@ -493,7 +513,7 @@ export async function POST(request: Request) {
     const promptFinal = noLocalHint
       ? prompt + "\nNo local model could identify this item. Classify from the image alone."
       : prompt;
-    const raw = await callModel(openai, "gpt-5.4-mini", image, promptFinal);
+    const { raw, usage } = await callModel(openai, "gpt-5.4-mini", image, promptFinal);
     const modelUsed = "t2" as const;
 
     // Build result + conditional overrides
@@ -502,7 +522,7 @@ export async function POST(request: Request) {
 
     applyConditionalOverride(result, raw);
 
-    return { result, raw, modelUsed };
+    return { result, raw, modelUsed, tokenUsage: usage };
   }
 
   try {
@@ -533,6 +553,16 @@ export async function POST(request: Request) {
           confidence: b.result.confidence,
           modelUsed: b.modelUsed,
         }));
+        // Sum token usage across all batched OpenAI calls — the single pilot-log
+        // entry represents the cost of the whole batch request.
+        const batchTokenUsage = batchResults.reduce<TokenUsage | undefined>((acc, b) => {
+          if (!b.tokenUsage) return acc;
+          if (!acc) return { ...b.tokenUsage };
+          return {
+            promptTokens: acc.promptTokens + b.tokenUsage.promptTokens,
+            completionTokens: acc.completionTokens + b.tokenUsage.completionTokens,
+          };
+        }, undefined);
         runInBackground(
           Promise.all([
             isolated("calibration", recordCalibrationPrediction(first.result.confidence, first.modelUsed), undefined),
@@ -554,6 +584,7 @@ export async function POST(request: Request) {
               overrideApplied: first.result.wasteStream !== first.raw.wasteStream,
               tierResults: batchTierResults,
               allItems,
+              ...(batchTokenUsage && { tokenUsage: batchTokenUsage }),
             }), undefined)
           )
         );
@@ -572,7 +603,7 @@ export async function POST(request: Request) {
     // ── Multi-item mode: full-frame, zero-detection fallback ──
     if (singleData.multi) {
       const multiPrompt = buildMultiItemPrompt(siteConfig, locale);
-      const rawItems = await callModelMulti(openai, "gpt-5.4-mini", image, multiPrompt);
+      const { items: rawItems, usage: multiUsage } = await callModelMulti(openai, "gpt-5.4-mini", image, multiPrompt);
       const totalServerMs = Date.now() - startMs;
       console.log(`[${requestId}] multi-item classified ${rawItems.length} items in ${totalServerMs}ms`);
 
@@ -623,6 +654,10 @@ export async function POST(request: Request) {
                 overrideApplied: item.result.wasteStream !== item.raw.wasteStream,
                 tierResults: clientTierResults,
                 allItems,
+                // OpenAI usage applies to the single API call that produced
+                // all multi-item results — attribute it to the head entry only
+                // so cost aggregation does not double-count.
+                ...(i === 0 && multiUsage && { tokenUsage: multiUsage }),
               }), undefined)
             ))
           )
@@ -635,7 +670,7 @@ export async function POST(request: Request) {
       });
     }
 
-    const { result, raw, modelUsed } = await classifySingleImage(
+    const { result, raw, modelUsed, tokenUsage } = await classifySingleImage(
       image,
       undefined,
       materialHint as MaterialHint | undefined,
@@ -690,6 +725,7 @@ export async function POST(request: Request) {
           overrideApplied: result.wasteStream !== raw.wasteStream,
           tierResults,
           allItems: [{ itemName: result.itemName, wasteStream: result.wasteStream, confidence: result.confidence, modelUsed }],
+          ...(tokenUsage && { tokenUsage }),
           ...(materialHint && {
             rgbAnalysis: {
               dominantHue: (materialHint as MaterialHint).dominantHue,

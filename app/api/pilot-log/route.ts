@@ -9,6 +9,7 @@ import { del as deleteBlob } from "@vercel/blob";
 import type { PilotLogEntry } from "@/lib/types";
 import { verifyKioskRequest } from "@/lib/kiosk-auth";
 import { parsePilotLogEntry } from "@/lib/pilot-log-schema";
+import { serverFaceDetected } from "@/lib/face-detect-server";
 
 import { checkAndSendMilestoneNotification } from "@/lib/milestone-check";
 
@@ -22,6 +23,14 @@ const SAFE_TOKEN = z.string().min(1).max(128).regex(/^[\w\-\s.]+$/);
 
 const PilotLogPostSchema = z.object({
   image: z.string().min(100).max(IMAGE_MAX_LENGTH).optional(),
+  /**
+   * Client-side face detection hint. When true, the client already detected
+   * a face and chose not to send the image — trust the positive. When false
+   * or omitted with an image present, the server re-checks via
+   * `serverFaceDetected()` before uploading (defense-in-depth against a
+   * compromised kiosk session).
+   */
+  faceDetected: z.boolean().optional(),
   entry: z.object({
     modelUsed: z.enum(["t2", "T1"]).optional(),
     itemName: SAFE_TOKEN.optional(),
@@ -77,6 +86,7 @@ export async function POST(request: Request) {
     );
   }
   const { image, entry } = parsed.data;
+  const clientFaceDetected = parsed.data.faceDetected === true;
 
   const requestId = generateRequestId();
   const timestamp = new Date().toISOString();
@@ -85,13 +95,33 @@ export async function POST(request: Request) {
   runInBackground(
     (async () => {
       let imageUrl: string | undefined;
+      let faceBlocked = false;
       if (image) {
-        imageUrl = await uploadFrameToBlob(
-          image,
-          entry.itemName ?? "unknown",
-          entry.wasteStream ?? "unknown",
-          timestamp,
-        ) ?? undefined;
+        // Privacy gate: symmetric with `/api/classify`. Trust a positive from
+        // the client (skip redundant server detection when the client already
+        // saw a face), but re-check server-side when the client says "no face"
+        // — a compromised kiosk session could otherwise lie to bypass the
+        // gate. Fail-closed: any detector error is treated as "face present".
+        let blockUpload = clientFaceDetected;
+        if (!blockUpload) {
+          try {
+            blockUpload = await serverFaceDetected(image);
+          } catch (err) {
+            console.warn(`[${requestId}] server face detection error, failing closed:`, err);
+            blockUpload = true;
+          }
+        }
+
+        if (blockUpload) {
+          faceBlocked = true;
+        } else {
+          imageUrl = await uploadFrameToBlob(
+            image,
+            entry.itemName ?? "unknown",
+            entry.wasteStream ?? "unknown",
+            timestamp,
+          ) ?? undefined;
+        }
       }
       await logPilotEntry({
         timestamp,
@@ -103,7 +133,7 @@ export async function POST(request: Request) {
         requiresVerification: entry.requiresVerification ?? false,
         latencyMs: entry.latencyMs ?? 0,
         imageUrl,
-        blobUploadFailed: image ? !imageUrl : undefined,
+        blobUploadFailed: image && !faceBlocked ? !imageUrl : undefined,
         requestId,
         meta: entry.meta as PilotLogEntry["meta"],
         yoloDetections: entry.yoloDetections as PilotLogEntry["yoloDetections"],

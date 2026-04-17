@@ -3,11 +3,14 @@
  *
  * Protected paths:
  *   /review                        — admin review UI
+ *   /insights                      — operations dashboard (top misclassifications,
+ *                                    pipeline funnel, daily timeseries)
  *   /api/review, /api/review/*     — review data + export
  *   /api/pilot-log GET / DELETE    — pilot log viewer + purge
  *   /api/pilot-image               — captured frame images
  *   /api/health                    — service health check
  *   /api/calibration               — model calibration data
+ *   /api/dashboard-metrics         — aggregation backing /insights
  *
  * Kiosk-facing endpoints (/api/classify, /api/pilot-log POST,
  * /api/kiosk/session) are NOT gated here — they use kiosk-auth at route level
@@ -36,11 +39,13 @@ const SESSION_INFO = "wayste-admin-session-v1";
 /** Paths that require admin Basic Auth. */
 const ADMIN_PATHS = [
   "/review",
+  "/insights",
   "/api/review",
   "/api/pilot-log",
   "/api/pilot-image",
   "/api/health",
   "/api/calibration",
+  "/api/dashboard-metrics",
 ];
 
 function isAdminPath(pathname: string): boolean {
@@ -140,7 +145,7 @@ export async function middleware(request: NextRequest) {
   return new NextResponse("Authentication required", {
     status: 401,
     headers: {
-      "WWW-Authenticate": 'Basic realm="Wayste Admin"',
+      "WWW-Authenticate": 'Basic realm="wayste Admin"',
     },
   });
 }
@@ -149,10 +154,12 @@ export const config = {
   // Only run middleware on admin paths (skip static files, images, etc.)
   matcher: [
     "/review/:path*",
+    "/insights/:path*",
     "/api/review/:path*",
     "/api/pilot-log",
     "/api/pilot-image/:path*",
     "/api/health",
     "/api/calibration",
+    "/api/dashboard-metrics",
   ],
 };

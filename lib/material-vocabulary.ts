@@ -7,8 +7,8 @@
  *   - waste-rules.ts (Tier 3 prompt: list possible materials with visual cues)
  *
  * LIMITATION: The YOLO World ONNX model is exported with pre-baked class
- * embeddings (36 classes). Dynamic vocabulary injection at runtime is not
- * feasible without model re-export. Instead, the full 36-class vocabulary
+ * embeddings (53 classes). Dynamic vocabulary injection at runtime is not
+ * feasible without model re-export. Instead, the full 53-class vocabulary
  * runs and results are filtered to the relevant material subset here.
  * Classes marked with (*) are NOT in the current YOLO World model and can
  * only be resolved via Tier 3 (GPT material identification prompt).

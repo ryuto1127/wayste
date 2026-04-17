@@ -2,6 +2,7 @@
 - Match the language you use (English or Japanese)
 - Avoid technical jargon; use plain, natural language
 - If technical terms or concepts come up, explain what they mean in simple terms
+- **Project name spelling: always lowercase `wayste`** — never `Wayste`, `WAYSTE`, or `WaYsTe`. This applies even at the start of a sentence and in headings/titles. The name is a stylized lowercase wordmark.
 
 ### Kiosk End-Users (Office/Airport Workers)
 - The kiosk's UI must also use simple, non-technical language
@@ -16,34 +17,33 @@
 
 ## Tech Stack
 - TypeScript / Next.js 16 (App Router) / React 19 / Tailwind CSS v4
-- YOLO26m FP16 (ONNX Runtime Web) — browser object detection, 15 custom classes
-- YOLO World S (ONNX Runtime Web) — browser recycling detection, 36 classes
-- OpenAI GPT-5.4 (nano → mini escalation) — cloud fallback
+- YOLO26m FP16 (ONNX Runtime Web) — browser object detection, 15 custom waste classes (`15class_v1.onnx`, 39 MB)
+- OpenAI `gpt-5.4-mini` — cloud fallback (single-model path) when local YOLO confidence is below the fallback threshold
 - Upstash Redis (REST) / Vercel Blob / Vercel Serverless + Cron
-- Zod v4 / Jest v30 (281 tests, 11 suites) / EN+JA i18n (125+ keys)
+- Zod v4 / Jest v30 (267 tests, 14 suites) / EN+JA i18n (125+ keys)
 
 ## Commands
     npm run dev      # Dev server (Turbopack)
     npm run build    # Production build
-    npm test         # 281 Jest tests, 11 suites
+    npm test         # 267 Jest tests, 14 suites
     npm run lint     # ESLint
 
 ## Architecture
-- `app/api/classify/route.ts` — Classification endpoint (GPT-5.4 nano→mini, overrides, Blob upload); supports single + batch (up to 4 items) formats
+- `app/api/classify/route.ts` — Classification endpoint (GPT-5.4 mini, overrides, Blob upload); supports single + batch (up to 4 items) formats
 - `lib/threshold-config.ts` — Master sensitivity (0–1) → all detection/inference thresholds; auto-calibration aware
 - `lib/frame-analyzer.ts` — CV pipeline: 120x120 canvas, ~33fps, background subtraction, auto-calibration, multi-blob detection (top 4 with per-blob sharpness/contrast/skin/saturation scoring)
-- `lib/yolo-inference.ts` — YOLO26m wrapper (Tier 1: detection floor 0.65, instant result when >= YOLO_FALLBACK_THRESHOLD — 0.75 at default sensitivity); WebGPU primary, WASM fallback
-- `lib/yolo-world-inference.ts` — YOLO World S wrapper (Tier 2: fires when Tier 1 < YOLO_FALLBACK_THRESHOLD, accepts >= YOLO_WORLD_ACCEPT_THRESHOLD — both 0.75 at default sensitivity); 36 recycling-specific classes
+- `lib/yolo-inference.ts` — YOLO26m wrapper (Tier 1: 15 custom waste classes; instant result when confidence ≥ YOLO_FALLBACK_THRESHOLD = 0.75 at default sensitivity); WebGPU primary, WASM fallback
 - `lib/rgb-material-analyzer.ts` — Post-YOLO RGB/texture analysis: color (HSV), transparency, metallicity, bbox aspect ratio, LBP texture → refines YOLO class names + feeds MaterialHint to GPT
-- `lib/inference-backend.ts` — 3-tier orchestration; sequential model startup with `overallReady` gate; parallel API call when Tier 1 < 0.30
+- `lib/inference-backend.ts` — 2-tier orchestration (YOLO → GPT-5.4 mini); sequential model startup with `overallReady` gate
+- `lib/yolo-world-inference.ts` — **Currently unused.** Legacy YOLO World wrapper kept in the repo but no longer imported by any runtime path.
 - `lib/waste-rules-core.ts` — Word-boundary pattern matching + override engine (browser-safe)
 - `lib/waste-rules.ts` — Site config loader + GPT prompt builder (5-min cache)
-- `components/KioskDisplay.tsx` — State machine: loading → idle → object_detected → classifying → result → cooldown; multi-item blob-to-detection matching (up to 4), three-way routing (YOLO match → tier system, unmatched+object → API, unmatched+noise → discard)
+- `components/KioskDisplay.tsx` — State machine: loading → idle → object_detected → classifying → result → cooldown; multi-item blob-to-detection matching (up to 4), three-way routing (YOLO match above threshold → instant result, YOLO match below threshold → GPT-5.4 mini, unmatched+object → GPT-5.4 mini, unmatched+noise → discard)
 - `config/sites/*.json` — Per-site waste rules (4 presets: japan-office, office-hq, airport, pilot; japan-office is the default)
-- `middleware.ts` — Admin auth: HTTP Basic Auth → 7-day session cookie
+- `middleware.ts` — Admin auth: HTTP Basic Auth → 4-hour session cookie
 
 ## Rules & Conventions
-- 3-tier local-first: always prefer browser YOLO over API; only fall back to OpenAI when local confidence is insufficient
+- 2-tier local-first: always prefer browser YOLO over API; only fall back to OpenAI `gpt-5.4-mini` when local confidence is insufficient
 - Overrides use word-boundary matching ("cup" matches "paper cup" but not "cupcake")
 - `staffHandlingItems` force `needs_review` regardless of AI output
 - Image uploads and Redis logging run via `waitUntil()` — never block the response

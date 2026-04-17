@@ -36,6 +36,37 @@ jest.mock("@vercel/functions", () => ({
   waitUntil: jest.fn((p: Promise<unknown>) => p.catch(() => {})),
 }));
 
+// ── Mock pilot-log so tests can inspect logged entries ──
+const mockLogPilotEntry = jest.fn().mockResolvedValue(undefined);
+jest.mock("@/lib/pilot-log", () => ({
+  logPilotEntry: (...args: unknown[]) => mockLogPilotEntry(...args),
+}));
+
+// ── Mock face-detect-server (avoids loading the ONNX runtime in tests) ──
+jest.mock("@/lib/face-detect-server", () => ({
+  serverFaceDetected: jest.fn().mockResolvedValue(false),
+}));
+
+// ── Capture every promise handed to runInBackground so tests can await it ──
+const bgPromises: Promise<unknown>[] = [];
+jest.mock("@/lib/background-task", () => {
+  const actual = jest.requireActual("@/lib/background-task");
+  return {
+    ...actual,
+    runInBackground: (p: Promise<unknown>) => {
+      bgPromises.push(p.catch(() => {}));
+    },
+  };
+});
+
+/** Wait until every background promise registered so far has settled. */
+async function flushBackground(): Promise<void> {
+  while (bgPromises.length > 0) {
+    const pending = bgPromises.splice(0, bgPromises.length);
+    await Promise.allSettled(pending);
+  }
+}
+
 // Set env vars before importing route
 process.env.KV_REST_API_URL = "https://fake-redis.upstash.io";
 process.env.KV_REST_API_TOKEN = "fake-token";
@@ -57,9 +88,14 @@ interface RawClassification {
 describe("POST /api/classify", () => {
   beforeEach(() => {
     mockCreate.mockReset();
+    mockLogPilotEntry.mockClear();
+    bgPromises.length = 0;
   });
 
-  function makeOpenAIResponse(raw: RawClassification) {
+  function makeOpenAIResponse(
+    raw: RawClassification,
+    usage?: { prompt_tokens: number; completion_tokens: number },
+  ) {
     return {
       choices: [
         {
@@ -68,6 +104,7 @@ describe("POST /api/classify", () => {
           },
         },
       ],
+      ...(usage && { usage }),
     };
   }
 
@@ -160,6 +197,64 @@ describe("POST /api/classify", () => {
       const data = await res.json();
       expect(data.preAction).toBe("Empty contents and remove cap");
     }
+  });
+
+  it("propagates OpenAI token usage into the pilot-log entry", async () => {
+    const miniResponse = makeOpenAIResponse(
+      {
+        itemName: "plastic bottle",
+        wasteStream: "recyclable",
+        confidence: 0.9,
+        reasoning: "PET",
+        isCompound: false,
+        components: [],
+      },
+      { prompt_tokens: 712, completion_tokens: 184 },
+    );
+    mockCreate.mockResolvedValueOnce(miniResponse);
+
+    const { POST } = await import("@/app/api/classify/route");
+    const req = makeRequest({
+      image: "e".repeat(200),
+      siteId: "japan-office",
+    });
+
+    const res = await POST(req);
+    expect(res.status).toBe(200);
+
+    await flushBackground();
+
+    expect(mockLogPilotEntry).toHaveBeenCalled();
+    const logged = mockLogPilotEntry.mock.calls[0][0];
+    expect(logged.tokenUsage).toEqual({ promptTokens: 712, completionTokens: 184 });
+    expect(logged.modelUsed).toBe("t2");
+  });
+
+  it("omits tokenUsage when OpenAI omits the usage field", async () => {
+    const miniResponse = makeOpenAIResponse({
+      itemName: "paper",
+      wasteStream: "recyclable",
+      confidence: 0.8,
+      reasoning: "paper sheet",
+      isCompound: false,
+      components: [],
+    }); // no usage field
+    mockCreate.mockResolvedValueOnce(miniResponse);
+
+    const { POST } = await import("@/app/api/classify/route");
+    const req = makeRequest({
+      image: "f".repeat(200),
+      siteId: "japan-office",
+    });
+
+    const res = await POST(req);
+    expect(res.status).toBe(200);
+
+    await flushBackground();
+
+    expect(mockLogPilotEntry).toHaveBeenCalled();
+    const logged = mockLogPilotEntry.mock.calls[0][0];
+    expect(logged.tokenUsage).toBeUndefined();
   });
 
   it("returns 429 when rate limit is hit", async () => {

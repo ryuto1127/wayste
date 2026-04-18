@@ -78,6 +78,7 @@ export function getCachedResult(
 ): ClassificationResponse | null {
   const store = loadCache();
   const key = normalizeKey(itemName, locale);
+  let resolvedKey = key;
   let entry = store.entries[key];
 
   // Fuzzy match: if exact key miss, try token-based similarity
@@ -96,13 +97,15 @@ export function getCachedResult(
     }
     if (bestKey) {
       entry = store.entries[bestKey];
+      resolvedKey = bestKey;
     }
     if (!entry) return null;
   }
 
-  // Check TTL
+  // Check TTL — use resolvedKey so fuzzy-matched stale entries get evicted,
+  // not the non-existent query key.
   if (Date.now() - entry.timestamp > CACHE_TTL_MS) {
-    delete store.entries[key];
+    delete store.entries[resolvedKey];
     saveCache(store);
     return null;
   }

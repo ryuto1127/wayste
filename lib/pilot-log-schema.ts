@@ -72,6 +72,7 @@ export const PilotLogEntrySchema = z.object({
   latencyMs: z.number().min(0).max(120_000),
   imageUrl: z.string().url().max(2048).optional(),
   blobUploadFailed: z.boolean().optional(),
+  faceBlocked: z.boolean().optional(),
   requestId: z.string().max(128).optional(),
   meta: MetaSchema.optional(),
   yoloDetections: z.array(YoloDetectionSchema).max(64).optional(),

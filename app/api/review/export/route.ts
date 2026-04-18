@@ -119,10 +119,18 @@ export async function GET(request: Request) {
             console.warn(`[review/export] Skipping disallowed blob URL for ${filename}`);
             return null;
           }
-          const res = await fetch(url, { headers: blobHeaders });
-          if (!res.ok) return null;
-          const buf = Buffer.from(await res.arrayBuffer());
-          return { filename, buf };
+          try {
+            const res = await fetch(url, { headers: blobHeaders });
+            if (!res.ok) {
+              console.warn(`[review/export] Fetch failed for ${filename}: HTTP ${res.status}`);
+              return null;
+            }
+            const buf = Buffer.from(await res.arrayBuffer());
+            return { filename, buf };
+          } catch (err) {
+            console.warn(`[review/export] Fetch errored for ${filename}:`, err);
+            return null;
+          }
         }),
       );
       for (const result of results) {

@@ -1,9 +1,12 @@
 "use client";
 
 import { Component, type ReactNode } from "react";
+import { t, type Locale } from "@/lib/i18n";
 
 interface Props {
   children: ReactNode;
+  /** Locale for the error screen text. Defaults to "en". */
+  locale?: Locale;
 }
 
 interface State {
@@ -66,31 +69,23 @@ export default class ErrorBoundary extends Component<Props, State> {
     }
   }
 
-  private handleRetryNow = () => {
-    this.clearTimer();
-    window.location.reload();
-  };
-
   render() {
     if (this.state.hasError) {
+      const locale: Locale = this.props.locale ?? "en";
+      const countdownMsg = t(locale, "restartingIn").replace(
+        "{seconds}",
+        String(this.state.countdown),
+      );
       return (
         <div className="h-screen w-screen bg-neutral-950 flex flex-col items-center justify-center p-8 text-center">
           <div className="text-6xl mb-6">⚠️</div>
           <h1 className="text-2xl font-bold text-white mb-3">
-            System Temporarily Unavailable
+            {t(locale, "systemErrorTitle")}
           </h1>
           <p className="text-neutral-400 text-lg mb-2">
-            The kiosk encountered an error and will restart automatically.
+            {t(locale, "systemErrorDesc")}
           </p>
-          <p className="text-neutral-500 text-sm mb-8">
-            Restarting in {this.state.countdown} seconds…
-          </p>
-          <button
-            onClick={this.handleRetryNow}
-            className="px-6 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-medium text-lg transition-colors"
-          >
-            Restart Now
-          </button>
+          <p className="text-neutral-500 text-sm">{countdownMsg}</p>
         </div>
       );
     }

@@ -134,6 +134,7 @@ export async function POST(request: Request) {
         latencyMs: entry.latencyMs ?? 0,
         imageUrl,
         blobUploadFailed: image && !faceBlocked ? !imageUrl : undefined,
+        faceBlocked: image ? faceBlocked : undefined,
         requestId,
         meta: entry.meta as PilotLogEntry["meta"],
         yoloDetections: entry.yoloDetections as PilotLogEntry["yoloDetections"],

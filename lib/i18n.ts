@@ -91,6 +91,15 @@ const translations = {
     // Camera screen
     holdSteadyDetecting: "Item detected — Hold steady...",
     analyzingPleaseWait: "Analyzing...",
+    cameraStarting: "Starting camera...",
+    cameraAccessDenied: "Camera access denied. Please allow camera permissions.",
+    cameraNotFound: "No camera found. Please connect a camera.",
+    cameraFailedToStart: "Failed to start camera.",
+
+    // System error (ErrorBoundary)
+    systemErrorTitle: "System Temporarily Unavailable",
+    systemErrorDesc: "The kiosk encountered an error and will restart automatically.",
+    restartingIn: "Restarting in {seconds} seconds…",
 
     // Result screen
     putThisInBin: "Put this in the",
@@ -288,6 +297,15 @@ const translations = {
     // Camera screen
     holdSteadyDetecting: "アイテムを検出 — 動かさないでください...",
     analyzingPleaseWait: "分析中...",
+    cameraStarting: "カメラを起動中...",
+    cameraAccessDenied: "カメラへのアクセスが拒否されました。カメラの使用を許可してください。",
+    cameraNotFound: "カメラが見つかりません。カメラを接続してください。",
+    cameraFailedToStart: "カメラを起動できませんでした。",
+
+    // System error (ErrorBoundary)
+    systemErrorTitle: "一時的にご利用いただけません",
+    systemErrorDesc: "エラーが発生しました。自動的に再起動します。",
+    restartingIn: "{seconds} 秒後に再起動します…",
 
     // Result screen
     putThisInBin: "こちらへ捨ててください：",

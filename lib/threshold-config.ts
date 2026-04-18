@@ -49,7 +49,18 @@ export function computeThresholds(
 ): ThresholdConfig {
   const s = clamp(sensitivity, 0, 1);
 
-  // ROI foreground threshold — calibration overrides when available
+  // ROI foreground threshold — calibration overrides when available.
+  //
+  // The calibration upper bound (0.08) is intentionally higher than the
+  // uncalibrated range's max (0.05). Rationale: in noisy environments
+  // (HVAC vibration, foot-traffic shadows, low-light sensor noise) the
+  // rolling calibration can legitimately observe a noise floor above 0.05.
+  // Letting the clamp rise above the uncalibrated range lets auto-calibration
+  // suppress those environments' false positives at the cost of some
+  // sensitivity — a deliberate tradeoff favoring precision over recall for
+  // sites where manual tuning isn't feasible. If a site's calibrated
+  // threshold pegs near 0.08 in practice, treat that as a signal to revisit
+  // camera placement or lighting before changing the clamp.
   let ROI_FG_THRESHOLD: number;
   if (calibration) {
     ROI_FG_THRESHOLD = clamp(

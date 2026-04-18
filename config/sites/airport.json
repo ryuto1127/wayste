@@ -3,6 +3,7 @@
   "siteName": "Airport Terminal — wayste",
   "defaultLocale": "en",
   "voiceEnabled": true,
+  "reviewThreshold": 0.55,
   "sensitivity": 0.5,
   "streams": [
     {
@@ -28,6 +29,12 @@
       "label": "Liquids Only",
       "color": "#0891B2",
       "description": "Pour remaining liquids here before recycling the container."
+    },
+    {
+      "id": "needs_review",
+      "label": "Ask Staff",
+      "color": "#D97706",
+      "description": "Items that cannot be confidently classified. Please check bin signage or ask airport staff."
     }
   ],
   "overrides": [

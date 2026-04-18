@@ -1813,6 +1813,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
         <CameraFeed
           ref={cameraRef}
           mirror={mirrorCamera}
+          locale={locale}
         />
       </div>
 

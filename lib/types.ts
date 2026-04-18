@@ -89,6 +89,12 @@ export interface PilotLogEntry {
   latencyMs: number;
   imageUrl?: string;   // Vercel Blob URL of the captured frame
   blobUploadFailed?: boolean;
+  /**
+   * True when face detection blocked the upload (privacy gate fired).
+   * Distinct from `blobUploadFailed` so ops can tell "upload intentionally
+   * skipped" from "upload attempted and failed".
+   */
+  faceBlocked?: boolean;
   requestId?: string;
   meta?: ClassifyMeta;
   /** YOLO detections for this frame (if YOLO ran). Used for fine-tuning dataset export. */

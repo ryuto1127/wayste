@@ -7,6 +7,7 @@ import {
   forwardRef,
   useState,
 } from "react";
+import { t, type Locale } from "@/lib/i18n";
 
 export interface CameraFeedHandle {
   captureFrame: (quality?: number) => string | null;
@@ -20,9 +21,11 @@ interface CameraFeedProps {
    * Set to `true` for front-facing / selfie-style cameras.
    */
   mirror?: boolean;
+  /** Locale for error + "Starting camera..." text. Defaults to "en". */
+  locale?: Locale;
 }
 
-const CameraFeed = forwardRef<CameraFeedHandle, CameraFeedProps>(function CameraFeed({ mirror = false }, ref) {
+const CameraFeed = forwardRef<CameraFeedHandle, CameraFeedProps>(function CameraFeed({ mirror = false, locale = "en" }, ref) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -58,14 +61,14 @@ const CameraFeed = forwardRef<CameraFeedHandle, CameraFeedProps>(function Camera
       } catch (err) {
         if (!mounted) return;
         if (err instanceof DOMException && err.name === "NotAllowedError") {
-          setError("Camera access denied. Please allow camera permissions.");
+          setError(t(locale, "cameraAccessDenied"));
         } else if (
           err instanceof DOMException &&
           err.name === "NotFoundError"
         ) {
-          setError("No camera found. Please connect a camera.");
+          setError(t(locale, "cameraNotFound"));
         } else {
-          setError("Failed to start camera.");
+          setError(t(locale, "cameraFailedToStart"));
         }
       }
     }
@@ -124,7 +127,7 @@ const CameraFeed = forwardRef<CameraFeedHandle, CameraFeedProps>(function Camera
       {!ready && (
         <div className="absolute inset-0 flex items-center justify-center bg-neutral-900">
           <div className="text-xl text-neutral-400 animate-pulse">
-            Starting camera...
+            {t(locale, "cameraStarting")}
           </div>
         </div>
       )}

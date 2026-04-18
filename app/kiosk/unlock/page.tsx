@@ -15,6 +15,10 @@
 
 import { useRef, useState } from "react";
 
+/** Delay before auto-redirecting to the kiosk after a successful unlock,
+ *  so the staff member has a moment to see the "Unlocked" confirmation. */
+const REDIRECT_DELAY_MS = 1200;
+
 export default function KioskUnlockPage() {
   const inputRef = useRef<HTMLInputElement>(null);
   const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
@@ -38,6 +42,9 @@ export default function KioskUnlockPage() {
       if (res.ok) {
         setStatus("success");
         if (inputRef.current) inputRef.current.value = "";
+        setTimeout(() => {
+          window.location.href = "/";
+        }, REDIRECT_DELAY_MS);
       } else if (res.status === 401) {
         setStatus("error");
         setErrorMsg("Invalid token. Please check and try again. / トークンが正しくありません。");
@@ -65,15 +72,9 @@ export default function KioskUnlockPage() {
           <div className="rounded-lg border border-emerald-700 bg-emerald-900/30 p-4 mb-4">
             <p className="font-medium mb-2">Unlocked. / アンロックしました。</p>
             <p className="text-sm text-neutral-300 mb-4">
-              This device is now authorized for 30 days. <br />
-              このデバイスは 30 日間使用できます。
+              Opening kiosk… <br />
+              キオスクを開いています…
             </p>
-            <a
-              href="/"
-              className="inline-block rounded-md bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 text-sm font-medium"
-            >
-              Open Kiosk / キオスクを開く
-            </a>
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -109,7 +110,7 @@ export default function KioskUnlockPage() {
         )}
 
         <p className="mt-8 text-xs text-neutral-500">
-          Tip: after unlocking, you can close this tab. The authorization is stored as a secure cookie on this device only.
+          The authorization is stored as a secure cookie on this device only and lasts 30 days.
         </p>
       </div>
     </div>

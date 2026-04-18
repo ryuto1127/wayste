@@ -1,40 +1,38 @@
 /**
- * Next.js middleware — protects admin pages and their backing API routes.
+ * Next.js middleware — protects admin pages, gates the kiosk page behind a
+ * device-unlock flow, and sets a per-request nonce-based Content-Security-Policy.
  *
- * Protected paths:
- *   /review                        — admin review UI
- *   /insights                      — operations dashboard (top misclassifications,
- *                                    pipeline funnel, daily timeseries)
- *   /api/review, /api/review/*     — review data + export
- *   /api/pilot-log GET / DELETE    — pilot log viewer + purge
- *   /api/pilot-image               — captured frame images
- *   /api/health                    — service health check
- *   /api/calibration               — model calibration data
- *   /api/dashboard-metrics         — aggregation backing /insights
+ * # CSP
+ * A fresh base64 nonce is generated on every request and added to `script-src`
+ * alongside `'strict-dynamic'`. The nonce is also forwarded to Next.js via the
+ * `x-nonce` request header so that Next.js stamps it onto the inline bootstrap
+ * scripts it emits for hydration. Any downstream chunks loaded by those
+ * bootstrap scripts are trusted transitively via `'strict-dynamic'`.
  *
- * Kiosk-facing endpoints (/api/classify, /api/pilot-log POST,
- * /api/kiosk/session) are NOT gated here — they use kiosk-auth at route level
- * (see lib/kiosk-auth.ts).
+ * # Kiosk session redirect
+ * - Visiting `/` without a valid `kiosk_session` cookie redirects to
+ *   `/kiosk/unlock` so staff can authorize the device.
+ * - Visiting `/kiosk/unlock` with a valid `kiosk_session` cookie redirects
+ *   back to `/` so already-authorized devices skip the unlock screen.
  *
- * Auth method: HTTP Basic Auth (first login) → session cookie (subsequent)
- *   Username: admin (or anything)
- *   Password: value of ADMIN_API_KEY env var
+ * # Admin auth
+ * Admin pages and their backing API routes require either a valid
+ * `admin_session` cookie, an `x-api-key` header, or HTTP Basic Auth.
  *
- * After successful Basic Auth, a session cookie (admin_session) is set so the
- * browser won't prompt for credentials again until the cookie expires (7 days).
- *
- * Dev mode: ADMIN_API_KEY not set → auth skipped ONLY on localhost.
- * In production (Vercel), missing ADMIN_API_KEY returns 500.
+ * Kiosk-facing API endpoints (`/api/classify`, `/api/pilot-log POST`,
+ * `/api/kiosk/session`) are authenticated at the route level via
+ * `lib/kiosk-auth.ts`, not here.
  */
 
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { hmacHex, timingSafeEqualStr } from "@/lib/crypto-utils";
 import { recordAudit, callerSource } from "@/lib/audit-log";
+import { KIOSK_SESSION_COOKIE, makeKioskSessionToken } from "@/lib/kiosk-auth";
 
-const SESSION_COOKIE = "admin_session";
-const SESSION_MAX_AGE = 60 * 60 * 4; // 4 hours
-const SESSION_INFO = "wayste-admin-session-v1";
+const ADMIN_SESSION_COOKIE = "admin_session";
+const ADMIN_SESSION_MAX_AGE = 60 * 60 * 4; // 4 hours
+const ADMIN_SESSION_INFO = "wayste-admin-session-v1";
 
 /** Paths that require admin Basic Auth. */
 const ADMIN_PATHS = [
@@ -50,109 +48,217 @@ const ADMIN_PATHS = [
 
 function isAdminPath(pathname: string): boolean {
   return ADMIN_PATHS.some(
-    (p) => pathname === p || pathname.startsWith(p + "/")
+    (p) => pathname === p || pathname.startsWith(p + "/"),
   );
 }
 
+function isLocalhost(host: string): boolean {
+  return host.startsWith("localhost") || host.startsWith("127.0.0.1");
+}
+
+async function makeAdminSessionToken(adminKey: string): Promise<string> {
+  return hmacHex(adminKey, ADMIN_SESSION_INFO);
+}
+
+/** 128-bit base64 nonce — unpredictable per request. */
+function generateNonce(): string {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  let binary = "";
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary);
+}
+
+function buildCsp(nonce: string): string {
+  return [
+    "default-src 'self'",
+    // Scripts: nonce + strict-dynamic lets Next.js's bootstrap inline script
+    // run and transitively trust the chunks it loads. wasm-unsafe-eval is
+    // required by onnxruntime-web.
+    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' 'wasm-unsafe-eval'`,
+    // Tailwind injects inline <style> tags
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' blob: data: https://*.public.blob.vercel-storage.com",
+    "connect-src 'self' https://cdn.jsdelivr.net https://storage.googleapis.com https://api.openai.com https://*.upstash.io",
+    "media-src 'self' blob:",
+    "worker-src 'self' blob:",
+    "frame-ancestors 'none'",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+  ].join("; ");
+}
+
+/** Validate the kiosk_session cookie without involving route-level auth. */
+async function hasValidKioskSession(request: NextRequest): Promise<boolean> {
+  const kioskToken = process.env.KIOSK_API_TOKEN;
+  const host = request.headers.get("host") ?? "";
+
+  if (!kioskToken) {
+    // Matches verifyKioskRequest dev-bypass: localhost without a token is OK.
+    return isLocalhost(host);
+  }
+
+  const presented = request.cookies.get(KIOSK_SESSION_COOKIE)?.value;
+  if (!presented) return false;
+  const expected = await makeKioskSessionToken(kioskToken);
+  return timingSafeEqualStr(presented, expected);
+}
+
 /**
- * Proper HMAC-SHA256 session token. The cookie value is deterministic
- * (HMAC of a fixed label keyed by ADMIN_API_KEY), so rotating
- * ADMIN_API_KEY invalidates every existing admin session at once.
- *
- * For per-session revocation in the future, replace this with a random
- * token + Redis-backed session table.
+ * Build a NextResponse that carries the CSP header on the response AND
+ * forwards the nonce to downstream Next.js rendering via the `x-nonce`
+ * request header. Callers can pass a `mutate` hook to set extra cookies.
  */
-async function makeSessionToken(adminKey: string): Promise<string> {
-  return hmacHex(adminKey, SESSION_INFO);
+function passThrough(
+  request: NextRequest,
+  nonce: string,
+  csp: string,
+  mutate?: (res: NextResponse) => void,
+): NextResponse {
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set("x-nonce", nonce);
+  requestHeaders.set("content-security-policy", csp);
+  const res = NextResponse.next({ request: { headers: requestHeaders } });
+  res.headers.set("Content-Security-Policy", csp);
+  if (mutate) mutate(res);
+  return res;
+}
+
+function redirectWithCsp(
+  request: NextRequest,
+  to: string,
+  csp: string,
+): NextResponse {
+  const url = request.nextUrl.clone();
+  url.pathname = to;
+  url.search = "";
+  const res = NextResponse.redirect(url);
+  res.headers.set("Content-Security-Policy", csp);
+  return res;
 }
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+  const nonce = generateNonce();
+  const csp = buildCsp(nonce);
 
-  // Only protect admin paths
-  if (!isAdminPath(pathname)) return NextResponse.next();
-
-  // /api/pilot-log POST is a kiosk endpoint — let it through to route-level kiosk auth
-  if (pathname === "/api/pilot-log" && request.method === "POST") {
-    return NextResponse.next();
-  }
-
-  const adminKey = process.env.ADMIN_API_KEY;
-
-  if (!adminKey) {
-    // Only skip auth on localhost (dev mode). In production, refuse to run unprotected.
-    const host = request.headers.get("host") ?? "";
-    if (host.startsWith("localhost") || host.startsWith("127.0.0.1")) {
-      return NextResponse.next();
+  // ── Kiosk session gate (HTML routes only) ──
+  if (pathname === "/" || pathname === "/kiosk/unlock") {
+    const kioskAuthed = await hasValidKioskSession(request);
+    if (pathname === "/" && !kioskAuthed) {
+      return redirectWithCsp(request, "/kiosk/unlock", csp);
     }
-    return new NextResponse(
-      "Server misconfiguration: ADMIN_API_KEY is not set.",
-      { status: 500 }
-    );
+    if (pathname === "/kiosk/unlock" && kioskAuthed) {
+      return redirectWithCsp(request, "/", csp);
+    }
+    return passThrough(request, nonce, csp);
   }
 
-  const expectedToken = await makeSessionToken(adminKey);
+  // ── Admin auth for protected paths ──
+  if (isAdminPath(pathname)) {
+    // /api/pilot-log POST is a kiosk endpoint — let route-level kiosk auth handle it
+    if (pathname === "/api/pilot-log" && request.method === "POST") {
+      return passThrough(request, nonce, csp);
+    }
 
-  // 1. Check session cookie first (no password prompt)
-  const sessionCookie = request.cookies.get(SESSION_COOKIE)?.value;
-  if (sessionCookie && (await timingSafeEqualStr(sessionCookie, expectedToken))) {
-    return NextResponse.next();
-  }
+    const adminKey = process.env.ADMIN_API_KEY;
 
-  // 2. Check x-api-key header (for programmatic access / curl)
-  const apiKey = request.headers.get("x-api-key");
-  if (apiKey && (await timingSafeEqualStr(apiKey, adminKey))) {
-    recordAudit({ type: "admin.login", source: callerSource(request), path: pathname, extra: { method: "x-api-key" } });
-    const res = NextResponse.next();
-    res.cookies.set(SESSION_COOKIE, expectedToken, {
-      httpOnly: true,
-      secure: request.nextUrl.protocol === "https:",
-      sameSite: "lax",
-      maxAge: SESSION_MAX_AGE,
-      path: "/",
-    });
-    return res;
-  }
+    if (!adminKey) {
+      const host = request.headers.get("host") ?? "";
+      if (isLocalhost(host)) return passThrough(request, nonce, csp);
+      return new NextResponse(
+        "Server misconfiguration: ADMIN_API_KEY is not set.",
+        { status: 500 },
+      );
+    }
 
-  // 3. Check HTTP Basic Auth — set session cookie on success
-  const authHeader = request.headers.get("authorization");
-  if (authHeader?.startsWith("Basic ")) {
-    try {
-      const decoded = atob(authHeader.slice(6));
-      const password = decoded.includes(":") ? decoded.split(":").slice(1).join(":") : decoded;
-      if (await timingSafeEqualStr(password, adminKey)) {
-        recordAudit({ type: "admin.login", source: callerSource(request), path: pathname, extra: { method: "basic" } });
-        const res = NextResponse.next();
-        res.cookies.set(SESSION_COOKIE, expectedToken, {
+    const expectedToken = await makeAdminSessionToken(adminKey);
+
+    // 1. Existing session cookie
+    const sessionCookie = request.cookies.get(ADMIN_SESSION_COOKIE)?.value;
+    if (sessionCookie && (await timingSafeEqualStr(sessionCookie, expectedToken))) {
+      return passThrough(request, nonce, csp);
+    }
+
+    // 2. x-api-key header
+    const apiKey = request.headers.get("x-api-key");
+    if (apiKey && (await timingSafeEqualStr(apiKey, adminKey))) {
+      recordAudit({
+        type: "admin.login",
+        source: callerSource(request),
+        path: pathname,
+        extra: { method: "x-api-key" },
+      });
+      return passThrough(request, nonce, csp, (res) => {
+        res.cookies.set(ADMIN_SESSION_COOKIE, expectedToken, {
           httpOnly: true,
           secure: request.nextUrl.protocol === "https:",
           sameSite: "lax",
-          maxAge: SESSION_MAX_AGE,
+          maxAge: ADMIN_SESSION_MAX_AGE,
           path: "/",
         });
-        return res;
-      }
-    } catch {
-      // Invalid base64 — fall through to 401
+      });
     }
+
+    // 3. HTTP Basic Auth
+    const authHeader = request.headers.get("authorization");
+    if (authHeader?.startsWith("Basic ")) {
+      try {
+        const decoded = atob(authHeader.slice(6));
+        const password = decoded.includes(":")
+          ? decoded.split(":").slice(1).join(":")
+          : decoded;
+        if (await timingSafeEqualStr(password, adminKey)) {
+          recordAudit({
+            type: "admin.login",
+            source: callerSource(request),
+            path: pathname,
+            extra: { method: "basic" },
+          });
+          return passThrough(request, nonce, csp, (res) => {
+            res.cookies.set(ADMIN_SESSION_COOKIE, expectedToken, {
+              httpOnly: true,
+              secure: request.nextUrl.protocol === "https:",
+              sameSite: "lax",
+              maxAge: ADMIN_SESSION_MAX_AGE,
+              path: "/",
+            });
+          });
+        }
+      } catch {
+        // fall through to 401
+      }
+    }
+
+    // Deny
+    if (apiKey || authHeader?.startsWith("Basic ")) {
+      recordAudit({
+        type: "admin.login_fail",
+        source: callerSource(request),
+        path: pathname,
+      });
+    }
+    return new NextResponse("Authentication required", {
+      status: 401,
+      headers: {
+        "WWW-Authenticate": 'Basic realm="wayste Admin"',
+        "Content-Security-Policy": csp,
+      },
+    });
   }
 
-  // Deny: return 401 with WWW-Authenticate to trigger browser login dialog
-  // Only audit when credentials were actually presented (ignore unauthenticated probes)
-  if (apiKey || authHeader?.startsWith("Basic ")) {
-    recordAudit({ type: "admin.login_fail", source: callerSource(request), path: pathname });
-  }
-  return new NextResponse("Authentication required", {
-    status: 401,
-    headers: {
-      "WWW-Authenticate": 'Basic realm="wayste Admin"',
-    },
-  });
+  // ── Everything else (public pages, non-admin API) ──
+  return passThrough(request, nonce, csp);
 }
 
 export const config = {
-  // Only run middleware on admin paths (skip static files, images, etc.)
+  // Run on HTML pages (for CSP + kiosk redirect) and on protected API routes
+  // (for admin auth). Static assets and image/font optimization paths are
+  // excluded.
   matcher: [
+    "/",
+    "/kiosk/unlock",
     "/review/:path*",
     "/insights/:path*",
     "/api/review/:path*",

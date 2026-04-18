@@ -24,59 +24,22 @@ const nextConfig: NextConfig = {
   },
 
   // Security headers
+  // Note: Content-Security-Policy is set per-request in middleware.ts so we can
+  // inject a fresh nonce on every response. A static CSP in this file would
+  // have to either allow 'unsafe-inline' (weak) or block Next.js's auto-emitted
+  // inline bootstrap scripts (which would break hydration).
   async headers() {
     return [
       {
         source: "/:path*",
         headers: [
-          // Prevent MIME-type sniffing
           { key: "X-Content-Type-Options", value: "nosniff" },
-          // Block embedding in iframes (clickjacking protection)
           { key: "X-Frame-Options", value: "DENY" },
-          // Only send origin as referrer to external sites
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
-          // Opt out of Google's FLoC / Topics API
           { key: "Permissions-Policy", value: "interest-cohort=()" },
-          // Force HTTPS for this host + all subdomains for 2 years.
-          // Vercel serves only HTTPS in production anyway; this prevents
-          // downgrade attacks if a kiosk is ever on a hostile network.
-          // `preload` is intentionally omitted — opt in later via
-          // hstspreload.org after confirming the policy is stable.
           {
             key: "Strict-Transport-Security",
             value: "max-age=63072000; includeSubDomains",
-          },
-          // CSP: allow self + ONNX WASM eval + MediaPipe CDN + Vercel Blob
-          {
-            key: "Content-Security-Policy",
-            value: [
-              "default-src 'self'",
-              // Scripts: self + wasm-unsafe-eval for ONNX Runtime Web.
-              // In dev mode Next.js emits inline bootstrap scripts for the RSC
-              // payload and HMR — allow 'unsafe-inline' then so hydration works.
-              // Production builds use nonces and keep the strict policy.
-              process.env.NODE_ENV === "development"
-                ? "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'"
-                : "script-src 'self' 'wasm-unsafe-eval'",
-              // Styles: self + inline (Tailwind)
-              "style-src 'self' 'unsafe-inline'",
-              // Images: self + blob (canvas) + Vercel Blob storage
-              "img-src 'self' blob: data: https://*.public.blob.vercel-storage.com",
-              // Connect: self + MediaPipe CDN + Google Storage (models) + OpenAI + Upstash
-              "connect-src 'self' https://cdn.jsdelivr.net https://storage.googleapis.com https://api.openai.com https://*.upstash.io",
-              // Media: self + blob (camera)
-              "media-src 'self' blob:",
-              // Workers: self + blob (ONNX web workers)
-              "worker-src 'self' blob:",
-              // No iframes (clickjacking)
-              "frame-ancestors 'none'",
-              // Disallow Flash / Java / other plugin objects
-              "object-src 'none'",
-              // Lock <base href="…"> so injected markup can't redirect relative URLs
-              "base-uri 'self'",
-              // Restrict <form action="…"> to same origin
-              "form-action 'self'",
-            ].join("; "),
           },
         ],
       },

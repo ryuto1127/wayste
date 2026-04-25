@@ -43,7 +43,7 @@ export default function KioskUnlockPage() {
         setStatus("success");
         if (inputRef.current) inputRef.current.value = "";
         setTimeout(() => {
-          window.location.href = "/";
+          window.location.href = "/kiosk";
         }, REDIRECT_DELAY_MS);
       } else if (res.status === 401) {
         setStatus("error");

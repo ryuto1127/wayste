@@ -28,6 +28,12 @@
     npm test         # 267 Jest tests, 14 suites
     npm run lint     # ESLint
 
+## Routes
+- `/` — Public marketing landing page (`app/page.tsx`); 10-section product introduction with embedded demos. Light theme, scrollable.
+- `/kiosk` — Kiosk display for physical devices (`app/kiosk/page.tsx`); requires valid `kiosk_session` cookie or middleware redirects to `/kiosk/unlock`. Wrapped in dark fixed-viewport layout via `app/kiosk/layout.tsx`.
+- `/kiosk/unlock` — One-time kiosk auth flow; sets the long-lived `kiosk_session` cookie then redirects to `/kiosk`.
+- `/review`, `/insights` — Admin pages, gated by HTTP Basic Auth via middleware.
+
 ## Architecture
 - `app/api/classify/route.ts` — Classification endpoint (GPT-5.4 mini, overrides, Blob upload); supports single + batch (up to 4 items) formats
 - `lib/threshold-config.ts` — Master sensitivity (0–1) → all detection/inference thresholds; auto-calibration aware
@@ -39,7 +45,7 @@
 - `lib/waste-rules.ts` — Site config loader + GPT prompt builder (5-min cache)
 - `components/KioskDisplay.tsx` — State machine: loading → idle → object_detected → classifying → result → cooldown; multi-item blob-to-detection matching (up to 4), three-way routing (YOLO match above threshold → instant result, YOLO match below threshold → GPT-5.4 mini, unmatched+object → GPT-5.4 mini, unmatched+noise → discard)
 - `config/sites/*.json` — Per-site waste rules (4 presets: japan-office, office-hq, airport, pilot; japan-office is the default)
-- `middleware.ts` — Admin auth: HTTP Basic Auth → 4-hour session cookie
+- `middleware.ts` — Admin auth (HTTP Basic Auth → 4-hour session cookie), kiosk session gate on `/kiosk` and `/kiosk/unlock`, and per-request nonce-based CSP
 
 ## Rules & Conventions
 - 2-tier local-first: always prefer browser YOLO over API; only fall back to OpenAI `gpt-5.4-mini` when local confidence is insufficient

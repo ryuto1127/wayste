@@ -10,10 +10,11 @@
  * bootstrap scripts are trusted transitively via `'strict-dynamic'`.
  *
  * # Kiosk session redirect
- * - Visiting `/` without a valid `kiosk_session` cookie redirects to
+ * - Visiting `/kiosk` without a valid `kiosk_session` cookie redirects to
  *   `/kiosk/unlock` so staff can authorize the device.
  * - Visiting `/kiosk/unlock` with a valid `kiosk_session` cookie redirects
- *   back to `/` so already-authorized devices skip the unlock screen.
+ *   back to `/kiosk` so already-authorized devices skip the unlock screen.
+ * - The marketing landing page lives at `/` and is publicly accessible.
  *
  * # Admin auth
  * Admin pages and their backing API routes require either a valid
@@ -144,13 +145,13 @@ export async function middleware(request: NextRequest) {
   const csp = buildCsp(nonce);
 
   // ── Kiosk session gate (HTML routes only) ──
-  if (pathname === "/" || pathname === "/kiosk/unlock") {
+  if (pathname === "/kiosk" || pathname === "/kiosk/unlock") {
     const kioskAuthed = await hasValidKioskSession(request);
-    if (pathname === "/" && !kioskAuthed) {
+    if (pathname === "/kiosk" && !kioskAuthed) {
       return redirectWithCsp(request, "/kiosk/unlock", csp);
     }
     if (pathname === "/kiosk/unlock" && kioskAuthed) {
-      return redirectWithCsp(request, "/", csp);
+      return redirectWithCsp(request, "/kiosk", csp);
     }
     return passThrough(request, nonce, csp);
   }
@@ -257,7 +258,7 @@ export const config = {
   // (for admin auth). Static assets and image/font optimization paths are
   // excluded.
   matcher: [
-    "/",
+    "/kiosk",
     "/kiosk/unlock",
     "/review/:path*",
     "/insights/:path*",

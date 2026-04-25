@@ -1,13 +1,8 @@
 @import "tailwindcss";
 
-:root {
-  --background: #0a0a0a;
-  --foreground: #ededed;
-}
-
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
+  --color-background: #ffffff;
+  --color-foreground: #0a0a0a;
 }
 
 /* Kiosk mode: hide cursor on public displays */
@@ -16,8 +11,6 @@
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
   font-family: var(--font-noto-sans-jp), system-ui, -apple-system, "Segoe UI",
     Roboto, "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic",
     sans-serif;

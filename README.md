@@ -20,7 +20,7 @@ A real-time AI waste-sorting kiosk. Walk up to the bins holding any item, and a 
 
 Built for office and public-space pilots. **Browser-first inference** keeps frames on-device for privacy and zero per-scan cost; a single cloud fallback handles the long tail. Full English and Japanese support, per-site configurable waste streams, and bias-aware computer vision.
 
-> **Status:** Demo running on Vercel; pilot tests being arranged with several Japanese offices and one airport partner. Not yet in production.
+> **Status:** Demo running on Vercel; pilot tests being arranged with universities and corporate offices in Japan. Not yet in production.
 
 ## Why I built this
 

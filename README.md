@@ -1,3 +1,9 @@
+<p align="center">
+  <strong>English</strong>
+  &nbsp;·&nbsp;
+  <a href="README.ja.md">日本語</a>
+</p>
+
 # wayste
 
 <p align="center">

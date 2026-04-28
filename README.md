@@ -1,8 +1,33 @@
 # wayste
 
-A real-time AI-powered waste sorting kiosk. Hold any item in front of the camera and it tells you which bin it belongs in — no app, no phone, no buttons required.
+<p align="center">
+  <img src="public/marketing/hook-1.png" alt="wayste kiosk in use — a hand holding a plastic cup over labelled bins" width="720">
+</p>
 
-Built for office and public-space pilots, with full English and Japanese support. Configurable per-site waste streams, pre-disposal guidance, and bias-aware computer vision.
+<p align="center">
+  <a href="https://wayste.vercel.app/"><strong>Live demo →</strong></a>
+  &nbsp;·&nbsp;
+  <a href="https://wayste.vercel.app/kiosk"><strong>Try the kiosk →</strong></a>
+</p>
+
+A real-time AI waste-sorting kiosk. Walk up to the bins holding any item, and a fixed downward camera tells you in seconds which bin it belongs in — no app, no phone, no buttons.
+
+Built for office and public-space pilots. **Browser-first inference** keeps frames on-device for privacy and zero per-scan cost; a single cloud fallback handles the long tail. Full English and Japanese support, per-site configurable waste streams, and bias-aware computer vision.
+
+> **Status:** Demo running on Vercel; pilot tests being arranged with several Japanese offices and one airport partner. Not yet in production.
+
+## Why I built this
+
+Office and airport bins in Japan often have 4–6 streams (burnable, plastic, PET, cans, paper, special) and the labels are dense. People glance for ~2 seconds, give up, and toss everything in landfill. A traditional app doesn't work — nobody wants to scan a QR code while holding trash. So the design constraint was: **zero user effort, zero install, real-time guidance** — which forced an architecture where a fixed camera sees only the trash and the user's hand, never their face, and the model runs in the browser so frames never leave the device.
+
+## Engineering highlights
+
+- **2-tier local-first pipeline** — a custom 15-class YOLO26m model runs in the browser via ONNX Runtime Web; high-confidence detections resolve instantly with no server call, and only the long-tail items fall through to GPT-5.4 mini. Most common items (PET bottles, cans, paper cups) never need the cloud.
+- **Fairness in CV** — skin detection in HSV (`h ≤ 50, 0.1 ≤ s ≤ 0.8, v ≥ 0.2`) instead of RGB ranges, because RGB skin heuristics are biased toward lighter skin and fail in real-world deployments.
+- **Sensitivity-derived thresholds** — every detection threshold (foreground ratio, motion gate, confidence cutoffs) is derived from a single 0–1 `sensitivity` knob in site config. No magic numbers scattered through code.
+- **HMAC kiosk session auth** — a long-lived signed cookie keyed by `KIOSK_API_TOKEN`; rotating the token revokes every deployed device at once. Bearer-token unlock flow at `/kiosk/unlock`.
+- **Auto-calibration** — first 45 frames measure environment-specific noise floor and override the foreground threshold. The same kiosk works under harsh fluorescent and warm office lighting without retuning.
+- **Thermal throttling** — CV analysis duration is tracked continuously; when an M1/M2 Mac throttles under sustained use, the frame rate halves automatically and a warning badge appears.
 
 ---
 
@@ -32,7 +57,7 @@ Built for office and public-space pilots, with full English and Japanese support
 
 ## How to use it
 
-1. Open the kiosk URL on any device with a camera
+1. Open `/kiosk` on any device with a camera (a one-time unlock at `/kiosk/unlock` sets a 30-day session cookie)
 2. Hold one item (or multiple items) in front of the camera
 3. Wait for the result — instant for common items (YOLO26m), or ~1–3 seconds when GPT-5.4 mini is needed
 4. Dispose of the item in the indicated bin — a physical bin position indicator shows where the bin sits in the row
@@ -44,10 +69,11 @@ Built for office and public-space pilots, with full English and Japanese support
 
 | URL | Purpose |
 |-----|---------|
-| `/` | The kiosk itself |
-| `/insights` | Operations dashboard — pipeline funnel, top misclassifications, daily time series |
-| `/review` | Human review — browse all classifications, mark each as Correct/Wrong/Nothing (false detection), download ZIP of flagged images for annotation |
-| `/kiosk/unlock` | Unlock UI for new kiosk devices — sets the long-lived `kiosk_session` cookie |
+| `/` | Public marketing landing page (10-section product introduction with embedded demos) |
+| `/kiosk` | The kiosk display itself — requires a valid `kiosk_session` cookie |
+| `/kiosk/unlock` | One-time unlock UI for a new kiosk device — sets the 30-day `kiosk_session` cookie |
+| `/insights` | Operations dashboard — pipeline funnel, top misclassifications, daily time series (admin-gated) |
+| `/review` | Human review — browse all classifications, mark each as Correct/Wrong/Nothing (false detection), download ZIP of flagged images for annotation (admin-gated) |
 
 ---
 
@@ -95,7 +121,10 @@ OPENAI_API_KEY=sk-...
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) and allow camera access when prompted.
+- [http://localhost:3000](http://localhost:3000) → public marketing landing page
+- [http://localhost:3000/kiosk](http://localhost:3000/kiosk) → the kiosk itself (allow camera access when prompted)
+
+In dev, the kiosk session gate is bypassed when `KIOSK_API_TOKEN` is unset, so you can open `/kiosk` directly.
 
 > **Camera mirroring:** By default the video feed is **not mirrored** — this is correct for a fixed kiosk camera facing outward (text on packages reads normally). If you are testing on a laptop with a front-facing selfie camera, add `NEXT_PUBLIC_MIRROR_CAMERA=true` to `.env.local` to flip the feed.
 
@@ -357,9 +386,9 @@ You can also trigger manual purges from the insights dashboard using the date-ra
 │   │   └── site-config/         # Returns site defaultLocale + streams for client use
 │   ├── demo/screens/            # Internal screen-state showcase (not user-facing)
 │   ├── insights/                # Operations dashboard (funnel, misclassifications, time series)
-│   ├── kiosk/unlock/            # Page that exchanges KIOSK_API_TOKEN for the long-lived cookie
+│   ├── kiosk/                   # Kiosk display (page.tsx) + unlock flow (unlock/page.tsx) + dark fixed-viewport layout
 │   ├── review/                  # Human review — Correct/Wrong/Nothing verdicts, ZIP export
-│   └── page.tsx                 # Kiosk entry point (server component, passes site config to client)
+│   └── page.tsx                 # Public marketing landing page (10-section product intro)
 ├── components/
 │   ├── AdminNav.tsx             # Shared admin nav (insights ↔ review ↔ kiosk)
 │   ├── CameraFeed.tsx           # Camera initialisation + frame capture (mirror prop)

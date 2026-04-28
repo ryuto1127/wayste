@@ -69,3 +69,12 @@ datasets/
 # Internal docs / draft communications — never push to public repo
 /docs/
 /security-email-draft.md
+/AGENTS.md
+/private/
+
+# Pitch decks, outreach drafts, and overview docs at repo root
+/*.pptx
+/wayste_*.pdf
+/wayste_*.docx
+/*-reply.md
+/*-draft.md

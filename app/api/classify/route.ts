@@ -107,7 +107,7 @@ const RequestSchema = z.union([BatchRequestSchema, SingleRequestSchema]);
 
 // ── Rate limiting (Redis-based) ──
 // Kiosks are trusted single-device endpoints — allow enough headroom for
-// back-to-back scans and retries. 6 requests per 3-second window prevents
+// back-to-back scans and retries. 15 requests per 3-second window prevents
 // genuine abuse while never blocking legitimate consecutive classifications.
 const RATE_LIMIT_MAX = parseInt(process.env.RATE_LIMIT_MAX || "15");
 const RATE_LIMIT_TTL_S = 3;

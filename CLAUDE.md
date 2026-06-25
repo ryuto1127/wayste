@@ -20,12 +20,12 @@
 - YOLO26m FP16 (ONNX Runtime Web) — browser object detection, 15 custom waste classes (`15class_v1.onnx`, 39 MB)
 - OpenAI `gpt-5.4-mini` — cloud fallback (single-model path) when local YOLO confidence is below the fallback threshold
 - Upstash Redis (REST) / Vercel Blob / Vercel Serverless + Cron
-- Zod v4 / Jest v30 (267 tests, 14 suites) / EN+JA i18n (125+ keys)
+- Zod v4 / Jest v30 (442 tests, 18 suites) / EN+JA i18n (169 keys/locale)
 
 ## Commands
     npm run dev      # Dev server (Turbopack)
     npm run build    # Production build
-    npm test         # 267 Jest tests, 14 suites
+    npm test         # 442 Jest tests, 18 suites
     npm run lint     # ESLint
 
 ## Routes
@@ -38,8 +38,8 @@
 - `app/api/classify/route.ts` — Classification endpoint (GPT-5.4 mini, overrides, Blob upload); supports single + batch (up to 4 items) formats
 - `lib/threshold-config.ts` — Master sensitivity (0–1) → all detection/inference thresholds; auto-calibration aware
 - `lib/frame-analyzer.ts` — CV pipeline: 120x120 canvas, ~33fps, background subtraction, auto-calibration, multi-blob detection (top 4 with per-blob sharpness/contrast/skin/saturation scoring)
-- `lib/yolo-inference.ts` — YOLO26m wrapper (Tier 1: 15 custom waste classes; instant result when confidence ≥ YOLO_FALLBACK_THRESHOLD = 0.75 at default sensitivity); WebGPU primary, WASM fallback
-- `lib/rgb-material-analyzer.ts` — Post-YOLO RGB/texture analysis: color (HSV), transparency, metallicity, bbox aspect ratio, LBP texture → refines YOLO class names + feeds MaterialHint to GPT
+- `lib/yolo-inference.ts` — YOLO26m wrapper (Tier 1: 15 custom waste classes; instant result when confidence ≥ YOLO_FALLBACK_THRESHOLD = 0.725 at default sensitivity, derived as `lerp(0.80, 0.65, sensitivity)` in `lib/threshold-config.ts`); WebGPU primary, WASM fallback
+- `lib/rgb-material-analyzer.ts` — RGB/texture analysis helpers (HSV color, transparency, metallicity, bbox aspect ratio, LBP texture, class-name refinement). The classify route *can* accept a `MaterialHint` and fold it into the GPT prompt + log, but the live kiosk path does not currently produce one — `analyzeMaterial()` is unwired and `KioskDisplay` sends no hint; only `refineClassName` / `computeLbpTexture` / `detectMetallicFromLuminance` are unit-tested. Treat this module as scaffolding, not an active stage.
 - `lib/inference-backend.ts` — 2-tier orchestration (YOLO → GPT-5.4 mini); sequential model startup with `overallReady` gate
 - `lib/waste-rules-core.ts` — Word-boundary pattern matching + override engine (browser-safe)
 - `lib/waste-rules.ts` — Site config loader + GPT prompt builder (5-min cache)

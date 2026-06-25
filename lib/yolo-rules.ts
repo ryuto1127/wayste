@@ -23,8 +23,11 @@ export function _setRulesCache(config: YoloRulesConfig | null): void {
 
 /**
  * Check if a class name maps to "not_waste" in the loaded rules.
- * Used to filter out non-waste detections (person, furniture, vehicles, etc.)
- * so they don't block waste detection via the API.
+ * Forward-compat guard for models that emit non-waste classes (person,
+ * furniture, vehicles, etc.) so they don't block waste detection via the API.
+ * NOTE: the shipped 15-class model (`public/models/yolo-rules.json`) has no
+ * "not_waste" entries, so this currently always returns false — a no-op kept
+ * for when a broader model is loaded.
  */
 export function isYoloClassNotWaste(className: string): boolean {
   if (!rulesCache) return false;

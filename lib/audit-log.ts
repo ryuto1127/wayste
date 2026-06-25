@@ -7,7 +7,7 @@
  *   - kiosk.session_mint   — bearer token exchanged for session cookie
  *
  * This intentionally does NOT log every /review request or every
- * /api/classify call — that would quickly fill the 10k-entry Redis list.
+ * /api/classify call — that would quickly fill the 2000-entry Redis list.
  * What we want for incident response is "who got access, from where, when".
  *
  * Entries are kept for up to 2000 rows (LTRIM) in `audit:events`.

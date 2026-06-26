@@ -39,6 +39,14 @@ curl -s -H "Authorization: Bearer $CRON_SECRET" \
 # add ?all=1 to also include non-escalated (T1) reviewed entries
 ```
 
+Local alternative (no `CRON_SECRET`; reads Redis directly with the read-only
+token; requires Node ≥ 23.6 to run the `.mts` directly):
+
+```bash
+node --env-file=.env.local scripts/bench/export-eval-set.mts
+# writes /tmp/wayste-bench/eval-set.json; prints counts + a model/review breakdown
+```
+
 `eval-set.json` = `{ summary, count, samples[] }`. Each sample has the
 `imageUrl`, the live model's `predictedStream`, the review `verdict`, and
 `groundTruthStream`.

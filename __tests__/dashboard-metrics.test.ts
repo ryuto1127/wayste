@@ -14,6 +14,7 @@ import {
   buildDashboardMetrics,
   computeFunnelTotals,
   computeGptCostUsd,
+  computeModelComparison,
   computeTimeSeries,
   computeTopMisclassifications,
   getDateRange,
@@ -52,6 +53,47 @@ const FALLBACK_DEFAULT =
   (FALLBACK_PROMPT_TOKENS * OPENAI_INPUT_PRICE_PER_M_USD_DEFAULT
     + FALLBACK_COMPLETION_TOKENS * OPENAI_OUTPUT_PRICE_PER_M_USD_DEFAULT)
   / 1_000_000;
+
+// ── computeModelComparison ───────────────────────────────────────────────────
+
+describe("computeModelComparison", () => {
+  const local = (
+    over: Partial<NonNullable<PilotLogEntry["localModel"]>>,
+  ): PilotLogEntry["localModel"] => ({
+    model: "qwen2.5-vl",
+    wasteStream: "recyclable",
+    latencyMs: 200,
+    agreesWithCloud: true,
+    ...over,
+  });
+
+  it("returns all-zero when no entry has a localModel", () => {
+    expect(computeModelComparison([makeEntry({}), makeEntry({})])).toEqual({
+      samples: 0,
+      resolved: 0,
+      agree: 0,
+      agreementRate: 0,
+      errors: 0,
+      medianLatencyMs: 0,
+    });
+  });
+
+  it("counts agreement, errors, and median latency over resolved samples", () => {
+    const entries: PilotLogEntry[] = [
+      makeEntry({ requestId: "a", localModel: local({ wasteStream: "recyclable", agreesWithCloud: true, latencyMs: 100 }) }),
+      makeEntry({ requestId: "b", localModel: local({ wasteStream: "burnable", agreesWithCloud: false, latencyMs: 300 }) }),
+      makeEntry({ requestId: "c", localModel: local({ wasteStream: "", agreesWithCloud: false, error: "timeout", latencyMs: 50 }) }),
+      makeEntry({ requestId: "d" }),
+    ];
+    const r = computeModelComparison(entries);
+    expect(r.samples).toBe(3);
+    expect(r.resolved).toBe(2);
+    expect(r.agree).toBe(1);
+    expect(r.agreementRate).toBeCloseTo(0.5);
+    expect(r.errors).toBe(1);
+    expect(r.medianLatencyMs).toBe(100);
+  });
+});
 
 // ── isPeriod ───────────────────────────────────────────────────────────────
 

@@ -130,6 +130,27 @@ export interface PilotLogEntry {
    * estimate when absent.
    */
   tokenUsage?: { promptTokens: number; completionTokens: number };
+  /**
+   * Shadow prediction from a local/candidate VLM run on the SAME frame, for
+   * cloud-vs-local comparison during a pilot. Populated only when a local VLM
+   * endpoint is configured (`LOCAL_VLM_ENDPOINT`); absent otherwise, so it has
+   * zero effect on normal operation.
+   */
+  localModel?: LocalModelPrediction;
+}
+
+/** A local/candidate VLM's shadow prediction for one frame (cloud-vs-local comparison). */
+export interface LocalModelPrediction {
+  /** Model identifier (from `LOCAL_VLM_MODEL`). */
+  model: string;
+  /** Stream the local VLM chose; empty string when the shadow call failed. */
+  wasteStream: string;
+  confidence?: number;
+  latencyMs: number;
+  /** Whether the local stream matched the cloud model's stream. */
+  agreesWithCloud: boolean;
+  /** Set when the shadow call failed (then wasteStream is "" and agreesWithCloud false). */
+  error?: string;
 }
 
 /**

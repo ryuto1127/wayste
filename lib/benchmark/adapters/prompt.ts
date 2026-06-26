@@ -6,24 +6,27 @@
  * stay identical across candidates — otherwise benchmark numbers wouldn't be
  * comparable.
  */
-import type { EvalSample } from "../eval-set";
+/** Optional context for the prompt. Structurally satisfied by an EvalSample. */
+export interface PromptHints {
+  yoloCandidates?: { itemName: string; confidence: number }[];
+}
 
 /**
  * Build the classification instruction. The model must pick exactly one of the
  * site's disposal streams and answer as JSON so parsing is deterministic.
  */
-export function buildVlmPrompt(allowedStreams: string[], sample?: EvalSample): string {
+export function buildVlmPrompt(allowedStreams: string[], hints?: PromptHints): string {
   const streams = allowedStreams.join(", ");
-  const hints =
-    sample?.yoloCandidates && sample.yoloCandidates.length > 0
-      ? `\nDetector hints (not authoritative): ${sample.yoloCandidates
+  const hintLine =
+    hints?.yoloCandidates && hints.yoloCandidates.length > 0
+      ? `\nDetector hints (not authoritative): ${hints.yoloCandidates
           .map((c) => `${c.itemName} (${c.confidence.toFixed(2)})`)
           .join(", ")}.`
       : "";
   return (
     `You are a waste-sorting assistant. Look at the single item in the image and ` +
     `decide which disposal stream it belongs to.\n` +
-    `Choose exactly one of these streams: ${streams}.${hints}\n` +
+    `Choose exactly one of these streams: ${streams}.${hintLine}\n` +
     `Respond with only JSON: {"stream": "<one of the allowed streams>"}.`
   );
 }

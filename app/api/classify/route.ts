@@ -11,6 +11,7 @@ import {
   applyOverrides,
 } from "@/lib/waste-rules";
 import { logPilotEntry } from "@/lib/pilot-log";
+import { runLocalVlmShadow } from "@/lib/vlm-shadow";
 import { runInBackground, isolated } from "@/lib/background-task";
 import { uploadFrameToBlob } from "@/lib/blob-store";
 import { redis } from "@/lib/redis";
@@ -636,8 +637,14 @@ export async function POST(request: Request) {
           Promise.all([
             isolated("calibration", recordCalibrationPrediction(multiResults[0].result.confidence, "t2"), undefined),
             isolated("blob-upload", safeUpload(image, multiResults[0].result.itemName, multiResults[0].result.wasteStream, logTimestamp), undefined),
-          ]).then(([, imageUrl]) =>
-            Promise.all(multiResults.map((item, i) =>
+          ]).then(async ([, imageUrl]) => {
+            const localModel = await runLocalVlmShadow({
+              imageBase64: image,
+              allowedStreams: siteConfig.streams.map((s) => s.id),
+              cloudStream: multiResults[0].result.wasteStream,
+              yoloCandidates: clientTierResults?.tier1,
+            });
+            return Promise.all(multiResults.map((item, i) =>
               isolated("pilot-log", logPilotEntry({
                 timestamp: logTimestamp,
                 modelUsed: "t2",
@@ -658,9 +665,10 @@ export async function POST(request: Request) {
                 // all multi-item results — attribute it to the head entry only
                 // so cost aggregation does not double-count.
                 ...(i === 0 && multiUsage && { tokenUsage: multiUsage }),
+                ...(i === 0 && localModel && { localModel }),
               }), undefined)
-            ))
-          )
+            ));
+          })
         );
       }
 
@@ -707,8 +715,16 @@ export async function POST(request: Request) {
       Promise.all([
         isolated("calibration", recordCalibrationPrediction(result.confidence, modelUsed), undefined),
         isolated("blob-upload", safeUpload(image, result.itemName, result.wasteStream, logTimestamp), undefined),
-      ]).then(([, imageUrl]) =>
-        isolated("pilot-log", logPilotEntry({
+      ]).then(async ([, imageUrl]) => {
+        // Cloud-vs-local shadow comparison (pilot mechanism). No-op unless
+        // LOCAL_VLM_ENDPOINT is set; runs here so it never delays the response.
+        const localModel = await runLocalVlmShadow({
+          imageBase64: image,
+          allowedStreams: siteConfig.streams.map((s) => s.id),
+          cloudStream: result.wasteStream,
+          yoloCandidates: tierResults?.tier1,
+        });
+        return isolated("pilot-log", logPilotEntry({
           timestamp: logTimestamp,
           modelUsed,
           escalated: false,
@@ -726,6 +742,7 @@ export async function POST(request: Request) {
           tierResults,
           allItems: [{ itemName: result.itemName, wasteStream: result.wasteStream, confidence: result.confidence, modelUsed }],
           ...(tokenUsage && { tokenUsage }),
+          ...(localModel && { localModel }),
           ...(materialHint && {
             rgbAnalysis: {
               dominantHue: (materialHint as MaterialHint).dominantHue,
@@ -737,8 +754,8 @@ export async function POST(request: Request) {
               }),
             },
           }),
-        }), undefined)
-      )
+        }), undefined);
+      })
     );
 
     return NextResponse.json({ ...result, requestId });

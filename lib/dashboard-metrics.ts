@@ -81,12 +81,29 @@ export interface TimeSeriesPoint extends FunnelTotals {
   date: string;
 }
 
+/** Cloud-vs-local VLM comparison aggregate (pilot shadow mode). */
+export interface ModelComparison {
+  /** Entries that carried a `localModel` shadow prediction. */
+  samples: number;
+  /** Of those, how many the local model resolved (no error, non-empty stream). */
+  resolved: number;
+  /** Of resolved, how many agreed with the cloud model's stream. */
+  agree: number;
+  /** agree / resolved (0 when resolved is 0). */
+  agreementRate: number;
+  errors: number;
+  /** Median local-model latency (ms) over resolved samples. */
+  medianLatencyMs: number;
+}
+
 export interface DashboardMetricsResponse {
   period: Period;
   range: { startIso: string; endIso: string; timezone: "Asia/Tokyo" };
   funnel: FunnelTotals;
   topMisclassifications: MisclassificationItem[];
   timeseries: TimeSeriesPoint[];
+  /** Cloud-vs-local comparison from pilot shadow mode (samples=0 when unused). */
+  modelComparison: ModelComparison;
   /** Cost-calculation provenance — surfaced so the UI can describe the source. */
   pricing: {
     inputPricePerMUsd: number;
@@ -369,6 +386,27 @@ export function computeTimeSeries(
   }));
 }
 
+/**
+ * Aggregate the cloud-vs-local shadow comparison over the given entries.
+ * Pure. Returns all-zero when no entry carries a `localModel` (shadow disabled).
+ */
+export function computeModelComparison(entries: readonly PilotLogEntry[]): ModelComparison {
+  const withLocal = entries.filter((e) => e.localModel);
+  const resolved = withLocal.filter((e) => e.localModel!.wasteStream && !e.localModel!.error);
+  const agree = resolved.filter((e) => e.localModel!.agreesWithCloud).length;
+  const errors = withLocal.filter((e) => !!e.localModel!.error).length;
+  const latencies = resolved.map((e) => e.localModel!.latencyMs).sort((a, b) => a - b);
+  const medianLatencyMs = latencies.length ? latencies[Math.floor((latencies.length - 1) / 2)] : 0;
+  return {
+    samples: withLocal.length,
+    resolved: resolved.length,
+    agree,
+    agreementRate: resolved.length ? agree / resolved.length : 0,
+    errors,
+    medianLatencyMs,
+  };
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // Top-level: assemble the API response
 // ────────────────────────────────────────────────────────────────────────────
@@ -389,6 +427,7 @@ export function buildDashboardMetrics(
   const funnel = computeFunnelTotals(entries);
   const topMisclassifications = computeTopMisclassifications(entries, verdicts);
   const timeseries = computeTimeSeries(entries, range.days);
+  const modelComparison = computeModelComparison(entries);
 
   const inputPricePerMUsd = resolveInputPricePerM();
   const outputPricePerMUsd = resolveOutputPricePerM();
@@ -403,6 +442,7 @@ export function buildDashboardMetrics(
     funnel,
     topMisclassifications,
     timeseries,
+    modelComparison,
     pricing: {
       inputPricePerMUsd,
       outputPricePerMUsd,

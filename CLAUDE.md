@@ -21,12 +21,12 @@
 - YOLO26m FP16 (ONNX Runtime Web) — browser object detection, 15 custom waste classes (`15class_v1.onnx`, 39 MB)
 - OpenAI `gpt-5.4-mini` — cloud fallback (single-model path) when local YOLO confidence is below the fallback threshold
 - Upstash Redis (REST) / Vercel Blob / Vercel Serverless + Cron
-- Zod v4 / Jest v30 (460 tests, 19 suites) / EN+JA i18n (169 keys/locale)
+- Zod v4 / Jest v30 (462 tests, 19 suites) / EN+JA i18n (174 keys/locale)
 
 ## Commands
     npm run dev      # Dev server (Turbopack)
     npm run build    # Production build
-    npm test         # 460 Jest tests, 19 suites
+    npm test         # 462 Jest tests, 19 suites
     npm run lint     # ESLint
 
 ## Routes
@@ -42,6 +42,7 @@
 - `lib/yolo-inference.ts` — YOLO26m wrapper (Tier 1: 15 custom waste classes; instant result when confidence ≥ YOLO_FALLBACK_THRESHOLD = 0.725 at default sensitivity, derived as `lerp(0.80, 0.65, sensitivity)` in `lib/threshold-config.ts`); WebGPU primary, WASM fallback
 - `lib/rgb-material-analyzer.ts` — RGB/texture analysis helpers (HSV color, transparency, metallicity, bbox aspect ratio, LBP texture, class-name refinement). The classify route *can* accept a `MaterialHint` and fold it into the GPT prompt + log, but the live kiosk path does not currently produce one — `analyzeMaterial()` is unwired and `KioskDisplay` sends no hint; only `refineClassName` / `computeLbpTexture` / `detectMetallicFromLuminance` are unit-tested. Treat this module as scaffolding, not an active stage.
 - `lib/inference-backend.ts` — 2-tier orchestration (YOLO → GPT-5.4 mini); sequential model startup with `overallReady` gate
+- `lib/vlm-shadow.ts` — Cloud-vs-local shadow comparison (pilot mechanism, off by default). When `LOCAL_VLM_ENDPOINT` is set, `/api/classify` also runs a local/candidate VLM on each escalated frame (server-side, non-blocking, inside the existing background logging) and records `localModel` on the pilot-log entry; aggregated by `computeModelComparison()` and shown on `/insights`. Offline benchmarking harness lives in `lib/benchmark/` (+ `scripts/bench/`)
 - `lib/waste-rules-core.ts` — Word-boundary pattern matching + override engine (browser-safe)
 - `lib/waste-rules.ts` — Site config loader + GPT prompt builder (5-min cache)
 - `components/KioskDisplay.tsx` — State machine: loading → idle → object_detected → classifying → result → cooldown; multi-item blob-to-detection matching (up to 4), three-way routing (YOLO match above threshold → instant result, YOLO match below threshold → GPT-5.4 mini, unmatched+object → GPT-5.4 mini, unmatched+noise → discard)

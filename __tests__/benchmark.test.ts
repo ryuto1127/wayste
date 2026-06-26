@@ -10,6 +10,7 @@ import { runBenchmark } from "@/lib/benchmark/runner";
 import { makeStubAdapter } from "@/lib/benchmark/vlm-adapter";
 import { buildVlmPrompt, parseStreamFromOutput } from "@/lib/benchmark/adapters/prompt";
 import { makeQwenHttpAdapter } from "@/lib/benchmark/adapters/qwen-http";
+import { runLocalVlmShadow, isShadowEnabled } from "@/lib/vlm-shadow";
 
 function makeEntry(o: Partial<PilotLogEntry> = {}): PilotLogEntry {
   return {
@@ -275,5 +276,55 @@ describe("makeQwenHttpAdapter", () => {
         sample: makeSample(),
       }),
     ).rejects.toThrow();
+  });
+});
+
+describe("runLocalVlmShadow", () => {
+  const original = process.env.LOCAL_VLM_ENDPOINT;
+  afterEach(() => {
+    if (original === undefined) delete process.env.LOCAL_VLM_ENDPOINT;
+    else process.env.LOCAL_VLM_ENDPOINT = original;
+  });
+
+  it("is disabled and returns null when LOCAL_VLM_ENDPOINT is unset", async () => {
+    delete process.env.LOCAL_VLM_ENDPOINT;
+    expect(isShadowEnabled()).toBe(false);
+    const out = await runLocalVlmShadow({ imageBase64: "x", allowedStreams: ["recyclable"], cloudStream: "recyclable" });
+    expect(out).toBeNull();
+  });
+
+  it("returns the local prediction + agreement when enabled", async () => {
+    process.env.LOCAL_VLM_ENDPOINT = "http://local/v1/chat/completions";
+    const fakeFetch = (async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ choices: [{ message: { content: '{"stream":"recyclable"}' } }] }),
+    })) as unknown as typeof fetch;
+    let t = 0;
+    const out = await runLocalVlmShadow({
+      imageBase64: "x",
+      allowedStreams: ["recyclable", "burnable"],
+      cloudStream: "recyclable",
+      fetchImpl: fakeFetch,
+      now: () => (t += 100),
+    });
+    expect(out?.wasteStream).toBe("recyclable");
+    expect(out?.agreesWithCloud).toBe(true);
+    expect(out?.error).toBeUndefined();
+    expect(out?.latencyMs).toBe(100);
+  });
+
+  it("records an error (never throws) on a failed call", async () => {
+    process.env.LOCAL_VLM_ENDPOINT = "http://local/v1/chat/completions";
+    const fakeFetch = (async () => ({ ok: false, status: 500 })) as unknown as typeof fetch;
+    const out = await runLocalVlmShadow({
+      imageBase64: "x",
+      allowedStreams: ["recyclable"],
+      cloudStream: "recyclable",
+      fetchImpl: fakeFetch,
+    });
+    expect(out?.wasteStream).toBe("");
+    expect(out?.agreesWithCloud).toBe(false);
+    expect(out?.error).toBeTruthy();
   });
 });

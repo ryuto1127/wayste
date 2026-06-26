@@ -8,6 +8,8 @@ import {
 import { scoreBenchmark, percentile, type VlmRunResult } from "@/lib/benchmark/scoring";
 import { runBenchmark } from "@/lib/benchmark/runner";
 import { makeStubAdapter } from "@/lib/benchmark/vlm-adapter";
+import { buildVlmPrompt, parseStreamFromOutput } from "@/lib/benchmark/adapters/prompt";
+import { makeQwenHttpAdapter } from "@/lib/benchmark/adapters/qwen-http";
 
 function makeEntry(o: Partial<PilotLogEntry> = {}): PilotLogEntry {
   return {
@@ -201,5 +203,77 @@ describe("runBenchmark", () => {
     });
     expect(report.failures).toBe(1);
     expect(report.accuracy).toBe(1); // the one that succeeded matched its GT
+  });
+});
+
+describe("buildVlmPrompt / parseStreamFromOutput", () => {
+  const streams = ["recycling", "compost", "landfill"];
+
+  it("lists allowed streams, includes yolo hints, and asks for JSON", () => {
+    const p = buildVlmPrompt(streams, makeSample({ yoloCandidates: [{ itemName: "can", confidence: 0.4 }] }));
+    expect(p).toContain("recycling, compost, landfill");
+    expect(p).toContain("can (0.40)");
+    expect(p.toLowerCase()).toContain("json");
+  });
+
+  it("parses a stream from JSON output, case-insensitively", () => {
+    expect(parseStreamFromOutput('{"stream":"Recycling"}', streams)).toBe("recycling");
+  });
+
+  it("falls back to scanning free text", () => {
+    expect(parseStreamFromOutput("This belongs in the compost bin.", streams)).toBe("compost");
+  });
+
+  it("returns null when no allowed stream appears", () => {
+    expect(parseStreamFromOutput("no idea what this is", streams)).toBeNull();
+  });
+});
+
+describe("makeQwenHttpAdapter", () => {
+  const streams = ["recycling", "compost"];
+
+  function fakeFetch(chatContent: string): typeof fetch {
+    return (async (url: string) => {
+      if (url.includes("blob") || url.endsWith(".jpg")) {
+        return {
+          ok: true,
+          status: 200,
+          headers: { get: () => "image/jpeg" },
+          arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer,
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ choices: [{ message: { content: chatContent } }] }),
+      };
+    }) as unknown as typeof fetch;
+  }
+
+  it("fetches the image, calls the endpoint, and returns the parsed stream", async () => {
+    const adapter = makeQwenHttpAdapter({
+      endpoint: "http://localhost:8000/v1/chat/completions",
+      fetchImpl: fakeFetch('{"stream":"compost"}'),
+    });
+    const out = await adapter.classify({
+      imageUrl: "https://blob.example.com/x.jpg",
+      allowedStreams: streams,
+      sample: makeSample(),
+    });
+    expect(out.stream).toBe("compost");
+  });
+
+  it("throws when the model output has no parseable stream", async () => {
+    const adapter = makeQwenHttpAdapter({
+      endpoint: "http://model.local/v1/chat",
+      fetchImpl: fakeFetch("total garbage, no stream here"),
+    });
+    await expect(
+      adapter.classify({
+        imageUrl: "https://blob.example.com/x.jpg",
+        allowedStreams: streams,
+        sample: makeSample(),
+      }),
+    ).rejects.toThrow();
   });
 });

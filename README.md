@@ -18,13 +18,13 @@
 
 A real-time AI waste-sorting kiosk. Walk up to the bins holding any item, and a fixed downward camera tells you in seconds which bin it belongs in — no app, no phone, no buttons.
 
-Built for office and public-space pilots. **Browser-first inference** keeps frames on-device for privacy and zero per-scan cost; a single cloud fallback handles the long tail. Full English and Japanese support, per-site configurable waste streams, and bias-aware computer vision.
+Built for office and public-space pilots. **Browser-first inference** keeps frames on-device for privacy and zero per-scan cost; a single cloud fallback handles the long tail today — and on the privacy roadmap, that fallback is being replaced by an on-device VLM so that no image ever leaves the device. Full English and Japanese support, per-site configurable waste streams, and bias-aware computer vision.
 
 > **Status:** Demo running on Vercel; pilot tests being arranged with universities and corporate offices in Japan. Not yet in production.
 
 ## Why I built this
 
-Office and airport bins in Japan often have 4–6 streams (burnable, plastic, PET, cans, paper, special) and the labels are dense. People glance for ~2 seconds, give up, and toss everything in landfill. A traditional app doesn't work — nobody wants to scan a QR code while holding trash. So the design constraint was: **zero user effort, zero install, real-time guidance** — which forced an architecture where a fixed camera sees only the trash and the user's hand, never their face, and the model runs in the browser so frames never leave the device.
+Office and airport bins in Japan often have 4–6 streams (burnable, plastic, PET, cans, paper, special) and the labels are dense. People glance for ~2 seconds, give up, and toss everything in landfill. A traditional app doesn't work — nobody wants to scan a QR code while holding trash. So the design constraint was: **zero user effort, zero install, real-time guidance** — which forced an architecture where a fixed camera sees only the trash and the user's hand, never their face, and the model runs in the browser so frames stay on-device — only the rare long tail still falls back to the cloud today, which the on-device roadmap is removing.
 
 ## Engineering highlights
 

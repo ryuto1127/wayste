@@ -308,7 +308,7 @@ export default function Page() {
               </h3>
               <p className="text-neutral-600 leading-relaxed">
                 カメラは下向きに固定され、映るのは手とゴミだけ。
-                すべての判定はブラウザ内で完結し、画像は外部に送信されません。
+                判定の大半は端末内で完結し、珍しい品物だけクラウドに送ります。画像を一切外に出さない完全な端末内処理を目指し、端末内AIへの移行を進めています。
               </p>
             </div>
             <div className="p-10 bg-white rounded-3xl">

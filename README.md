@@ -43,8 +43,6 @@ Office and airport bins in Japan often have 4–6 streams (burnable, plastic, PE
 - Runs a **2-tier inference pipeline** — local YOLO first, cloud GPT only when needed:
   - **Tier 1 — YOLO26m (on-demand, browser):** custom 15-class waste detection model (`15class_v1.onnx`, 39 MB) covering bottles, cans, cups, bags, batteries, food waste, and other common items. Runs when the CV pipeline triggers classification; high-confidence detections are resolved instantly with no server call.
   - **Tier 2 — OpenAI `gpt-5.4-mini`:** fires when YOLO confidence is below the sensitivity-derived fallback threshold (~0.725 at default sensitivity 0.5), or when a foreground blob exists with no matching YOLO detection. Single-model path — no nano escalation.
-- **RGB material analysis** refines YOLO class names using bounding-box color, transparency, metallicity, shape (aspect ratio), and LBP texture analysis — disambiguates "bottle" → "glass bottle" / "PET bottle" / "aluminum can" etc. before waste-rule matching
-- Material hints (hue, saturation, transparency, texture surface) are forwarded to GPT in Tier 2 for improved cloud classification
 - Shows a **clear directive** based on confidence level — no raw percentages shown to users:
   - High confidence → **"Put this in Recycling"**
   - Medium confidence → **"This looks like it goes in Landfill"** + a soft note to check the bin label
@@ -91,7 +89,6 @@ Office and airport bins in Japan often have 4–6 streams (burnable, plastic, PE
 | Styling | Tailwind CSS v4 |
 | Local inference (Tier 1) | YOLO26m FP16 — custom 15-class waste model (`15class_v1.onnx`, 39 MB) via ONNX Runtime Web — on-demand |
 | AI classification (Tier 2) | OpenAI `gpt-5.4-mini` (single-model path) |
-| Material analysis | RGB color analysis + LBP texture analysis on YOLO bounding boxes — refines class names and feeds hints to GPT |
 | Local detection | OffscreenCanvas background subtraction at 120×120 (square), ~33 fps, multi-blob analysis (up to 4), auto-calibrating thresholds |
 | Response validation | Zod schema validation on all model output |
 | API security | HMAC-signed session tokens + two-tier auth (kiosk token / admin key) |
@@ -199,12 +196,6 @@ YOLO26m (custom 15-class waste model) runs on-demand when the CV pipeline
 triggers classification. All 15 classes are waste items (bottles, cans, cups,
 bags, batteries, food waste, etc.) — every detection maps to a disposal stream.
         ↓
-RGB material analysis runs on best detection bounding box:
-  · Color (HSV), transparency, metallicity, bbox aspect ratio
-  · LBP texture analysis → paper / plastic / metal surface suggestion
-  · refineClassName disambiguates generic YOLO labels
-    (e.g. "bottle" → "glass bottle", "PET bottle", or "aluminum can")
-        ↓
 If YOLO26m confidence ≥ YOLO_FALLBACK_THRESHOLD (~0.725 at default sensitivity 0.5)
         → result returned immediately (instant, no server call)
         → YOLO-only log sent to /api/pilot-log (non-blocking)
@@ -213,8 +204,6 @@ If YOLO26m confidence ≥ YOLO_FALLBACK_THRESHOLD (~0.725 at default sensitivity
 Fires when YOLO confidence is below the fallback threshold, or when a
 foreground blob exists with no matching YOLO detection.
   · Center short-side square crop (e.g. 720×720 from 1280×720) sent to /api/classify
-  · MaterialHint (color, transparency, texture) included when available —
-    GPT prompt says "Local analysis detected: transparent=true, metallic=false, …"
   · gpt-5.4-mini classifies item + optional preAction guidance (single-model path)
   · Zod validates model JSON output; unknown stream IDs fall back to needs_review
   · Compound items (multi-part objects) are detected and broken down into per-component disposal instructions
@@ -489,7 +478,7 @@ You can also trigger manual purges from the insights dashboard using the date-ra
 npm test
 ```
 
-442 unit tests across 18 suites covering the state machine, CV pipeline thresholds, threshold sensitivity derivation, override pattern matching, offline cache, notifications, classification API route, RGB material/texture analysis, multi-item blob detection, sequential model loading, bbox utilities, dashboard metrics + integration, insights helpers, OpenAI pricing/budget, and analysis exports.
+465 unit tests across 19 suites covering the state machine, CV pipeline thresholds, threshold sensitivity derivation, override pattern matching, offline cache, notifications, classification API route, multi-item blob detection, sequential model loading, bbox utilities, dashboard metrics + integration, insights helpers, OpenAI pricing/budget, the cloud-vs-local shadow comparison, and analysis exports.
 
 ---
 

@@ -7,7 +7,7 @@ export default function Page() {
       <section className="relative min-h-[100vh] flex flex-col justify-center px-6 md:px-12 py-20 bg-gradient-to-b from-neutral-50 to-white">
         <div className="max-w-6xl mx-auto w-full">
           <div className="text-center mb-16">
-            <p className="text-sm font-semibold tracking-widest text-emerald-600 uppercase mb-6">
+            <p className="text-sm font-semibold tracking-widest text-emerald-600 mb-6">
               wayste
             </p>
             <h1
@@ -113,7 +113,7 @@ export default function Page() {
               />
             </div>
             <div>
-              <p className="text-sm font-semibold tracking-widest text-emerald-600 uppercase mb-4">
+              <p className="text-sm font-semibold tracking-widest text-emerald-600 mb-4">
                 wayste とは
               </p>
               <h2

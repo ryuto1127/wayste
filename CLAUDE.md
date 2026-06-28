@@ -2,7 +2,7 @@
 - Match the language you use (English or Japanese)
 - Avoid technical jargon; use plain, natural language
 - If technical terms or concepts come up, explain what they mean in simple terms
-- **Project name spelling: always lowercase `wayste`** — never `Wayste`, `WAYSTE`, or `WaYsTe`. This applies even at the start of a sentence and in headings/titles. The name is a stylized lowercase wordmark.
+- **Project name spelling: always lowercase `wayste`** — never `Wayste`, `WAYSTE`, or `WaYsTe`. This applies even at the start of a sentence and in headings/titles. The name is a stylized lowercase wordmark. Don't uppercase it visually either — no CSS `text-transform: uppercase`/`uppercase` utility on elements that render the wordmark (e.g. eyebrow labels).
 
 ### Kiosk End-Users (Office/Airport Workers)
 - The kiosk's UI must also use simple, non-technical language

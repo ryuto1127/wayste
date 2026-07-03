@@ -7,7 +7,7 @@ export default function Page() {
       <section className="relative min-h-[100vh] flex flex-col justify-center px-6 md:px-12 py-20 bg-gradient-to-b from-neutral-50 to-white">
         <div className="max-w-6xl mx-auto w-full">
           <div className="text-center mb-16">
-            <p className="text-sm font-semibold tracking-widest text-emerald-600 uppercase mb-6">
+            <p className="text-sm font-semibold tracking-widest text-emerald-600 mb-6">
               wayste
             </p>
             <h1
@@ -113,7 +113,7 @@ export default function Page() {
               />
             </div>
             <div>
-              <p className="text-sm font-semibold tracking-widest text-emerald-600 uppercase mb-4">
+              <p className="text-sm font-semibold tracking-widest text-emerald-600 mb-4">
                 wayste とは
               </p>
               <h2
@@ -308,7 +308,7 @@ export default function Page() {
               </h3>
               <p className="text-neutral-600 leading-relaxed">
                 カメラは下向きに固定され、映るのは手とゴミだけ。
-                すべての判定はブラウザ内で完結し、画像は外部に送信されません。
+                判定はすべて端末の中で完結し、判定のために画像が外部のAIへ送られることはありません。わからない品物は推測せず「確認が必要」と案内します。
               </p>
             </div>
             <div className="p-10 bg-white rounded-3xl">

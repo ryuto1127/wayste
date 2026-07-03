@@ -59,8 +59,8 @@
     { "pattern": "その他の色のびん", "stream": "recyclable", "note": "緑・青などの色付きびんは中を洗って資源ゴミへ" },
     { "pattern": "びん", "stream": "recyclable", "note": "中を洗って資源ゴミへ" },
     { "pattern": "glass bottle", "stream": "recyclable", "note": "中を洗って資源ゴミへ" },
-    { "pattern": "toner", "stream": "special", "note": "総務・管理部門へお渡しください", "requiresStaff": true },
-    { "pattern": "トナー", "stream": "special", "note": "総務・管理部門へお渡しください", "requiresStaff": true }
+    { "pattern": "toner", "stream": "needs_review", "note": "総務・管理部門へお渡しください", "requiresStaff": true },
+    { "pattern": "トナー", "stream": "needs_review", "note": "総務・管理部門へお渡しください", "requiresStaff": true }
   ],
   "compounds": [
     {

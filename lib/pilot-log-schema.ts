@@ -88,6 +88,16 @@ export const PilotLogEntrySchema = z.object({
       completionTokens: z.number().min(0).max(1_000_000),
     })
     .optional(),
+  localModel: z
+    .object({
+      model: z.string().max(128),
+      wasteStream: z.string().max(64),
+      confidence: z.number().min(0).max(1).optional(),
+      latencyMs: z.number().min(0).max(600_000),
+      agreesWithCloud: z.boolean(),
+      error: z.string().max(512).optional(),
+    })
+    .optional(),
 });
 
 /**

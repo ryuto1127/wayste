@@ -11,6 +11,7 @@ import {
   applyOverrides,
 } from "@/lib/waste-rules";
 import { logPilotEntry } from "@/lib/pilot-log";
+import { runLocalVlmShadow } from "@/lib/vlm-shadow";
 import { runInBackground, isolated } from "@/lib/background-task";
 import { uploadFrameToBlob } from "@/lib/blob-store";
 import { redis } from "@/lib/redis";
@@ -107,7 +108,7 @@ const RequestSchema = z.union([BatchRequestSchema, SingleRequestSchema]);
 
 // ── Rate limiting (Redis-based) ──
 // Kiosks are trusted single-device endpoints — allow enough headroom for
-// back-to-back scans and retries. 6 requests per 3-second window prevents
+// back-to-back scans and retries. 15 requests per 3-second window prevents
 // genuine abuse while never blocking legitimate consecutive classifications.
 const RATE_LIMIT_MAX = parseInt(process.env.RATE_LIMIT_MAX || "15");
 const RATE_LIMIT_TTL_S = 3;
@@ -348,6 +349,18 @@ export async function POST(request: Request) {
   // and the open image-upload vector.
   const auth = await verifyKioskRequest(request);
   if (!auth.ok) return auth.response;
+
+  // ── Cloud fallback gate (server-side enforcement) ──
+  // The kiosk stops calling this route when NEXT_PUBLIC_CLOUD_FALLBACK is
+  // unset, but a stale client bundle could still POST frames. Refuse here so
+  // "no frame is sent to a cloud AI" holds regardless of client state. This
+  // also keeps the vlm-shadow comparison off unless the pilot flag is on.
+  if (process.env.NEXT_PUBLIC_CLOUD_FALLBACK !== "1") {
+    return NextResponse.json(
+      { error: "Cloud classification is disabled. Set NEXT_PUBLIC_CLOUD_FALLBACK=1 (pilot experiments only) to enable." },
+      { status: 403 },
+    );
+  }
 
   // ── Redis-based rate limiting ──
   const clientId =
@@ -636,8 +649,14 @@ export async function POST(request: Request) {
           Promise.all([
             isolated("calibration", recordCalibrationPrediction(multiResults[0].result.confidence, "t2"), undefined),
             isolated("blob-upload", safeUpload(image, multiResults[0].result.itemName, multiResults[0].result.wasteStream, logTimestamp), undefined),
-          ]).then(([, imageUrl]) =>
-            Promise.all(multiResults.map((item, i) =>
+          ]).then(async ([, imageUrl]) => {
+            const localModel = await runLocalVlmShadow({
+              imageBase64: image,
+              allowedStreams: siteConfig.streams.map((s) => s.id),
+              cloudStream: multiResults[0].result.wasteStream,
+              yoloCandidates: clientTierResults?.tier1,
+            });
+            return Promise.all(multiResults.map((item, i) =>
               isolated("pilot-log", logPilotEntry({
                 timestamp: logTimestamp,
                 modelUsed: "t2",
@@ -658,9 +677,10 @@ export async function POST(request: Request) {
                 // all multi-item results — attribute it to the head entry only
                 // so cost aggregation does not double-count.
                 ...(i === 0 && multiUsage && { tokenUsage: multiUsage }),
+                ...(i === 0 && localModel && { localModel }),
               }), undefined)
-            ))
-          )
+            ));
+          })
         );
       }
 
@@ -707,8 +727,16 @@ export async function POST(request: Request) {
       Promise.all([
         isolated("calibration", recordCalibrationPrediction(result.confidence, modelUsed), undefined),
         isolated("blob-upload", safeUpload(image, result.itemName, result.wasteStream, logTimestamp), undefined),
-      ]).then(([, imageUrl]) =>
-        isolated("pilot-log", logPilotEntry({
+      ]).then(async ([, imageUrl]) => {
+        // Cloud-vs-local shadow comparison (pilot mechanism). No-op unless
+        // LOCAL_VLM_ENDPOINT is set; runs here so it never delays the response.
+        const localModel = await runLocalVlmShadow({
+          imageBase64: image,
+          allowedStreams: siteConfig.streams.map((s) => s.id),
+          cloudStream: result.wasteStream,
+          yoloCandidates: tierResults?.tier1,
+        });
+        return isolated("pilot-log", logPilotEntry({
           timestamp: logTimestamp,
           modelUsed,
           escalated: false,
@@ -726,6 +754,7 @@ export async function POST(request: Request) {
           tierResults,
           allItems: [{ itemName: result.itemName, wasteStream: result.wasteStream, confidence: result.confidence, modelUsed }],
           ...(tokenUsage && { tokenUsage }),
+          ...(localModel && { localModel }),
           ...(materialHint && {
             rgbAnalysis: {
               dominantHue: (materialHint as MaterialHint).dominantHue,
@@ -737,8 +766,8 @@ export async function POST(request: Request) {
               }),
             },
           }),
-        }), undefined)
-      )
+        }), undefined);
+      })
     );
 
     return NextResponse.json({ ...result, requestId });

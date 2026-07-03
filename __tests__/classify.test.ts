@@ -72,6 +72,8 @@ process.env.KV_REST_API_URL = "https://fake-redis.upstash.io";
 process.env.KV_REST_API_TOKEN = "fake-token";
 process.env.OPENAI_API_KEY = "fake-key";
 process.env.BLOB_READ_WRITE_TOKEN = "fake-blob-token";
+// Route-level cloud gate: tests exercise the legacy cloud path explicitly
+process.env.NEXT_PUBLIC_CLOUD_FALLBACK = "1";
 
 import type { ComponentPart } from "@/lib/types";
 

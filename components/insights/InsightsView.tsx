@@ -10,6 +10,7 @@ import type {
 import {
   buildDashboardUrl,
   errorMessageKey,
+  formatPercent,
   mapStatusToError,
   PERIOD_OPTIONS,
   type InsightsLoadError,
@@ -215,8 +216,43 @@ function DashboardBody({
         locale={locale}
       />
 
+      {/* Cloud-vs-local comparison — only when pilot shadow data exists. */}
+      {data.modelComparison.samples > 0 && (
+        <ModelComparisonCard data={data.modelComparison} locale={locale} />
+      )}
+
       {/* Daily trend across the whole period. */}
       <MetricsTimeseries timeseries={data.timeseries} locale={locale} />
+    </div>
+  );
+}
+
+function ModelComparisonCard({
+  data,
+  locale,
+}: {
+  data: DashboardMetricsResponse["modelComparison"];
+  locale: Locale;
+}) {
+  const T = (key: TranslationKey) => t(locale, key);
+  return (
+    <section className="rounded-xl border border-neutral-800 bg-neutral-900/50 p-6">
+      <h2 className="text-sm font-medium text-neutral-300">{T("insightsModelCompareTitle")}</h2>
+      <div className="mt-4 grid grid-cols-3 gap-4">
+        <CompareStat label={T("insightsModelCompareAgreement")} value={formatPercent(data.agree, data.resolved)} />
+        <CompareStat label={T("insightsModelCompareSamples")} value={`${data.resolved}/${data.samples}`} />
+        <CompareStat label={T("insightsModelCompareLatency")} value={`${data.medianLatencyMs} ms`} />
+      </div>
+      <p className="mt-4 text-xs text-neutral-500">{T("insightsModelCompareNote")}</p>
+    </section>
+  );
+}
+
+function CompareStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="text-2xl font-semibold text-neutral-100">{value}</span>
+      <span className="text-xs text-neutral-400">{label}</span>
     </div>
   );
 }

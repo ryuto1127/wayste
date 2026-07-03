@@ -28,6 +28,7 @@ import {
 import { computeThresholds, type ThresholdConfig, type Calibration } from "@/lib/threshold-config";
 import { perfMonitor } from "@/lib/perf-monitor";
 import { loadYoloRules, resolveYoloDetection, isYoloClassNotWaste } from "@/lib/yolo-rules";
+import { buildClassificationResult } from "@/lib/waste-rules-core";
 import {
   computeFrameFingerprint,
   frameDiff,
@@ -80,6 +81,20 @@ const UNRESOLVED_ESCALATION_CYCLES = 5;
 /** Delay (ms) after entering result state before firing a proactive API sweep
  *  to catch items outside YOLO's vocabulary. Only fires for T1-only results. */
 const RESULT_API_SWEEP_DELAY_MS = 1_500;
+
+// ── Cloud fallback (pilot experiments only) ──
+/** OFF by default: items YOLO can't confidently resolve become `needs_review`
+ *  on-device, and no frame ever leaves the kiosk for classification.
+ *  Set NEXT_PUBLIC_CLOUD_FALLBACK=1 to re-enable the legacy GPT escalation
+ *  path — pilot experiments only (e.g. the cloud-vs-local shadow comparison
+ *  via LOCAL_VLM_ENDPOINT on the server). */
+const CLOUD_FALLBACK_ENABLED = process.env.NEXT_PUBLIC_CLOUD_FALLBACK === "1";
+/** Confidence assigned to on-device needs_review fallbacks. Must be > 0 —
+ *  handleMultiClassificationResults treats confidence 0 as the
+ *  "nothing detected" sentinel (see resolveYoloDetection's not_waste branch)
+ *  and would discard the card. Kept far below any reviewThreshold so the
+ *  result always renders as needs_review. */
+const LOCAL_FALLBACK_CONFIDENCE = 0.01;
 
 // ── Background adaptation rates (passed to FrameAnalyzer per pipeline state) ──
 // idle / cooldown: full rate — continuously absorb drift and persistent leftovers
@@ -364,9 +379,61 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
     setPipelineState(next);
   }, []);
 
-  // ── API call (with timeout + 429 retry) ──
+  // ── Fallback classification ──
+  // Default (CLOUD_FALLBACK_ENABLED=false): resolved entirely on-device as
+  // `needs_review` — the frame is never sent to the cloud for classification.
+  // Legacy cloud path (GPT via /api/classify) only runs when the pilot
+  // experiment flag NEXT_PUBLIC_CLOUD_FALLBACK=1 is set.
   const classify = useCallback(
     async (frame: string, meta: ClassifyMeta, yoloDetections?: YoloDetectionLog[], multi?: boolean, tierResults?: { tier1?: { itemName: string; confidence: number; x?: number }[] }, faceDetected?: boolean): Promise<ClassificationResponse & { requestId?: string }> => {
+      if (!CLOUD_FALLBACK_ENABLED) {
+        // ── On-device resolution: uncertain item → needs_review ──
+        const siteConfig = siteConfigRef.current;
+        const loc = localeRef.current;
+        const raw = {
+          itemName: t(loc, "uncertain"),
+          wasteStream: "needs_review",
+          confidence: LOCAL_FALLBACK_CONFIDENCE,
+          reasoning: t(loc, "notSureCheck"),
+        };
+        const result: ClassificationResponse & { requestId?: string } = siteConfig
+          ? { ...buildClassificationResult(raw, siteConfig, loc), modelUsed: "T1" }
+          : {
+              itemName: raw.itemName,
+              wasteStream: "needs_review",
+              confidence: LOCAL_FALLBACK_CONFIDENCE,
+              reasoning: raw.reasoning,
+              binColor: "#D97706",
+              binLabel: "Needs Verification",
+              needsReview: true,
+              isCompound: false,
+              modelUsed: "T1",
+            };
+        // Log for the admin review loop (fire-and-forget) — same frame policy
+        // as logYoloOnlyResult: attach it only when the client-side face
+        // check passed; the server re-checks before storing.
+        const entry = {
+          modelUsed: "T1",
+          itemName: result.itemName,
+          wasteStream: result.wasteStream,
+          confidence: LOCAL_FALLBACK_CONFIDENCE,
+          requiresVerification: true,
+          latencyMs: 0,
+          ...(yoloDetections && yoloDetections.length > 0 && { yoloDetections }),
+          meta,
+          ...(tierResults && { tierResults }),
+          allItems: [{ itemName: result.itemName, wasteStream: result.wasteStream, confidence: LOCAL_FALLBACK_CONFIDENCE, modelUsed: "T1" }],
+        };
+        fetch("/api/pilot-log", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(
+            faceDetected ? { faceDetected: true, entry } : { image: frame, faceDetected: false, entry }
+          ),
+        }).catch(() => {});
+        return result;
+      }
+
       const doFetch = async (): Promise<ClassificationResponse & { requestId?: string }> => {
         const fetchStartMs = Date.now();
         const controller = new AbortController();
@@ -1052,6 +1119,22 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           handleMultiClassificationResults(resolvedResults, resolvedResults.map(() => undefined));
           detectionGoneMapRef.current.clear();
         } else if (hasResults) {
+          if (!CLOUD_FALLBACK_ENABLED) {
+            // ── Local-only mode: no cloud response is coming for the
+            // unresolved remainder — display the confidently-resolved items
+            // now. If the leftover detection persists, the result-state
+            // escalation adds an on-device needs_review card for it.
+            console.log(`[yolo-loop] partial: ${resolvedResults.map(r => r.itemName).join(" + ")} resolved — displaying (local-only mode)`);
+            if (analysis) {
+              logYoloOnlyResult(video, resolvedResults[0], detections, yoloMs, analysis, "T1", undefined, undefined,
+                { tier1: wasteDetections.map(d => ({ itemName: d.className, confidence: d.confidence, x: d.bbox[0] + d.bbox[2] / 2 })).sort((a, b) => b.confidence - a.confidence).slice(0, 5) },
+                resolvedResults,
+                { blobCount: qualifiedBlobCount, yoloDetectionCount: wasteDetections.length });
+            }
+            handleMultiClassificationResults(resolvedResults, resolvedResults.map(() => undefined));
+            detectionGoneMapRef.current.clear();
+            return;
+          }
           // ── Some resolved but unresolved items or blob mismatch — let API finish ──
           if (yoloMissedItems) {
             console.log(`[yolo-loop] partial: ${resolvedResults.map(r => r.itemName).join(" + ")} resolved, but ${qualifiedBlobCount} blobs vs ${wasteDetections.length} detections — waiting for API`);
@@ -1320,255 +1403,6 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       }
     }
 
-    // ── Trigger classification (Tiered Pipeline — all on-demand) ──
-    //
-    // Tier 1: YOLO26m (on-demand) → conf >= 0.65 + rule → instant result
-    // Tier 2: OpenAI API (GPT-5.4-mini) → ~1-3s
-    //
-    function triggerClassification(analysis: FrameAnalysis) {
-      if (inFlightRef.current) return;
-
-      const video = cameraRef.current?.getVideo();
-      if (!video) return;
-
-      inFlightRef.current = true;
-      classifyStartRef.current = Date.now();
-      transition("classifying");
-
-      const backend = inferenceRef.current;
-      const yoloReady = backend?.isReady() && siteConfigRef.current;
-      const isOffline = typeof navigator !== "undefined" && !navigator.onLine;
-
-      // If offline, use local YOLO only → offline fallback
-      if (isOffline) {
-        handleOfflineClassification(video, backend, yoloReady);
-        return;
-      }
-
-      const apiController = new AbortController();
-      let yoloDetectionLogs: YoloDetectionLog[] | undefined;
-      type TierHints = { tier1?: { itemName: string; confidence: number; x?: number }[] };
-      const apiPromise = (multi?: boolean, tierResults?: TierHints) => classifyViaApiAsync(video, analysis, apiController.signal, yoloDetectionLogs, multi, tierResults);
-
-      if (!yoloReady || !backend) {
-        // No YOLO at all — straight to API
-        apiPromise()
-          .then(({ result: r, requestId }) => {
-            if (r) handleClassificationResult(r, requestId);
-            else handleClassificationError(new Error("API returned no result"));
-          })
-          .catch(handleClassificationError);
-        return;
-      }
-
-      // ── Tier 1: On-demand YOLO detection ──
-      const yoloStart = Date.now();
-      const blobs = analysis.blobs;
-      backend.detect(video)
-        .then((detections) => {
-          const yoloMs = Date.now() - yoloStart;
-          perfMonitor.recordYoloInference(yoloMs);
-
-          if (detections.length > 0) {
-            yoloDetectionLogs = toDetectionLogs(detections);
-          }
-
-          // Filter out not_waste classes (person, furniture, vehicles, etc.)
-          const wasteDetections = detections.filter(d => !isYoloClassNotWaste(d.className));
-
-          // ── Detection routing ──
-          const resolvedResults: (ClassificationResponse & { _bbox?: Bbox })[] = [];
-          let unresolvedCount = 0;
-
-          for (const detection of wasteDetections.slice(0, 4)) {
-            if (detection.confidence >= thresholdsRef.current.YOLO_FALLBACK_THRESHOLD) {
-              const r = resolveYoloDetection(detection, siteConfigRef.current!, localeRef.current);
-              if (r) {
-                (r as ClassificationResponse & { _bbox?: Bbox })._bbox = detection.bbox;
-                resolvedResults.push(r as ClassificationResponse & { _bbox?: Bbox });
-                continue;
-              }
-            }
-            unresolvedCount++;
-          }
-
-          // Blob-vs-detection reconciliation: if CV sees more qualified
-          // blobs than YOLO detected, there are items YOLO missed
-          // (e.g. item class not in YOLO's vocabulary).
-          const qualifiedBlobCount = blobs.filter(b => blobIsObject(b)).length;
-          const yoloMissedItems = qualifiedBlobCount > wasteDetections.length;
-          if (yoloMissedItems) {
-            console.log(`[tier1] blob-detection mismatch: ${qualifiedBlobCount} blobs vs ${wasteDetections.length} YOLO detections — escalating to API`);
-          }
-
-          // All items resolved locally AND no missed blobs → instant result
-          if (resolvedResults.length > 0 && unresolvedCount === 0 && !yoloMissedItems) {
-            resolvedResults.sort((a, b) => {
-              const aCx = (a._bbox?.[0] ?? 0) + (a._bbox?.[2] ?? 0) / 2;
-              const bCx = (b._bbox?.[0] ?? 0) + (b._bbox?.[2] ?? 0) / 2;
-              return aCx - bCx;
-            });
-            console.log(`[tier1] YOLO HIT: ${resolvedResults.map((r) => r.itemName).join(" + ")} in ${yoloMs}ms`);
-            logYoloOnlyResult(video, resolvedResults[0], detections, yoloMs, analysis, "T1", undefined, undefined,
-              { tier1: wasteDetections.map(d => ({ itemName: d.className, confidence: d.confidence, x: d.bbox[0] + d.bbox[2] / 2 })).sort((a, b) => b.confidence - a.confidence).slice(0, 5) },
-              resolvedResults,
-              { blobCount: qualifiedBlobCount, yoloDetectionCount: wasteDetections.length });
-            handleMultiClassificationResults(resolvedResults, resolvedResults.map(() => undefined));
-            return;
-          }
-
-          // ── Some or all items need API resolution (Tier 2) ──
-          const best = wasteDetections[0] ?? null;
-          const hasBlobPresence = blobs.some(b => blobIsObject(b));
-
-          if (best || unresolvedCount > 0 || hasBlobPresence) {
-            const tier1Hints = wasteDetections
-              .map(d => ({ itemName: d.className, confidence: d.confidence, x: d.bbox[0] + d.bbox[2] / 2 }))
-              .sort((a, b) => b.confidence - a.confidence)
-              .slice(0, 5);
-
-            console.log(`[tier1] ${resolvedResults.length} resolved, ${unresolvedCount} unresolved — escalating to API`);
-
-            escalateToApi(
-              best, apiPromise, resolvedResults, tier1Hints,
-            );
-          } else {
-            // No waste detections and no qualified blobs
-            if (detections.length > 0) {
-              console.log(`[tier1] Only non-waste detections (${detections.map(d => d.className).join(", ")}) in ${yoloMs}ms — ignoring`);
-              nothingDetectedCountRef.current++;
-              cooldownStartRef.current = Date.now();
-              transition("cooldown");
-              inFlightRef.current = false;
-              return;
-            }
-            // No YOLO detections at all — full-frame API fallback
-            console.log(`[tier1] No YOLO detections (${yoloMs}ms) — escalating to API`);
-            escalateToApi(null, apiPromise, [], []);
-          }
-        })
-        .catch(() => {
-          // YOLO failed entirely — skip to API
-          apiPromise()
-            .then(({ result: r, requestId }) => {
-              if (r) handleClassificationResult(r, requestId);
-              else handleClassificationError(new Error("API returned no result"));
-            })
-            .catch(handleClassificationError);
-        });
-    }
-
-    /** Escalate to the API (Tier 2) with full-frame multi-item prompt. */
-    function escalateToApi(
-      yoloBest: { className: string; confidence: number } | null,
-      apiPromise: (multi?: boolean, tierResults?: { tier1?: { itemName: string; confidence: number; x?: number }[] }) => Promise<{ result: (ClassificationResponse & { requestId?: string }) | null; requestId?: string; multiResults?: ClassificationResponse[] }>,
-      tier1Results: (ClassificationResponse & { _bbox?: Bbox })[],
-      tier1Hints: { itemName: string; confidence: number; x?: number }[],
-    ) {
-      // Show optimistic T1 results while waiting for API
-      if (tier1Results.length > 0) {
-        tier1Results.sort((a, b) => {
-          const aCx = (a._bbox?.[0] ?? 0) + (a._bbox?.[2] ?? 0) / 2;
-          const bCx = (b._bbox?.[0] ?? 0) + (b._bbox?.[2] ?? 0) / 2;
-          return aCx - bCx;
-        });
-        setStableResults(tier1Results.map(r => toTrackedResult(r)));
-
-        resultEnterTimeRef.current = Date.now();
-      }
-
-      // Always send full frame — cheaper and more reliable than per-bbox crops
-      apiPromise(true, { tier1: tier1Hints })
-        .then(({ result: r, requestId, multiResults }) => {
-          const apiResults = multiResults ?? (r ? [r] : []);
-          if (apiResults.length > 0) {
-            handleMultiClassificationResults(apiResults, apiResults.map(() => requestId));
-          } else if (tier1Results.length > 0) {
-            handleMultiClassificationResults(tier1Results, tier1Results.map(() => undefined));
-          } else {
-            handleClassificationError(new Error("API returned no result"));
-          }
-        })
-        .catch((err) => {
-          if (tier1Results.length > 0) {
-            handleMultiClassificationResults(tier1Results, tier1Results.map(() => undefined));
-          } else if (yoloBest) {
-            handleClassificationResult(buildOfflineFallback(yoloBest.className, yoloBest.confidence), undefined);
-          } else {
-            handleClassificationError(err);
-          }
-        });
-    }
-
-    /** Handle offline classification: YOLO → rules → offline fallback. */
-    function handleOfflineClassification(
-      video: HTMLVideoElement,
-      backend: InferenceBackend | null,
-      yoloReady: boolean | SiteConfig | null | undefined,
-    ) {
-      if (!yoloReady || !backend) {
-        handleClassificationResult(buildOfflineFallback("unknown item", 0.1), undefined);
-        return;
-      }
-
-      backend.detect(video)
-        .then((detections) => {
-          const wasteDetections = detections.filter(d => !isYoloClassNotWaste(d.className));
-          if (wasteDetections.length > 0) {
-            const seen = new Set<string>();
-            const resolvedResults: ClassificationResponse[] = [];
-            for (const det of wasteDetections) {
-              if (seen.has(det.className)) continue;
-              seen.add(det.className);
-              const r = resolveYoloDetection(det, siteConfigRef.current!, localeRef.current);
-              if (r) resolvedResults.push(r);
-              if (resolvedResults.length >= 4) break;
-            }
-            if (resolvedResults.length > 0) {
-              console.log(`[offline] YOLO HIT: ${resolvedResults.map((r) => r.itemName).join(" + ")}`);
-              handleMultiClassificationResults(resolvedResults, resolvedResults.map(() => undefined));
-              return;
-            }
-            // No rules matched — use best detection as fallback
-            handleClassificationResult(buildOfflineFallback(wasteDetections[0].className, wasteDetections[0].confidence), undefined);
-          } else {
-            handleClassificationResult(buildOfflineFallback("unknown item", 0.1), undefined);
-          }
-        })
-        .catch(() => {
-          handleClassificationResult(buildOfflineFallback("unknown item", 0.1), undefined);
-        });
-    }
-
-    /** Build a minimal classification result for offline/fallback scenarios. */
-    function buildOfflineFallback(
-      className: string,
-      confidence: number,
-    ): ClassificationResponse {
-      const streams = siteConfigRef.current?.streams ?? [];
-      const reviewStream = streams.find((s) => s.id === "needs_review");
-      return {
-        itemName: className,
-        wasteStream: "needs_review",
-        confidence: Math.min(confidence, 0.3),
-        reasoning: localeRef.current === "ja"
-          ? "オフラインで分類されました。スタッフに確認してください。"
-          : "Classified offline — please verify with staff.",
-        binColor: reviewStream?.color ?? "#D97706",
-        binLabel: reviewStream?.label ?? "Needs Verification",
-        needsReview: true,
-        isCompound: false,
-        modelUsed: "T1",
-      };
-    }
-
-    function handleClassificationResult(
-      result: ClassificationResponse & { requestId?: string },
-      requestId: string | undefined,
-    ) {
-      handleMultiClassificationResults([result], [requestId ?? result.requestId]);
-    }
-
     /** Convert a ClassificationResponse (possibly with _bbox) to a TrackedResult. */
     function toTrackedResult(r: ClassificationResponse & { _bbox?: Bbox; requestId?: string }): TrackedResult {
       return {
@@ -1666,10 +1500,12 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       transition("result");
 
       // Schedule proactive API sweep for T1-only results (catches items
-      // outside YOLO's vocabulary that YOLO can never detect)
+      // outside YOLO's vocabulary that YOLO can never detect). Cloud-only:
+      // in local-only mode the sweep would just append a phantom
+      // needs_review card next to every confirmed result, so skip it.
       if (resultSweepTimerRef.current) clearTimeout(resultSweepTimerRef.current);
       const isYoloOnly = requestIds.every(id => id === undefined);
-      if (isYoloOnly) {
+      if (isYoloOnly && CLOUD_FALLBACK_ENABLED) {
         resultSweepTimerRef.current = setTimeout(triggerResultApiSweep, RESULT_API_SWEEP_DELAY_MS);
       }
 
@@ -1680,20 +1516,6 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           lastCachedRef.current = cacheKey;
         }
       }
-      inFlightRef.current = false;
-    }
-
-    function handleClassificationError(err: unknown) {
-      if (err instanceof DOMException && err.name === "AbortError") {
-        return;
-      }
-
-      const msg = T("classificationFailed");
-      console.error("[classify] API error:", err);
-      setError(msg);
-      errorSetAtRef.current = Date.now();
-      cooldownStartRef.current = Date.now();
-      transition("cooldown");
       inFlightRef.current = false;
     }
 

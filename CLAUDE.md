@@ -2,7 +2,7 @@
 - Match the language you use (English or Japanese)
 - Avoid technical jargon; use plain, natural language
 - If technical terms or concepts come up, explain what they mean in simple terms
-- **Project name spelling: always lowercase `wayste`** — never `Wayste`, `WAYSTE`, or `WaYsTe`. This applies even at the start of a sentence and in headings/titles. The name is a stylized lowercase wordmark.
+- **Project name spelling: always lowercase `wayste`** — never `Wayste`, `WAYSTE`, or `WaYsTe`. This applies even at the start of a sentence and in headings/titles. The name is a stylized lowercase wordmark. Don't uppercase it visually either — no CSS `text-transform: uppercase`/`uppercase` utility on elements that render the wordmark (e.g. eyebrow labels).
 
 ### Kiosk End-Users (Office/Airport Workers)
 - The kiosk's UI must also use simple, non-technical language
@@ -14,18 +14,19 @@
 - End goal: zero-effort sorting guidance in offices, airports, and public spaces
 - Constraints: browser-first inference (minimize server costs/latency); camera sees only waste + hands, never faces
 - Current phase: demo on Vercel, no production deployment yet — planning pilot tests
+- Privacy (decided, implemented): the kiosk classifies 100% on-device by default — items YOLO can't confidently resolve become `needs_review` locally; no frame is sent to a cloud AI. The legacy GPT escalation survives only behind `NEXT_PUBLIC_CLOUD_FALLBACK=1` for pilot experiments (cloud-vs-local comparison). Next: introduce a local VLM as "Tier 1.5" to raise automation on items YOLO can't resolve, then delete the cloud path entirely.
 
 ## Tech Stack
 - TypeScript / Next.js 16 (App Router) / React 19 / Tailwind CSS v4
 - YOLO26m FP16 (ONNX Runtime Web) — browser object detection, 15 custom waste classes (`15class_v1.onnx`, 39 MB)
-- OpenAI `gpt-5.4-mini` — cloud fallback (single-model path) when local YOLO confidence is below the fallback threshold
+- OpenAI `gpt-5.4-mini` — legacy cloud fallback, OFF by default; only used when `NEXT_PUBLIC_CLOUD_FALLBACK=1` (pilot experiments). Default kiosk path resolves low-confidence items as `needs_review` on-device
 - Upstash Redis (REST) / Vercel Blob / Vercel Serverless + Cron
-- Zod v4 / Jest v30 (267 tests, 14 suites) / EN+JA i18n (125+ keys)
+- Zod v4 / Jest v30 (465 tests, 19 suites) / EN+JA i18n (174 keys/locale)
 
 ## Commands
     npm run dev      # Dev server (Turbopack)
     npm run build    # Production build
-    npm test         # 267 Jest tests, 14 suites
+    npm test         # 465 Jest tests, 19 suites
     npm run lint     # ESLint
 
 ## Routes
@@ -35,20 +36,21 @@
 - `/review`, `/insights` — Admin pages, gated by HTTP Basic Auth via middleware.
 
 ## Architecture
-- `app/api/classify/route.ts` — Classification endpoint (GPT-5.4 mini, overrides, Blob upload); supports single + batch (up to 4 items) formats
+- `app/api/classify/route.ts` — Classification endpoint (GPT-5.4 mini, gated behind `NEXT_PUBLIC_CLOUD_FALLBACK=1` — returns 403 otherwise; overrides, Blob upload); supports single + batch (up to 4 items) formats
 - `lib/threshold-config.ts` — Master sensitivity (0–1) → all detection/inference thresholds; auto-calibration aware
 - `lib/frame-analyzer.ts` — CV pipeline: 120x120 canvas, ~33fps, background subtraction, auto-calibration, multi-blob detection (top 4 with per-blob sharpness/contrast/skin/saturation scoring)
-- `lib/yolo-inference.ts` — YOLO26m wrapper (Tier 1: 15 custom waste classes; instant result when confidence ≥ YOLO_FALLBACK_THRESHOLD = 0.75 at default sensitivity); WebGPU primary, WASM fallback
-- `lib/rgb-material-analyzer.ts` — Post-YOLO RGB/texture analysis: color (HSV), transparency, metallicity, bbox aspect ratio, LBP texture → refines YOLO class names + feeds MaterialHint to GPT
+- `lib/yolo-inference.ts` — YOLO26m wrapper (Tier 1: 15 custom waste classes; instant result when confidence ≥ YOLO_FALLBACK_THRESHOLD = 0.725 at default sensitivity, derived as `lerp(0.80, 0.65, sensitivity)` in `lib/threshold-config.ts`); WebGPU primary, WASM fallback
+- `lib/rgb-material-analyzer.ts` — RGB/texture analysis helpers (HSV color, transparency, metallicity, bbox aspect ratio, LBP texture, class-name refinement). The classify route *can* accept a `MaterialHint` and fold it into the GPT prompt + log, but the live kiosk path does not currently produce one — `analyzeMaterial()` is unwired and `KioskDisplay` sends no hint; only `refineClassName` / `computeLbpTexture` / `detectMetallicFromLuminance` are unit-tested. Treat this module as scaffolding, not an active stage.
 - `lib/inference-backend.ts` — 2-tier orchestration (YOLO → GPT-5.4 mini); sequential model startup with `overallReady` gate
+- `lib/vlm-shadow.ts` — Cloud-vs-local shadow comparison (pilot mechanism, off by default). When `LOCAL_VLM_ENDPOINT` is set, `/api/classify` also runs a local/candidate VLM on each escalated frame (server-side, non-blocking, inside the existing background logging) and records `localModel` on the pilot-log entry; aggregated by `computeModelComparison()` and shown on `/insights`. Offline benchmarking harness lives in `lib/benchmark/` (+ `scripts/bench/`)
 - `lib/waste-rules-core.ts` — Word-boundary pattern matching + override engine (browser-safe)
 - `lib/waste-rules.ts` — Site config loader + GPT prompt builder (5-min cache)
-- `components/KioskDisplay.tsx` — State machine: loading → idle → object_detected → classifying → result → cooldown; multi-item blob-to-detection matching (up to 4), three-way routing (YOLO match above threshold → instant result, YOLO match below threshold → GPT-5.4 mini, unmatched+object → GPT-5.4 mini, unmatched+noise → discard)
+- `components/KioskDisplay.tsx` — State machine: loading → idle → object_detected → classifying → result → cooldown; multi-item blob-to-detection matching (up to 4), three-way routing (YOLO match above threshold → instant result, YOLO match below threshold → on-device `needs_review`, unmatched+object → on-device `needs_review`, unmatched+noise → discard). With `NEXT_PUBLIC_CLOUD_FALLBACK=1` the two `needs_review` branches call GPT-5.4 mini instead (legacy pilot mode; also re-enables the result-state API sweep)
 - `config/sites/*.json` — Per-site waste rules (4 presets: japan-office, office-hq, airport, pilot; japan-office is the default)
 - `middleware.ts` — Admin auth (HTTP Basic Auth → 4-hour session cookie), kiosk session gate on `/kiosk` and `/kiosk/unlock`, and per-request nonce-based CSP
 
 ## Rules & Conventions
-- 2-tier local-first: always prefer browser YOLO over API; only fall back to OpenAI `gpt-5.4-mini` when local confidence is insufficient
+- Local-first, local-only by default: all classification happens in the browser (YOLO); items it can't confidently resolve become `needs_review` on-device. Never add a cloud call to the default kiosk path — the GPT fallback exists only behind `NEXT_PUBLIC_CLOUD_FALLBACK=1` for pilot experiments
 - Overrides use word-boundary matching ("cup" matches "paper cup" but not "cupcake")
 - `staffHandlingItems` force `needs_review` regardless of AI output
 - Image uploads and Redis logging run via `waitUntil()` — never block the response
@@ -75,53 +77,6 @@
 - Import Node built-ins (`fs`, `path`, `crypto`) in browser code — they are stubbed to empty modules
 - Send every frame to the API — the CV pipeline gates classification (ROI + sharpness + skin checks)
 - Use Edge Functions (deprecated) or `NEXT_PUBLIC_*` for secrets
-
-## Multi-Agent Pipeline
-
-### Trigger Detection
-When the user expresses intent to **implement, add, build, fix, review, or develop** something, look for phrases like:
-- "add a feature for...", "build ...", "implement ...", "fix the ...", "I want to ...", "let's create ...", "develop ...", "can you make ..."
-
-Do NOT trigger on questions, explanations, or research requests (e.g., "how does X work?", "explain Y").
-
-When intent is detected, **always ask first**:
-- "Would you like me to start the multi-agent pipeline (Planner → Generator → Evaluator), or would you prefer to handle this directly?"
-
-Only launch the pipeline if the user confirms. If the user declines, proceed as a normal Claude Code session.
-
-### Pipeline Flow
-
-The pipeline uses the Agent tool to invoke sub-agents defined in `.claude/agents/`. Inter-agent state is stored in `.claude/workspace/`.
-
-```
-1. Detect intent → launch Planner agent
-2. Planner dialogues with user → generates .claude/workspace/PLAN.md → waits for user confirmation
-3. User confirms → initialize STEP_CURRENT.md to Step 1 → begin step loop
-4. Generator reads all of PLAN.md → implements Step N
-5. Evaluator reviews Step N → OK or NO
-   - NO → writes specific feedback to STEP_N_REVIEW.md → Generator revises → back to step 5
-   - OK → logs approval to STEP_N_REVIEW.md → advances STEP_CURRENT.md → back to step 4
-6. All steps OK → Evaluator creates commit + opens PR + displays summary in chat
-```
-
-### Agent Definitions
-- `.claude/agents/planner.md` — Clarifies user intent, produces PLAN.md (what, not how)
-- `.claude/agents/generator.md` — Implements each step, makes all technical decisions
-- `.claude/agents/evaluator.md` — Reviews implementation against plan, approves or returns feedback
-
-### Workspace Files (`.claude/workspace/`)
-- `PLAN.md` — Structured plan generated by Planner
-- `STEP_CURRENT.md` — Current step number and status
-- `STEP_N_REVIEW.md` — Evaluator decision log per step (e.g., STEP_1_REVIEW.md)
-- `FINAL_SUMMARY.md` — Summary of all changes after pipeline completes
-
-### Invoking Agents
-Each agent is invoked as a sub-agent via the Agent tool:
-```
-Agent(prompt: "Follow the instructions in .claude/agents/planner.md. [context]")
-Agent(prompt: "Follow the instructions in .claude/agents/generator.md. [context]")
-Agent(prompt: "Follow the instructions in .claude/agents/evaluator.md. [context]")
-```
 
 ## Self-Updating Rules
 

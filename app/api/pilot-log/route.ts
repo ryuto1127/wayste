@@ -16,10 +16,14 @@ import { checkAndSendMilestoneNotification } from "@/lib/milestone-check";
 // ── POST body validation ──
 // Size cap matches /api/classify (≈ 3.75 MB base64) to prevent memory DoS.
 const IMAGE_MAX_LENGTH = 5_000_000;
-// Constrain itemName/wasteStream to alphanumerics + a few separators — these
+// Constrain itemName/wasteStream to letters/digits + a few separators — these
 // values are used to build the Blob object path, so path-traversal characters
-// must be rejected even though `uploadFrameToBlob` sanitizes them.
-const SAFE_TOKEN = z.string().min(1).max(128).regex(/^[\w\-\s.]+$/);
+// (`/`, `\`) must be rejected even though `uploadFrameToBlob` sanitizes them.
+// Unicode-aware (`\p{L}\p{N}` + the `u` flag): the kiosk logs localized item
+// names ("不明", "ペットボトル"), which the previous ASCII-only pattern
+// silently rejected — dropping every Japanese-locale log entry with a 400.
+// Commas are allowed for multi-item joined names.
+const SAFE_TOKEN = z.string().min(1).max(128).regex(/^[\p{L}\p{N}\p{Zs}\s\-.,()、。・ー〜]+$/u);
 
 const PilotLogPostSchema = z.object({
   image: z.string().min(100).max(IMAGE_MAX_LENGTH).optional(),
@@ -42,6 +46,21 @@ const PilotLogPostSchema = z.object({
     yoloDetections: z.unknown().optional(),
     rgbAnalysis: z.unknown().optional(),
     tierResults: z.unknown().optional(),
+    /** All classified items in this frame — /review renders multi-item
+     *  entries from this field, so it must survive the POST. */
+    allItems: z
+      .array(
+        z.object({
+          itemName: SAFE_TOKEN,
+          wasteStream: SAFE_TOKEN,
+          confidence: z.number().min(0).max(1),
+          modelUsed: z.string().max(32).optional(),
+        }),
+      )
+      .max(16)
+      .optional(),
+    blobCount: z.number().min(0).max(64).optional(),
+    yoloDetectionCount: z.number().min(0).max(64).optional(),
   }),
 });
 
@@ -140,6 +159,9 @@ export async function POST(request: Request) {
         yoloDetections: entry.yoloDetections as PilotLogEntry["yoloDetections"],
         rgbAnalysis: entry.rgbAnalysis as PilotLogEntry["rgbAnalysis"],
         tierResults: entry.tierResults as PilotLogEntry["tierResults"],
+        allItems: entry.allItems,
+        blobCount: entry.blobCount,
+        yoloDetectionCount: entry.yoloDetectionCount,
       });
 
       // Check for milestone notification (non-blocking, best-effort)

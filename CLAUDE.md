@@ -36,7 +36,7 @@
 - `/review`, `/insights` — Admin pages, gated by HTTP Basic Auth via middleware.
 
 ## Architecture
-- `app/api/classify/route.ts` — Classification endpoint (GPT-5.4 mini, overrides, Blob upload); supports single + batch (up to 4 items) formats
+- `app/api/classify/route.ts` — Classification endpoint (GPT-5.4 mini, gated behind `NEXT_PUBLIC_CLOUD_FALLBACK=1` — returns 403 otherwise; overrides, Blob upload); supports single + batch (up to 4 items) formats
 - `lib/threshold-config.ts` — Master sensitivity (0–1) → all detection/inference thresholds; auto-calibration aware
 - `lib/frame-analyzer.ts` — CV pipeline: 120x120 canvas, ~33fps, background subtraction, auto-calibration, multi-blob detection (top 4 with per-blob sharpness/contrast/skin/saturation scoring)
 - `lib/yolo-inference.ts` — YOLO26m wrapper (Tier 1: 15 custom waste classes; instant result when confidence ≥ YOLO_FALLBACK_THRESHOLD = 0.725 at default sensitivity, derived as `lerp(0.80, 0.65, sensitivity)` in `lib/threshold-config.ts`); WebGPU primary, WASM fallback

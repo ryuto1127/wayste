@@ -350,6 +350,18 @@ export async function POST(request: Request) {
   const auth = await verifyKioskRequest(request);
   if (!auth.ok) return auth.response;
 
+  // ── Cloud fallback gate (server-side enforcement) ──
+  // The kiosk stops calling this route when NEXT_PUBLIC_CLOUD_FALLBACK is
+  // unset, but a stale client bundle could still POST frames. Refuse here so
+  // "no frame is sent to a cloud AI" holds regardless of client state. This
+  // also keeps the vlm-shadow comparison off unless the pilot flag is on.
+  if (process.env.NEXT_PUBLIC_CLOUD_FALLBACK !== "1") {
+    return NextResponse.json(
+      { error: "Cloud classification is disabled. Set NEXT_PUBLIC_CLOUD_FALLBACK=1 (pilot experiments only) to enable." },
+      { status: 403 },
+    );
+  }
+
   // ── Redis-based rate limiting ──
   const clientId =
     request.headers.get("x-real-ip")

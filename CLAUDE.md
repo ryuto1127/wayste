@@ -14,12 +14,12 @@
 - End goal: zero-effort sorting guidance in offices, airports, and public spaces
 - Constraints: browser-first inference (minimize server costs/latency); camera sees only waste + hands, never faces
 - Current phase: demo on Vercel, no production deployment yet — planning pilot tests
-- Roadmap (privacy): move to 100% on-device inference — introduce a local VLM as "Tier 1.5" for items YOLO can't resolve, keep `gpt-5.4-mini` as a temporary safety net, then remove the cloud path once the local VLM clears accuracy/latency bars. End state: no image ever leaves the device.
+- Privacy (decided, implemented): the kiosk classifies 100% on-device by default — items YOLO can't confidently resolve become `needs_review` locally; no frame is sent to a cloud AI. The legacy GPT escalation survives only behind `NEXT_PUBLIC_CLOUD_FALLBACK=1` for pilot experiments (cloud-vs-local comparison). Next: introduce a local VLM as "Tier 1.5" to raise automation on items YOLO can't resolve, then delete the cloud path entirely.
 
 ## Tech Stack
 - TypeScript / Next.js 16 (App Router) / React 19 / Tailwind CSS v4
 - YOLO26m FP16 (ONNX Runtime Web) — browser object detection, 15 custom waste classes (`15class_v1.onnx`, 39 MB)
-- OpenAI `gpt-5.4-mini` — cloud fallback (single-model path) when local YOLO confidence is below the fallback threshold
+- OpenAI `gpt-5.4-mini` — legacy cloud fallback, OFF by default; only used when `NEXT_PUBLIC_CLOUD_FALLBACK=1` (pilot experiments). Default kiosk path resolves low-confidence items as `needs_review` on-device
 - Upstash Redis (REST) / Vercel Blob / Vercel Serverless + Cron
 - Zod v4 / Jest v30 (465 tests, 19 suites) / EN+JA i18n (174 keys/locale)
 
@@ -45,12 +45,12 @@
 - `lib/vlm-shadow.ts` — Cloud-vs-local shadow comparison (pilot mechanism, off by default). When `LOCAL_VLM_ENDPOINT` is set, `/api/classify` also runs a local/candidate VLM on each escalated frame (server-side, non-blocking, inside the existing background logging) and records `localModel` on the pilot-log entry; aggregated by `computeModelComparison()` and shown on `/insights`. Offline benchmarking harness lives in `lib/benchmark/` (+ `scripts/bench/`)
 - `lib/waste-rules-core.ts` — Word-boundary pattern matching + override engine (browser-safe)
 - `lib/waste-rules.ts` — Site config loader + GPT prompt builder (5-min cache)
-- `components/KioskDisplay.tsx` — State machine: loading → idle → object_detected → classifying → result → cooldown; multi-item blob-to-detection matching (up to 4), three-way routing (YOLO match above threshold → instant result, YOLO match below threshold → GPT-5.4 mini, unmatched+object → GPT-5.4 mini, unmatched+noise → discard)
+- `components/KioskDisplay.tsx` — State machine: loading → idle → object_detected → classifying → result → cooldown; multi-item blob-to-detection matching (up to 4), three-way routing (YOLO match above threshold → instant result, YOLO match below threshold → on-device `needs_review`, unmatched+object → on-device `needs_review`, unmatched+noise → discard). With `NEXT_PUBLIC_CLOUD_FALLBACK=1` the two `needs_review` branches call GPT-5.4 mini instead (legacy pilot mode; also re-enables the result-state API sweep)
 - `config/sites/*.json` — Per-site waste rules (4 presets: japan-office, office-hq, airport, pilot; japan-office is the default)
 - `middleware.ts` — Admin auth (HTTP Basic Auth → 4-hour session cookie), kiosk session gate on `/kiosk` and `/kiosk/unlock`, and per-request nonce-based CSP
 
 ## Rules & Conventions
-- 2-tier local-first: always prefer browser YOLO over API; only fall back to OpenAI `gpt-5.4-mini` when local confidence is insufficient
+- Local-first, local-only by default: all classification happens in the browser (YOLO); items it can't confidently resolve become `needs_review` on-device. Never add a cloud call to the default kiosk path — the GPT fallback exists only behind `NEXT_PUBLIC_CLOUD_FALLBACK=1` for pilot experiments
 - Overrides use word-boundary matching ("cup" matches "paper cup" but not "cupcake")
 - `staffHandlingItems` force `needs_review` regardless of AI output
 - Image uploads and Redis logging run via `waitUntil()` — never block the response

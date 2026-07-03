@@ -28,6 +28,7 @@ import {
 import { computeThresholds, type ThresholdConfig, type Calibration } from "@/lib/threshold-config";
 import { perfMonitor } from "@/lib/perf-monitor";
 import { loadYoloRules, resolveYoloDetection, isYoloClassNotWaste } from "@/lib/yolo-rules";
+import { buildClassificationResult } from "@/lib/waste-rules-core";
 import {
   computeFrameFingerprint,
   frameDiff,
@@ -80,6 +81,20 @@ const UNRESOLVED_ESCALATION_CYCLES = 5;
 /** Delay (ms) after entering result state before firing a proactive API sweep
  *  to catch items outside YOLO's vocabulary. Only fires for T1-only results. */
 const RESULT_API_SWEEP_DELAY_MS = 1_500;
+
+// ── Cloud fallback (pilot experiments only) ──
+/** OFF by default: items YOLO can't confidently resolve become `needs_review`
+ *  on-device, and no frame ever leaves the kiosk for classification.
+ *  Set NEXT_PUBLIC_CLOUD_FALLBACK=1 to re-enable the legacy GPT escalation
+ *  path — pilot experiments only (e.g. the cloud-vs-local shadow comparison
+ *  via LOCAL_VLM_ENDPOINT on the server). */
+const CLOUD_FALLBACK_ENABLED = process.env.NEXT_PUBLIC_CLOUD_FALLBACK === "1";
+/** Confidence assigned to on-device needs_review fallbacks. Must be > 0 —
+ *  handleMultiClassificationResults treats confidence 0 as the
+ *  "nothing detected" sentinel (see resolveYoloDetection's not_waste branch)
+ *  and would discard the card. Kept far below any reviewThreshold so the
+ *  result always renders as needs_review. */
+const LOCAL_FALLBACK_CONFIDENCE = 0.01;
 
 // ── Background adaptation rates (passed to FrameAnalyzer per pipeline state) ──
 // idle / cooldown: full rate — continuously absorb drift and persistent leftovers
@@ -364,9 +379,61 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
     setPipelineState(next);
   }, []);
 
-  // ── API call (with timeout + 429 retry) ──
+  // ── Fallback classification ──
+  // Default (CLOUD_FALLBACK_ENABLED=false): resolved entirely on-device as
+  // `needs_review` — the frame is never sent to the cloud for classification.
+  // Legacy cloud path (GPT via /api/classify) only runs when the pilot
+  // experiment flag NEXT_PUBLIC_CLOUD_FALLBACK=1 is set.
   const classify = useCallback(
     async (frame: string, meta: ClassifyMeta, yoloDetections?: YoloDetectionLog[], multi?: boolean, tierResults?: { tier1?: { itemName: string; confidence: number; x?: number }[] }, faceDetected?: boolean): Promise<ClassificationResponse & { requestId?: string }> => {
+      if (!CLOUD_FALLBACK_ENABLED) {
+        // ── On-device resolution: uncertain item → needs_review ──
+        const siteConfig = siteConfigRef.current;
+        const loc = localeRef.current;
+        const raw = {
+          itemName: t(loc, "uncertain"),
+          wasteStream: "needs_review",
+          confidence: LOCAL_FALLBACK_CONFIDENCE,
+          reasoning: t(loc, "notSureCheck"),
+        };
+        const result: ClassificationResponse & { requestId?: string } = siteConfig
+          ? { ...buildClassificationResult(raw, siteConfig, loc), modelUsed: "T1" }
+          : {
+              itemName: raw.itemName,
+              wasteStream: "needs_review",
+              confidence: LOCAL_FALLBACK_CONFIDENCE,
+              reasoning: raw.reasoning,
+              binColor: "#D97706",
+              binLabel: "Needs Verification",
+              needsReview: true,
+              isCompound: false,
+              modelUsed: "T1",
+            };
+        // Log for the admin review loop (fire-and-forget) — same frame policy
+        // as logYoloOnlyResult: attach it only when the client-side face
+        // check passed; the server re-checks before storing.
+        const entry = {
+          modelUsed: "T1",
+          itemName: result.itemName,
+          wasteStream: result.wasteStream,
+          confidence: LOCAL_FALLBACK_CONFIDENCE,
+          requiresVerification: true,
+          latencyMs: 0,
+          ...(yoloDetections && yoloDetections.length > 0 && { yoloDetections }),
+          meta,
+          ...(tierResults && { tierResults }),
+          allItems: [{ itemName: result.itemName, wasteStream: result.wasteStream, confidence: LOCAL_FALLBACK_CONFIDENCE, modelUsed: "T1" }],
+        };
+        fetch("/api/pilot-log", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(
+            faceDetected ? { faceDetected: true, entry } : { image: frame, faceDetected: false, entry }
+          ),
+        }).catch(() => {});
+        return result;
+      }
+
       const doFetch = async (): Promise<ClassificationResponse & { requestId?: string }> => {
         const fetchStartMs = Date.now();
         const controller = new AbortController();
@@ -1052,6 +1119,22 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           handleMultiClassificationResults(resolvedResults, resolvedResults.map(() => undefined));
           detectionGoneMapRef.current.clear();
         } else if (hasResults) {
+          if (!CLOUD_FALLBACK_ENABLED) {
+            // ── Local-only mode: no cloud response is coming for the
+            // unresolved remainder — display the confidently-resolved items
+            // now. If the leftover detection persists, the result-state
+            // escalation adds an on-device needs_review card for it.
+            console.log(`[yolo-loop] partial: ${resolvedResults.map(r => r.itemName).join(" + ")} resolved — displaying (local-only mode)`);
+            if (analysis) {
+              logYoloOnlyResult(video, resolvedResults[0], detections, yoloMs, analysis, "T1", undefined, undefined,
+                { tier1: wasteDetections.map(d => ({ itemName: d.className, confidence: d.confidence, x: d.bbox[0] + d.bbox[2] / 2 })).sort((a, b) => b.confidence - a.confidence).slice(0, 5) },
+                resolvedResults,
+                { blobCount: qualifiedBlobCount, yoloDetectionCount: wasteDetections.length });
+            }
+            handleMultiClassificationResults(resolvedResults, resolvedResults.map(() => undefined));
+            detectionGoneMapRef.current.clear();
+            return;
+          }
           // ── Some resolved but unresolved items or blob mismatch — let API finish ──
           if (yoloMissedItems) {
             console.log(`[yolo-loop] partial: ${resolvedResults.map(r => r.itemName).join(" + ")} resolved, but ${qualifiedBlobCount} blobs vs ${wasteDetections.length} detections — waiting for API`);
@@ -1417,10 +1500,12 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       transition("result");
 
       // Schedule proactive API sweep for T1-only results (catches items
-      // outside YOLO's vocabulary that YOLO can never detect)
+      // outside YOLO's vocabulary that YOLO can never detect). Cloud-only:
+      // in local-only mode the sweep would just append a phantom
+      // needs_review card next to every confirmed result, so skip it.
       if (resultSweepTimerRef.current) clearTimeout(resultSweepTimerRef.current);
       const isYoloOnly = requestIds.every(id => id === undefined);
-      if (isYoloOnly) {
+      if (isYoloOnly && CLOUD_FALLBACK_ENABLED) {
         resultSweepTimerRef.current = setTimeout(triggerResultApiSweep, RESULT_API_SWEEP_DELAY_MS);
       }
 

@@ -18,17 +18,17 @@
 
 A real-time AI waste-sorting kiosk. Walk up to the bins holding any item, and a fixed downward camera tells you in seconds which bin it belongs in — no app, no phone, no buttons.
 
-Built for office and public-space pilots. **Browser-first inference** keeps frames on-device for privacy and zero per-scan cost; a single cloud fallback handles the long tail today — and on the privacy roadmap, that fallback is being replaced by an on-device VLM so that no image ever leaves the device. Full English and Japanese support, per-site configurable waste streams, and bias-aware computer vision.
+Built for office and public-space pilots. **Classification is fully on-device**: frames stay in the browser for privacy and zero per-scan cost, and items the local model can't confidently identify are flagged for staff review instead of being sent to a cloud AI. (A legacy cloud-escalation path survives behind a flag, for pilot experiments only.) Full English and Japanese support, per-site configurable waste streams, and bias-aware computer vision.
 
 > **Status:** Demo running on Vercel; pilot tests being arranged with universities and corporate offices in Japan. Not yet in production.
 
 ## Why I built this
 
-Office and airport bins in Japan often have 4–6 streams (burnable, plastic, PET, cans, paper, special) and the labels are dense. People glance for ~2 seconds, give up, and toss everything in landfill. A traditional app doesn't work — nobody wants to scan a QR code while holding trash. So the design constraint was: **zero user effort, zero install, real-time guidance** — which forced an architecture where a fixed camera sees only the trash and the user's hand, never their face, and the model runs in the browser so frames stay on-device — only the rare long tail still falls back to the cloud today, which the on-device roadmap is removing.
+Office and airport bins in Japan often have 4–6 streams (burnable, plastic, PET, cans, paper, special) and the labels are dense. People glance for ~2 seconds, give up, and toss everything in landfill. A traditional app doesn't work — nobody wants to scan a QR code while holding trash. So the design constraint was: **zero user effort, zero install, real-time guidance** — which forced an architecture where a fixed camera sees only the trash and the user's hand, never their face, and the model runs in the browser so frames stay on-device — anything it can't confidently identify is flagged for staff review rather than sent to a cloud AI.
 
 ## Engineering highlights
 
-- **2-tier local-first pipeline** — a custom 15-class YOLO26m model runs in the browser via ONNX Runtime Web; high-confidence detections resolve instantly with no server call, and only the long-tail items fall through to GPT-5.4 mini. Most common items (PET bottles, cans, paper cups) never need the cloud.
+- **Local-only pipeline** — a custom 15-class YOLO26m model runs in the browser via ONNX Runtime Web; high-confidence detections resolve instantly with no server call, and anything it can't confidently identify becomes a needs-review result on-device. No frame is ever sent to a cloud AI (a legacy GPT escalation remains behind `NEXT_PUBLIC_CLOUD_FALLBACK=1`, for pilot experiments such as the cloud-vs-local comparison).
 - **Fairness in CV** — skin detection in HSV (`h ≤ 50, 0.1 ≤ s ≤ 0.8, v ≥ 0.2`) instead of RGB ranges, because RGB skin heuristics are biased toward lighter skin and fail in real-world deployments.
 - **Sensitivity-derived thresholds** — every detection threshold (foreground ratio, motion gate, confidence cutoffs) is derived from a single 0–1 `sensitivity` knob in site config. No magic numbers scattered through code.
 - **HMAC kiosk session auth** — a long-lived signed cookie keyed by `KIOSK_API_TOKEN`; rotating the token revokes every deployed device at once. Bearer-token unlock flow at `/kiosk/unlock`.
@@ -40,9 +40,9 @@ Office and airport bins in Japan often have 4–6 streams (burnable, plastic, PE
 ## What it does
 
 - Detects objects held up to the camera using local computer vision — no cloud needed for detection
-- Runs a **2-tier inference pipeline** — local YOLO first, cloud GPT only when needed:
+- Runs a **local-only inference pipeline** — YOLO in the browser, with an on-device fallback:
   - **Tier 1 — YOLO26m (on-demand, browser):** custom 15-class waste detection model (`15class_v1.onnx`, 39 MB) covering bottles, cans, cups, bags, batteries, food waste, and other common items. Runs when the CV pipeline triggers classification; high-confidence detections are resolved instantly with no server call.
-  - **Tier 2 — OpenAI `gpt-5.4-mini`:** fires when YOLO confidence is below the sensitivity-derived fallback threshold (~0.725 at default sensitivity 0.5), or when a foreground blob exists with no matching YOLO detection. Single-model path — no nano escalation.
+  - **Fallback — on-device `needs_review`:** when YOLO confidence is below the sensitivity-derived threshold (~0.725 at default sensitivity 0.5), or a foreground blob has no matching detection, the kiosk shows "needs verification" and points the user to the bin labels or staff — without sending the frame anywhere. (The legacy `gpt-5.4-mini` escalation still exists behind `NEXT_PUBLIC_CLOUD_FALLBACK=1`, for pilot experiments only.)
 - Shows a **clear directive** based on confidence level — no raw percentages shown to users:
   - High confidence → **"Put this in Recycling"**
   - Medium confidence → **"This looks like it goes in Landfill"** + a soft note to check the bin label
@@ -88,7 +88,7 @@ Office and airport bins in Japan often have 4–6 streams (burnable, plastic, PE
 | Framework | Next.js 16.2.4 (App Router, TypeScript) |
 | Styling | Tailwind CSS v4 |
 | Local inference (Tier 1) | YOLO26m FP16 — custom 15-class waste model (`15class_v1.onnx`, 39 MB) via ONNX Runtime Web — on-demand |
-| AI classification (Tier 2) | OpenAI `gpt-5.4-mini` (single-model path) |
+| Cloud escalation (pilot experiments only) | OpenAI `gpt-5.4-mini`, behind `NEXT_PUBLIC_CLOUD_FALLBACK=1` — the default kiosk never calls it |
 | Local detection | OffscreenCanvas background subtraction at 120×120 (square), ~33 fps, multi-blob analysis (up to 4), auto-calibrating thresholds |
 | Response validation | Zod schema validation on all model output |
 | API security | HMAC-signed session tokens + two-tier auth (kiosk token / admin key) |
@@ -200,13 +200,15 @@ If YOLO26m confidence ≥ YOLO_FALLBACK_THRESHOLD (~0.725 at default sensitivity
         → result returned immediately (instant, no server call)
         → YOLO-only log sent to /api/pilot-log (non-blocking)
         ↓
-── Tier 2: OpenAI gpt-5.4-mini ───────────────────────────────────────────
+── Fallback: on-device needs_review ──────────────────────────────────────
 Fires when YOLO confidence is below the fallback threshold, or when a
 foreground blob exists with no matching YOLO detection.
-  · Center short-side square crop (e.g. 720×720 from 1280×720) sent to /api/classify
-  · gpt-5.4-mini classifies item + optional preAction guidance (single-model path)
-  · Zod validates model JSON output; unknown stream IDs fall back to needs_review
-  · Compound items (multi-part objects) are detected and broken down into per-component disposal instructions
+  · Resolved entirely on-device: the item is shown as "needs verification"
+    with guidance to check the bin labels or ask staff — no cloud call
+  · Logged (metadata; frame attached only when the face check passes) to
+    /api/pilot-log for the admin review loop
+  · Legacy mode (NEXT_PUBLIC_CLOUD_FALLBACK=1, pilot experiments only):
+    the crop is sent to /api/classify and gpt-5.4-mini classifies instead
         ↓
 ── Common path ────────────────────────────────────────────────────────────
 Override rules applied (word-boundary pattern matching, sorted by specificity)

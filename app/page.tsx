@@ -10,6 +10,13 @@ export default function Page() {
             <p className="text-sm font-semibold tracking-widest text-emerald-600 mb-6">
               wayste
             </p>
+            <p className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-full text-sm font-medium mb-8">
+              <span
+                aria-hidden
+                className="w-2 h-2 rounded-full bg-emerald-500"
+              />
+              動くデモ完成済み — 導入・協業パートナー募集中
+            </p>
             <h1
               className="text-4xl md:text-6xl font-bold leading-tight mb-8 text-neutral-900"
               style={{ wordBreak: "keep-all", overflowWrap: "break-word" }}
@@ -33,7 +40,7 @@ export default function Page() {
               href="#cta"
               className="inline-flex items-center gap-2 px-8 py-4 bg-neutral-900 text-white rounded-full font-medium hover:bg-emerald-600 transition-colors"
             >
-              パイロット導入のご相談
+              導入・協業のご相談
               <span aria-hidden>→</span>
             </a>
           </div>
@@ -181,6 +188,9 @@ export default function Page() {
             <span className="inline-block">同じ「リサイクル」でも、</span>
             <span className="inline-block">アイテムに合わせて捨て方を案内します。</span>
           </p>
+          <p className="text-sm text-neutral-500 text-center mb-8">
+            このページの映像はすべて、実際に動作しているデモ画面の録画です。
+          </p>
           <div className="grid md:grid-cols-2 gap-6">
             <div className="bg-neutral-100 aspect-[2880/1554]">
               <video
@@ -225,8 +235,8 @@ export default function Page() {
           >
             <span className="inline-block">背景が透けて見える透明物体は、</span>
             <span className="inline-block">通常のAIには難しい課題。</span>
-            <span className="inline-block">waysteは特徴を抽出して</span>
-            <span className="inline-block">確実に判定します。</span>
+            <span className="inline-block">waysteは素材の特徴を抽出して</span>
+            <span className="inline-block">見分けます。</span>
           </p>
           <div className="max-w-3xl mx-auto bg-neutral-800 aspect-[2880/1554]">
             <video
@@ -385,33 +395,85 @@ export default function Page() {
         </div>
       </section>
 
-      {/* Section 10: CTA */}
+      {/* Section 10: Status / Partnership */}
+      <section className="py-24 md:py-32 px-6 md:px-12 bg-neutral-50">
+        <div className="max-w-5xl mx-auto">
+          <p className="text-sm font-semibold tracking-widest text-emerald-600 mb-4 text-center">
+            開発状況
+          </p>
+          <h2
+            className="text-3xl md:text-5xl font-bold text-center mb-6 text-neutral-900"
+            style={{ wordBreak: "keep-all", overflowWrap: "break-word" }}
+          >
+            <span className="inline-block">アイデアではなく、</span>
+            <span className="inline-block">動くシステムがあります。</span>
+          </h2>
+          <p
+            className="text-lg text-neutral-600 text-center mb-16 max-w-2xl mx-auto"
+            style={{ wordBreak: "keep-all", overflowWrap: "break-word" }}
+          >
+            <span className="inline-block">waysteのデモは完成済み。</span>
+            <span className="inline-block">あとは、実際の現場で</span>
+            <span className="inline-block">一緒に試してくれる</span>
+            <span className="inline-block">パートナーを探しています。</span>
+          </p>
+          <div className="grid sm:grid-cols-2 gap-6">
+            {[
+              {
+                title: "ブラウザだけで動く",
+                body: "特別なサーバーは不要。PC1台とカメラ、画面があればその場で動きます。",
+              },
+              {
+                title: "映像は端末の外に出ない",
+                body: "AIの判定はすべて端末の中で完結。映像を外部に送らないため、設置場所のプライバシー懸念が構造的にありません。",
+              },
+              {
+                title: "分別ルールは設定だけで変更",
+                body: "オフィス・空港・自治体など、場所ごとに違うルールへプログラム変更なしで対応できます。",
+              },
+              {
+                title: "協業を前提にした設計",
+                body: "共同パイロット、技術提供、ライセンスなど、柔軟な形でご一緒できます。",
+              },
+            ].map((c) => (
+              <div key={c.title} className="p-8 bg-white rounded-3xl">
+                <h3 className="text-lg font-bold mb-2 text-neutral-900">
+                  {c.title}
+                </h3>
+                <p className="text-neutral-600 leading-relaxed">{c.body}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Section 11: CTA */}
       <section
         id="cta"
         className="py-24 md:py-40 px-6 md:px-12 bg-gradient-to-b from-white to-neutral-50"
       >
         <div className="max-w-3xl mx-auto text-center">
-          <p className="text-sm font-semibold tracking-widest text-emerald-600 uppercase mb-6">
+          <p className="text-sm font-semibold tracking-widest text-emerald-600 mb-6">
             wayste
           </p>
           <h2
             className="text-3xl md:text-5xl font-bold mb-6 text-neutral-900"
             style={{ wordBreak: "keep-all", overflowWrap: "break-word" }}
           >
-            <span className="inline-block">パイロット導入を</span>
+            <span className="inline-block">パイロット導入・協業の</span>
             <br />
-            <span className="inline-block">募集中です</span>
+            <span className="inline-block">パートナーを募集中です</span>
           </h2>
           <p
             className="text-lg text-neutral-600 mb-12 leading-relaxed"
             style={{ wordBreak: "keep-all", overflowWrap: "break-word" }}
           >
-            <span className="inline-block">オフィス・大学・公共施設での</span>
-            <span className="inline-block">実証実験パートナーを探しています。</span>
-            <span className="inline-block">お気軽にご相談ください。</span>
+            <span className="inline-block">オフィス・大学・公共施設での実証実験のほか、</span>
+            <span className="inline-block">共同事業化・技術提供のご相談も歓迎します。</span>
+            <span className="inline-block">お気軽にご連絡ください。</span>
           </p>
           <a
-            href="mailto:ryuto.2007.11.27@gmail.com?subject=wayste%20パイロット導入のご相談"
+            href="mailto:ryuto.2007.11.27@gmail.com?subject=wayste%20導入・協業のご相談"
             className="inline-flex items-center gap-3 px-8 py-5 bg-emerald-600 text-white rounded-full font-medium hover:bg-emerald-700 transition-colors text-lg"
           >
             <svg

@@ -63,7 +63,7 @@ Office and airport bins in Japan often have 4–6 streams (burnable, plastic, PE
 
 1. Open `/kiosk` on any device with a camera (a one-time unlock at `/kiosk/unlock` sets a 30-day session cookie)
 2. Hold one item (or multiple items) in front of the camera
-3. Wait for the result — instant for common items (YOLO26m), or ~1–3 seconds when GPT-5.4 mini is needed
+3. Wait for the result — instant for confident detections (YOLO26m); items the model can't confidently identify show a needs-review result, still fully on-device
 4. Dispose of the item in the indicated bin — a physical bin position indicator shows where the bin sits in the row
 5. Walk away or tap **Done** to return to the idle screen early
 
@@ -222,7 +222,8 @@ Pre-action shown if applicable (e.g. "Empty contents and remove cap")
         ↓
 Result shown to user in fullscreen hero (single item) or split-screen grid (2–4 items);
 each blob is matched to YOLO detections by center proximity — unmatched blobs with
-high quality scores (sharpness + contrast) are sent to GPT; low-quality blobs are discarded.
+high quality scores (sharpness + contrast) become on-device needs-review results
+(legacy pilot mode only: sent to GPT); low-quality blobs are discarded.
 Frame upload to Blob + Redis logging happen asynchronously (non-blocking)
 ```
 

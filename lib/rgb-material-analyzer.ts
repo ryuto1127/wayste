@@ -6,6 +6,8 @@
  * color/material hints to refine the YOLO class name.
  *
  * Browser-safe — uses only Canvas/OffscreenCanvas APIs.
+ *
+ * @experimental — analyzeMaterial()/analyzeTexture() are not wired into the live kiosk; refineClassName/computeLbpTexture/detectMetallicFromLuminance are tested and kept as Tier-1.5 material
  */
 
 import type { MaterialHint, TextureHint } from "./types";

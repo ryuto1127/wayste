@@ -1,6 +1,8 @@
 /**
  * Visual cue descriptions per Tier-1 class, used in the GPT
  * material-identification prompt (buildMaterialIdentificationPrompt).
+ *
+ * @legacy-cloud-path — the default kiosk never calls this; alive only behind NEXT_PUBLIC_CLOUD_FALLBACK=1 (pilot experiments)
  */
 export const MATERIAL_VISUAL_CUES: Record<string, { material: string; cues: string }[]> = {
   bottle: [

@@ -121,6 +121,9 @@ class OnnxBackend implements InferenceBackend {
 }
 
 // ── Local HTTP backend ──
+/**
+ * @experimental — future Raspberry Pi backend, no tests yet
+ */
 class HttpBackend implements InferenceBackend {
   private ready = false;
 

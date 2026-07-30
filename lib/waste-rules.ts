@@ -55,6 +55,9 @@ export function loadSiteConfig(siteId: string = "japan-office"): SiteConfig {
   return config;
 }
 
+// ── GPT prompt builders ──
+// @legacy-cloud-path — the default kiosk never calls these; alive only behind NEXT_PUBLIC_CLOUD_FALLBACK=1 (pilot experiments)
+
 /**
  * Classification prompt for GPT-5.4 mini — handles compound items, detailed reasoning.
  */

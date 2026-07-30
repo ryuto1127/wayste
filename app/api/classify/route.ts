@@ -1,3 +1,6 @@
+/**
+ * @legacy-cloud-path — the default kiosk never calls this; alive only behind NEXT_PUBLIC_CLOUD_FALLBACK=1 (pilot experiments)
+ */
 import { NextResponse } from "next/server";
 import OpenAI from "openai";
 import { z } from "zod/v4";

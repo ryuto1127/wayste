@@ -1,6 +1,8 @@
 export type Locale = "en" | "ja";
 
-const translations = {
+// Exported for the key-parity test (__tests__/i18n-parity.test.ts) — runtime
+// consumers should use t() instead of reading this object directly.
+export const translations = {
   en: {
     // Kiosk display
     analyzing: "Analyzing...",

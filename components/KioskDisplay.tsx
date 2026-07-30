@@ -45,18 +45,24 @@ import ResultScreen from "./ResultScreen";
 import SystemStatusBadge from "./SystemStatusBadge";
 
 // ── Timing constants ──
+// Exported constants below are imported by __tests__/state-machine.test.ts so
+// the test simulator always uses the real values — do not duplicate them there.
 const ANALYSIS_INTERVAL_MS = 30;  // ~33 fps local CV
-const COOLDOWN_MS = 3500; // pause before re-scanning (BG model recovery + seedling animation)
-const RESULT_GONE_FRAMES = 5;     // result state exit window (~150ms at 33fps) — balanced against flicker risk
+export const COOLDOWN_MS = 3500; // pause before re-scanning (BG model recovery + seedling animation)
+/** Extra cooldown per consecutive nothing-detected miss (progressive backoff). */
+export const COOLDOWN_EXTENSION_PER_MISS_MS = 1_000;
+/** Upper bound for the progressively extended cooldown. */
+export const COOLDOWN_MAX_MS = 8_000;
+export const RESULT_GONE_FRAMES = 5;     // result state exit window (~150ms at 33fps) — balanced against flicker risk
 /** FG frames required to start the YOLO continuous loop. Kept low — YOLO
  *  handles its own quality; FG is just the "someone is approaching" trigger. */
-const FG_TRIGGER_FRAMES = 2;
+export const FG_TRIGGER_FRAMES = 2;
 /**
  * Escape hatch: if the result state persists for this long with the object
  * still visible (e.g., a tissue leftover that never leaves), force a transition
  * to cooldown so the BG model gets a full-rate update window in idle.
  */
-const RESULT_TIMEOUT_MS = 20_000;
+export const RESULT_TIMEOUT_MS = 20_000;
 /** Minimum time an error message is visible before being cleared. */
 const ERROR_HOLD_MS = 4_000;
 /** Abort API call if it takes longer than this. */
@@ -752,7 +758,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
 
       if (state === "cooldown") {
         const effectiveCooldown = nothingDetectedCountRef.current > 1
-          ? Math.min(COOLDOWN_MS + nothingDetectedCountRef.current * 1_000, 8_000)
+          ? Math.min(COOLDOWN_MS + nothingDetectedCountRef.current * COOLDOWN_EXTENSION_PER_MISS_MS, COOLDOWN_MAX_MS)
           : COOLDOWN_MS;
         const cooldownElapsed = Date.now() - cooldownStartRef.current >= effectiveCooldown;
         const errorHeld = !errorRef.current || (Date.now() - errorSetAtRef.current >= ERROR_HOLD_MS);

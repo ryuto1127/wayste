@@ -3,20 +3,32 @@
  *
  * The state machine runs inside a React component, so we test the transition
  * logic by extracting and simulating the rules used in KioskDisplay.tsx.
+ *
+ * All timing constants are imported from KioskDisplay itself (and derived
+ * thresholds from threshold-config) so the simulator cannot drift from the
+ * real implementation values.
  */
+
+// perf-monitor opens a BroadcastChannel at module scope (Node 22 has a global
+// BroadcastChannel), which would keep the Jest worker alive. The component is
+// never rendered here — only its exported constants are used — so stub it.
+jest.mock("@/lib/perf-monitor", () => ({ perfMonitor: {} }));
 
 import type { PipelineState, FrameAnalysis } from "@/lib/types";
 import { computeThresholds } from "@/lib/threshold-config";
+import {
+  COOLDOWN_MS,
+  COOLDOWN_EXTENSION_PER_MISS_MS,
+  COOLDOWN_MAX_MS,
+  FG_TRIGGER_FRAMES,
+  RESULT_GONE_FRAMES,
+  RESULT_TIMEOUT_MS,
+} from "@/components/KioskDisplay";
 
-const { ROI_FG_THRESHOLD } = computeThresholds(0.5);
-
-// Constants matching KioskDisplay.tsx
-const FG_TRIGGER_FRAMES = 2;
-const FG_PERSIST_FRAMES = 2;
-const RESULT_TIMEOUT_MS = 20_000;
-const RESULT_GONE_FRAMES = 5;
-const ROI_BLOB_THRESHOLD = 0.05;
-const COOLDOWN_MS = 1500;
+// Derived thresholds at the default sensitivity (0.5) — same source the
+// implementation uses (site config default sensitivity is 0.5).
+const { ROI_FG_THRESHOLD, ROI_BLOB_THRESHOLD, FG_PERSIST_FRAMES } =
+  computeThresholds(0.5);
 
 function makeAnalysis(overrides: Partial<FrameAnalysis> = {}): FrameAnalysis {
   return {
@@ -112,7 +124,7 @@ class StateMachineSimulator {
 
     if (this.state === "cooldown") {
       const effectiveCooldown = this.nothingDetectedCount > 1
-        ? Math.min(COOLDOWN_MS * this.nothingDetectedCount, 2_500)
+        ? Math.min(COOLDOWN_MS + this.nothingDetectedCount * COOLDOWN_EXTENSION_PER_MISS_MS, COOLDOWN_MAX_MS)
         : COOLDOWN_MS;
 
       // Pending item: classify immediately if sharp, otherwise return to idle
@@ -313,11 +325,16 @@ describe("State machine", () => {
     });
     sim.tick(emptyFrame);
 
-    // Normal cooldown (1500ms) has elapsed but effective cooldown is 3×1500=4500ms
+    // Normal cooldown has elapsed but effective cooldown is extended by
+    // nothingDetectedCount × COOLDOWN_EXTENSION_PER_MISS_MS
     expect(sim.state).toBe("cooldown");
 
     // Simulate full effective cooldown elapsed
-    sim.cooldownStart = Date.now() - 4500 - 1;
+    const effectiveCooldown = Math.min(
+      COOLDOWN_MS + sim.nothingDetectedCount * COOLDOWN_EXTENSION_PER_MISS_MS,
+      COOLDOWN_MAX_MS,
+    );
+    sim.cooldownStart = Date.now() - effectiveCooldown - 1;
     sim.tick(emptyFrame);
 
     expect(sim.state).toBe("idle");

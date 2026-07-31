@@ -264,6 +264,15 @@ export interface SiteConfig {
   streams: StreamDefinition[];
   overrides: ItemOverride[];
   defaultStream: WasteStream;
+  /**
+   * Maps the waste-stream ids used by the on-device YOLO rules
+   * (public/models/yolo-rules.json: recyclable/burnable/plastic/special)
+   * to this site's own stream ids. Without a mapping, YOLO results whose
+   * stream doesn't exist in `streams` fall back to needs_review — which
+   * silently disables the instant on-device path for sites that use
+   * different stream naming (e.g. recycling/landfill).
+   */
+  yoloStreamMap?: Record<string, WasteStream>;
   staffHandlingItems?: string[];
   /**
    * Config-driven compound item rules. When an item matches a pattern here,

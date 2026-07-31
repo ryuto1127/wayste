@@ -64,8 +64,21 @@
     }
   ],
   "canonicalNames": [
-    "water bottle", "plastic bottle", "coffee cup", "newspaper",
-    "food container", "napkin", "chip bag", "straw", "aluminum can"
+    "water bottle",
+    "plastic bottle",
+    "coffee cup",
+    "newspaper",
+    "food container",
+    "napkin",
+    "chip bag",
+    "straw",
+    "aluminum can"
   ],
-  "defaultStream": "landfill"
+  "defaultStream": "landfill",
+  "yoloStreamMap": {
+    "recyclable": "recycling",
+    "burnable": "landfill",
+    "plastic": "landfill",
+    "special": "needs_review"
+  }
 }

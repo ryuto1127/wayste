@@ -28,7 +28,7 @@ import {
 import { computeThresholds, type ThresholdConfig, type Calibration } from "@/lib/threshold-config";
 import { perfMonitor } from "@/lib/perf-monitor";
 import { loadYoloRules, resolveYoloDetection, isYoloClassNotWaste } from "@/lib/yolo-rules";
-import { buildClassificationResult } from "@/lib/waste-rules-core";
+import { buildLocalNeedsReviewResult, LOCAL_FALLBACK_CONFIDENCE } from "@/lib/local-fallback";
 import {
   computeFrameFingerprint,
   frameDiff,
@@ -95,12 +95,6 @@ const RESULT_API_SWEEP_DELAY_MS = 1_500;
  *  path — pilot experiments only (e.g. the cloud-vs-local shadow comparison
  *  via LOCAL_VLM_ENDPOINT on the server). */
 const CLOUD_FALLBACK_ENABLED = process.env.NEXT_PUBLIC_CLOUD_FALLBACK === "1";
-/** Confidence assigned to on-device needs_review fallbacks. Must be > 0 —
- *  handleMultiClassificationResults treats confidence 0 as the
- *  "nothing detected" sentinel (see resolveYoloDetection's not_waste branch)
- *  and would discard the card. Kept far below any reviewThreshold so the
- *  result always renders as needs_review. */
-const LOCAL_FALLBACK_CONFIDENCE = 0.01;
 
 // ── Background adaptation rates (passed to FrameAnalyzer per pipeline state) ──
 // idle / cooldown: full rate — continuously absorb drift and persistent leftovers
@@ -394,27 +388,9 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
     async (frame: string, meta: ClassifyMeta, yoloDetections?: YoloDetectionLog[], multi?: boolean, tierResults?: { tier1?: { itemName: string; confidence: number; x?: number }[] }, faceDetected?: boolean): Promise<ClassificationResponse & { requestId?: string }> => {
       if (!CLOUD_FALLBACK_ENABLED) {
         // ── On-device resolution: uncertain item → needs_review ──
-        const siteConfig = siteConfigRef.current;
         const loc = localeRef.current;
-        const raw = {
-          itemName: t(loc, "uncertain"),
-          wasteStream: "needs_review",
-          confidence: LOCAL_FALLBACK_CONFIDENCE,
-          reasoning: t(loc, "notSureCheck"),
-        };
-        const result: ClassificationResponse & { requestId?: string } = siteConfig
-          ? { ...buildClassificationResult(raw, siteConfig, loc), modelUsed: "T1" }
-          : {
-              itemName: raw.itemName,
-              wasteStream: "needs_review",
-              confidence: LOCAL_FALLBACK_CONFIDENCE,
-              reasoning: raw.reasoning,
-              binColor: "#D97706",
-              binLabel: "Needs Verification",
-              needsReview: true,
-              isCompound: false,
-              modelUsed: "T1",
-            };
+        const result: ClassificationResponse & { requestId?: string } =
+          buildLocalNeedsReviewResult(loc, siteConfigRef.current);
         // Log for the admin review loop (fire-and-forget) — same frame policy
         // as logYoloOnlyResult: attach it only when the client-side face
         // check passed; the server re-checks before storing.

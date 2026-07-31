@@ -94,12 +94,17 @@ export function resolveYoloDetection(
     };
   }
 
+  // Translate the rule's stream id into this site's naming when the site
+  // provides a mapping (e.g. recyclable -> recycling for US-style configs).
+  // Unmapped unknown streams still fall back to needs_review downstream.
+  const wasteStream = siteConfig.yoloStreamMap?.[rule.wasteStream] ?? rule.wasteStream;
+
   // Run through the same override/site-rule pipeline as the API route
   const ja = locale === "ja";
   const result = buildClassificationResult(
     {
       itemName: (ja && rule.itemName_ja) ? rule.itemName_ja : rule.itemName,
-      wasteStream: rule.wasteStream,
+      wasteStream,
       confidence: detection.confidence,
       reasoning: (ja && rule.reasoning_ja) ? rule.reasoning_ja : rule.reasoning,
       preAction: (ja && rule.preAction_ja) ? rule.preAction_ja : rule.preAction,

@@ -35,7 +35,14 @@ export function matchesPattern(itemName: string, pattern: string): boolean {
   const patternWords = lowerPattern.split(/[^a-z0-9]+/).filter(Boolean);
   const itemWords = lowerItem.split(/[^a-z0-9]+/).filter(Boolean);
 
-  if (patternWords.length === 0) return false;
+  // Pure-CJK patterns produce no [a-z0-9] words. Japanese has no word
+  // separators, so substring containment IS the word-boundary equivalent:
+  // 「蛍光灯」 must match 「蛍光灯（直管）」, 「ペットボトル」 must match
+  // 「空のペットボトル」. Without this, every non-exact Japanese item name
+  // silently bypasses overrides AND the staffHandlingItems safety gate.
+  if (patternWords.length === 0) {
+    return lowerPattern.length > 0 && lowerItem.includes(lowerPattern);
+  }
 
   const allPatternWordsMatch = patternWords.every((pw) =>
     itemWords.some((iw) => iw === pw)

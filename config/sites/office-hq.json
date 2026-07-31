@@ -1,7 +1,7 @@
 {
   "siteId": "office-hq",
   "siteName": "HQ Office — 4th Floor Kitchen",
-  "defaultLocale": "ja",
+  "defaultLocale": "en",
   "voiceEnabled": false,
   "reviewThreshold": 0.55,
   "sensitivity": 0.5,
@@ -160,22 +160,61 @@
     "needle"
   ],
   "canonicalNames": [
-    "coffee cup", "k-cup", "plastic bottle", "water bottle", "aluminum can",
-    "glass bottle", "cardboard", "plastic bag",
-    "napkin", "paper towel", "utensil",
-    "battery", "cable", "charger", "usb", "headphone",
-    "toner", "printer cartridge", "monitor", "laptop",
-    "food scraps", "banana peel", "apple core"
+    "coffee cup",
+    "k-cup",
+    "plastic bottle",
+    "water bottle",
+    "aluminum can",
+    "glass bottle",
+    "cardboard",
+    "plastic bag",
+    "napkin",
+    "paper towel",
+    "utensil",
+    "battery",
+    "cable",
+    "charger",
+    "usb",
+    "headphone",
+    "toner",
+    "printer cartridge",
+    "monitor",
+    "laptop",
+    "food scraps",
+    "banana peel",
+    "apple core"
   ],
   "defaultStream": "landfill",
   "tips": [
-    { "text": "ペットボトルはキャップとラベルを外してから、リサイクルへ入れましょう。" },
-    { "text": "食べ残しや果物の皮はコンポストへ。ビニール袋に入れずそのまま捨ててください。" },
-    { "text": "このオフィスのコーヒーカップはBPI認証のコンポスト対応です。コンポストへどうぞ。" },
-    { "text": "古いケーブルや充電器はエレベーター横の紫のE-Wasteボックスへ。" },
-    { "text": "段ボールは潰してからリサイクルへ入れてください。" },
-    { "text": "電池は絶対に普通のゴミ箱に入れないでください。E-Wasteボックスへ。" },
-    { "text": "迷ったときはゴミ（埋立）が安全です。リサイクルの汚染を防ぎましょう。" },
-    { "text": "トナーや大型電子機器はfacilities@company.comへ連絡してください。" }
-  ]
+    {
+      "text": "ペットボトルはキャップとラベルを外してから、リサイクルへ入れましょう。"
+    },
+    {
+      "text": "食べ残しや果物の皮はコンポストへ。ビニール袋に入れずそのまま捨ててください。"
+    },
+    {
+      "text": "このオフィスのコーヒーカップはBPI認証のコンポスト対応です。コンポストへどうぞ。"
+    },
+    {
+      "text": "古いケーブルや充電器はエレベーター横の紫のE-Wasteボックスへ。"
+    },
+    {
+      "text": "段ボールは潰してからリサイクルへ入れてください。"
+    },
+    {
+      "text": "電池は絶対に普通のゴミ箱に入れないでください。E-Wasteボックスへ。"
+    },
+    {
+      "text": "迷ったときはゴミ（埋立）が安全です。リサイクルの汚染を防ぎましょう。"
+    },
+    {
+      "text": "トナーや大型電子機器はfacilities@company.comへ連絡してください。"
+    }
+  ],
+  "yoloStreamMap": {
+    "recyclable": "recycling",
+    "burnable": "landfill",
+    "plastic": "landfill",
+    "special": "special"
+  }
 }

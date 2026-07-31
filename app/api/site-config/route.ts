@@ -25,6 +25,8 @@ export async function GET() {
     streams: config.streams,
     sensitivity: config.sensitivity,
     reviewThreshold: config.reviewThreshold,
+    defaultStream: config.defaultStream,
+    ...(config.yoloStreamMap && { yoloStreamMap: config.yoloStreamMap }),
     overrides: config.overrides ?? [],
     compounds: config.compounds ?? [],
     staffHandlingItems: config.staffHandlingItems ?? [],

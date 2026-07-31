@@ -21,12 +21,12 @@
 - YOLO26m FP16 (ONNX Runtime Web) — browser object detection, 15 custom waste classes (`15class_v1.onnx`, 39 MB)
 - OpenAI `gpt-5.4-mini` — legacy cloud fallback, OFF by default; only used when `NEXT_PUBLIC_CLOUD_FALLBACK=1` (pilot experiments). Default kiosk path resolves low-confidence items as `needs_review` on-device
 - Upstash Redis (REST) / Vercel Blob / Vercel Serverless + Cron
-- Zod v4 / Jest v30 (465 tests, 19 suites) / EN+JA i18n (174 keys/locale)
+- Zod v4 / Jest v30 (503 tests, 26 suites) / EN+JA i18n (174 keys/locale)
 
 ## Commands
     npm run dev      # Dev server (Turbopack)
     npm run build    # Production build
-    npm test         # 465 Jest tests, 19 suites
+    npm test         # 503 Jest tests, 26 suites
     npm run lint     # ESLint
 
 ## Routes
@@ -51,7 +51,8 @@
 
 ## Rules & Conventions
 - Local-first, local-only by default: all classification happens in the browser (YOLO); items it can't confidently resolve become `needs_review` on-device. Never add a cloud call to the default kiosk path — the GPT fallback exists only behind `NEXT_PUBLIC_CLOUD_FALLBACK=1` for pilot experiments
-- Overrides use word-boundary matching ("cup" matches "paper cup" but not "cupcake")
+- Overrides use word-boundary matching ("cup" matches "paper cup" but not "cupcake"); Japanese patterns match by substring (「蛍光灯」 matches 「蛍光灯（直管）」)
+- Site stream ids must either match yolo-rules.json streams (recyclable/burnable/plastic/special) or define `yoloStreamMap` in the site JSON — otherwise the on-device instant path silently degrades to needs_review
 - `staffHandlingItems` force `needs_review` regardless of AI output
 - Image uploads and Redis logging run via `waitUntil()` — never block the response
 - i18n keys live in `lib/i18n.ts`; API accepts `locale` param for response language

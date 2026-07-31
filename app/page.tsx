@@ -195,7 +195,8 @@ export default function Page() {
           <div className="grid md:grid-cols-2 gap-6">
             <div className="bg-neutral-100 aspect-[2880/1554]">
               <video
-                src="/marketing/demo-can.mov"
+                src="/marketing/demo-can.mp4"
+                poster="/marketing/demo-can-poster.jpg"
                 autoPlay
                 muted
                 loop
@@ -205,7 +206,8 @@ export default function Page() {
             </div>
             <div className="bg-neutral-100 aspect-[2880/1554]">
               <video
-                src="/marketing/demo-bottle.mov"
+                src="/marketing/demo-bottle.mp4"
+                poster="/marketing/demo-bottle-poster.jpg"
                 autoPlay
                 muted
                 loop
@@ -241,7 +243,8 @@ export default function Page() {
           </p>
           <div className="max-w-3xl mx-auto bg-neutral-800 aspect-[2880/1554]">
             <video
-              src="/marketing/demo-bag.mov"
+              src="/marketing/demo-bag.mp4"
+              poster="/marketing/demo-bag-poster.jpg"
               autoPlay
               muted
               loop
@@ -275,7 +278,8 @@ export default function Page() {
           </p>
           <div className="max-w-3xl mx-auto bg-neutral-100 aspect-[2880/1554]">
             <video
-              src="/marketing/demo-multi.mov"
+              src="/marketing/demo-multi.mp4"
+              poster="/marketing/demo-multi-poster.jpg"
               autoPlay
               muted
               loop

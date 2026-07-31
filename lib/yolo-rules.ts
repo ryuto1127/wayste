@@ -66,8 +66,10 @@ export function loadYoloRules(): Promise<YoloRulesConfig | null> {
  * Attempt to resolve a YOLO detection into a full ClassificationResponse
  * using the rules file and the site's override pipeline.
  *
- * Returns `null` if the detected class has no rule — caller should fall
- * back to the API (GPT mini).
+ * Returns `null` if the detected class has no rule — in the default
+ * local-only mode the caller resolves the item on-device as needs_review
+ * (lib/local-fallback.ts); the cloud API is only consulted when the
+ * NEXT_PUBLIC_CLOUD_FALLBACK=1 pilot flag is set.
  */
 export function resolveYoloDetection(
   detection: YoloDetection,

@@ -13,7 +13,6 @@ import type {
 } from "@/lib/types";
 import type { Locale } from "@/lib/i18n";
 import { t } from "@/lib/i18n";
-import { cacheResult } from "@/lib/offline-cache";
 import {
   FrameAnalyzer,
   imageQualityBand,
@@ -71,6 +70,13 @@ const API_TIMEOUT_MS = 15_000;
 const RATE_LIMIT_RETRY_MS = 1_200;
 /** Max time in "classifying" state before forcing a timeout recovery. */
 const CLASSIFYING_TIMEOUT_MS = 10_000;
+/** Local-only mode: if classifying has produced no result after this long
+ *  (item moving, below-threshold detections, out-of-vocabulary object),
+ *  resolve on-device as needs_review instead of scanning silently until
+ *  CLASSIFYING_TIMEOUT_MS and showing nothing. Only meaningful when the
+ *  cloud fallback is off — no frame quality requirement applies since no
+ *  image is sent anywhere for classification. */
+const LOCAL_UNRESOLVED_ESCALATION_MS = 2_500;
 /** Time without meaningful frame changes before escalating to API (ms). */
 const FRAME_STALE_ESCALATION_MS = 700;
 /** Mean pixel diff threshold for "frame has changed significantly" (0–255 scale). */
@@ -214,6 +220,12 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
   const inFlightRef = useRef(false);
   // ── YOLO loop refs ──
   const yoloRunningRef = useRef(false);
+  /** Generation token for the YOLO loop. Incremented on every start; a loop
+   *  iteration compares its captured generation after each await so a loop
+   *  stopped-then-restarted while detect() was in flight can neither revive
+   *  the old loop (doubled loops sharing refs) nor apply detections captured
+   *  from the PREVIOUS user's scene to the new session. */
+  const yoloGenRef = useRef(0);
   /** Per-trackId gone counter — tracks how many frame-change YOLO cycles each tracked result has been absent. */
   const detectionGoneMapRef = useRef<Map<number, number>>(new Map());
   /** Monotonically increasing tracking ID counter. */
@@ -235,7 +247,6 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
   /** Mirror of stableResults for stale-closure-safe reads in the YOLO loop. */
   const stableResultsRef = useRef<TrackedResult[]>([]);
   const lastAnalysisRef = useRef<FrameAnalysis | null>(null);
-  const lastCachedRef = useRef("");
   const errorSetAtRef = useRef(0);
   /** Last calibration object reference — detect rolling recalibration updates. */
   const lastCalibrationRef = useRef<Calibration | null>(null);
@@ -306,14 +317,19 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
 
   // ── Initialize inference backend + rules + site config (client-side) ──
   useEffect(() => {
-    Promise.all([
-      getInferenceBackend().then((backend) => {
-        inferenceRef.current = backend;
-      }),
-      loadYoloRules(),
+    // Site config is a hard prerequisite for the YOLO loop (startYoloLoop
+    // refuses without it). A single failed fetch at boot must not permanently
+    // brick an unattended kiosk — retry with backoff until it loads.
+    let siteConfigRetryTimer: ReturnType<typeof setTimeout> | null = null;
+    let cancelled = false;
+    const loadSiteConfigWithRetry = (attempt = 0) => {
       fetch("/api/site-config")
-        .then((r) => r.json())
+        .then((r) => {
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          return r.json();
+        })
         .then((data: SiteConfig) => {
+          if (cancelled) return;
           siteConfigRef.current = data;
           if (data.streams) setSiteStreams(data.streams);
           // Initialize thresholds from site sensitivity (calibration applied later)
@@ -324,8 +340,21 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
             setMirrorCamera(data.mirrorCamera);
           }
         })
-        .catch(() => {}),
+        .catch(() => {
+          if (cancelled) return;
+          const delayMs = Math.min(2000 * 2 ** attempt, 30_000);
+          console.warn(`[site-config] load failed — retrying in ${delayMs}ms`);
+          siteConfigRetryTimer = setTimeout(() => loadSiteConfigWithRetry(attempt + 1), delayMs);
+        });
+    };
+
+    Promise.all([
+      getInferenceBackend().then((backend) => {
+        inferenceRef.current = backend;
+      }),
+      loadYoloRules(),
     ]);
+    loadSiteConfigWithRetry();
 
     // Preload the BlazeFace face detector so the first real classification
     // (classify or T1 pilot-log) doesn't pay the ~5 MB WASM + 200 KB model
@@ -335,6 +364,11 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
     import("@/lib/face-detect")
       .then((m) => m.warmupFaceDetector())
       .catch(() => {});
+
+    return () => {
+      cancelled = true;
+      if (siteConfigRetryTimer) clearTimeout(siteConfigRetryTimer);
+    };
   }, []);
 
   // Fetch defaultLocale from site-config API as a fallback when no prop was passed.
@@ -656,8 +690,12 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
             unresolvedNewItemsRef.current.clear();
             lastYoloFingerprintRef.current = null;
             classifyStartRef.current = Date.now();
-            transition("classifying");
-            startYoloLoop(analyzer);
+            // Only enter classifying when the loop can actually run (model
+            // ready + site config loaded) — otherwise the kiosk would sit on
+            // a dead camera screen until the 10s timeout with nothing running.
+            if (startYoloLoop(analyzer)) {
+              transition("classifying");
+            }
           }
         } else {
           fgPersistRef.current = 0;
@@ -749,10 +787,9 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           detectionGoneMapRef.current.clear();
           unresolvedNewItemsRef.current.clear();
           lastYoloFingerprintRef.current = null;
-          if (roiHasFg) {
+          if (roiHasFg && startYoloLoop(analyzer)) {
             classifyStartRef.current = Date.now();
             transition("classifying");
-            startYoloLoop(analyzer);
           } else {
             transition("idle");
           }
@@ -781,18 +818,37 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
     // retry a genuinely different view (angle/position). In result state YOLO
     // continues for spatial tracking (bbox IoU) — classifications are locked.
 
-    function startYoloLoop(currentAnalyzer: FrameAnalyzer) {
-      if (yoloRunningRef.current) return;
+    /** Start the YOLO loop. Returns false when prerequisites (model ready,
+     *  site config loaded) aren't met — callers must NOT enter `classifying`
+     *  in that case, or the kiosk sits on a dead camera screen until timeout. */
+    function startYoloLoop(currentAnalyzer: FrameAnalyzer): boolean {
+      if (yoloRunningRef.current) return true;
       const backend = inferenceRef.current;
-      if (!backend?.isReady() || !siteConfigRef.current) return;
+      if (!backend?.isReady() || !siteConfigRef.current) return false;
       yoloRunningRef.current = true;
+      const gen = ++yoloGenRef.current;
       lastYoloFingerprintRef.current = null; // first run always fires
       lastYoloRunTimeRef.current = Date.now();
-      console.log(`[yolo-loop] started`);
+      console.log(`[yolo-loop] started (gen ${gen})`);
       (async () => {
-        while (yoloRunningRef.current) {
+        while (yoloRunningRef.current && yoloGenRef.current === gen) {
           const video = cameraRef.current?.getVideo();
           if (!video) { await new Promise(r => setTimeout(r, 50)); continue; }
+
+          // ── Local-only rescue: item present but unresolved for too long ──
+          // A moving or out-of-vocabulary item keeps changing the frame, so
+          // the stale-frame branch below never fires — without this check the
+          // kiosk would scan silently for CLASSIFYING_TIMEOUT_MS and show
+          // NOTHING. Resolving as needs_review requires no cloud image, so no
+          // frame-quality condition applies.
+          if (!CLOUD_FALLBACK_ENABLED
+              && stateRef.current === "classifying"
+              && !inFlightRef.current
+              && Date.now() - classifyStartRef.current >= LOCAL_UNRESOLVED_ESCALATION_MS
+              && lastAnalysisRef.current) {
+            console.log(`[yolo-loop] unresolved for ${LOCAL_UNRESOLVED_ESCALATION_MS}ms → on-device needs_review`);
+            triggerApiEscalation(video, lastAnalysisRef.current);
+          }
 
           // ── Frame-change gate ──
           if (!fingerprintCanvasRef.current) {
@@ -813,10 +869,14 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
                 && stateRef.current === "classifying"
                 && !inFlightRef.current) {
               const analysis = lastAnalysisRef.current;
-              if (analysis && imageQualityBand(analysis) === "good") {
+              // The "good" quality gate exists for the CLOUD path (a sharp
+              // frame is worth waiting for before paying for a Vision call).
+              // In local-only mode the escalation sends no frame anywhere —
+              // resolve regardless of quality.
+              if (analysis && (!CLOUD_FALLBACK_ENABLED || imageQualityBand(analysis) === "good")) {
                 triggerApiEscalation(video, analysis);
               } else {
-                // Quality too poor for API — no point staying in classifying
+                // Cloud mode + quality too poor for API — no point staying
                 console.log(`[yolo-loop] Frame stale ${staleDuration}ms, quality insufficient → cooldown`);
                 nothingDetectedCountRef.current++;
                 pendingItemRef.current = false;
@@ -844,6 +904,11 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           const yoloMs = Date.now() - yoloStart;
           perfMonitor.recordYoloInference(yoloMs);
 
+          // The loop may have been stopped (and possibly restarted for a NEW
+          // user/scene) while detect() was awaiting. Applying these detections
+          // would classify the previous scene as the current one.
+          if (!yoloRunningRef.current || yoloGenRef.current !== gen) break;
+
           const analysis = lastAnalysisRef.current;
           try {
             handleYoloCycleResult(detections, yoloMs, video, analysis, currentAnalyzer);
@@ -854,8 +919,9 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
             console.error("[yolo-loop] cycle handler failed:", err);
           }
         }
-        console.log(`[yolo-loop] stopped`);
+        console.log(`[yolo-loop] stopped (gen ${gen})`);
       })();
+      return true;
     }
 
     function stopYoloLoop() {
@@ -865,6 +931,11 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
         apiAbortRef.current.abort();
         apiAbortRef.current = null;
       }
+      // The abort above rejects any pending escalation with AbortError, whose
+      // catch handlers return without clearing the in-flight flag. Left true,
+      // it would permanently block every future escalation — the on-device
+      // needs_review path would silently die until a confident YOLO hit.
+      inFlightRef.current = false;
     }
 
     /** Escalate to API when YOLO can't resolve after frame stale timeout. */
@@ -886,6 +957,13 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       classifyViaApiAsync(video, analysis, controller.signal, undefined, true, { tier1: tier1Hints })
         .then(({ result: r, requestId, multiResults }) => {
           apiAbortRef.current = null;
+          // The pipeline may have moved on while the call was in flight
+          // (YOLO hit → result, or FG gone → cooldown). A stale response
+          // must not overwrite the fresher state.
+          if (stateRef.current !== "classifying") {
+            inFlightRef.current = false;
+            return;
+          }
           const apiResults = multiResults ?? (r ? [r] : []);
           if (apiResults.length > 0) {
             handleMultiClassificationResults(apiResults, apiResults.map(() => requestId));
@@ -901,10 +979,17 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
         })
         .catch((err) => {
           if (err instanceof DOMException && err.name === "AbortError") {
-            // YOLO won the race — silently ignore
+            // YOLO won the race (or the loop was stopped) — the escalation
+            // is void. The flag must still be cleared or every future
+            // escalation is silently blocked.
+            inFlightRef.current = false;
             return;
           }
           apiAbortRef.current = null;
+          if (stateRef.current !== "classifying") {
+            inFlightRef.current = false;
+            return;
+          }
           nothingDetectedCountRef.current++;
           pendingItemRef.current = false;
           analyzer.boostBackgroundAdaptation();
@@ -950,7 +1035,10 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           inFlightRef.current = false;
         })
         .catch((err) => {
-          if (err instanceof DOMException && err.name === "AbortError") return;
+          if (err instanceof DOMException && err.name === "AbortError") {
+            inFlightRef.current = false;
+            return;
+          }
           apiAbortRef.current = null;
           inFlightRef.current = false;
         });
@@ -1037,7 +1125,10 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           inFlightRef.current = false;
         })
         .catch((err) => {
-          if (err instanceof DOMException && err.name === "AbortError") return;
+          if (err instanceof DOMException && err.name === "AbortError") {
+            inFlightRef.current = false;
+            return;
+          }
           apiAbortRef.current = null;
           inFlightRef.current = false;
         });
@@ -1212,17 +1303,28 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
         // All new detections (resolved or not) must persist for multiple
         // cycles before being added to results. This prevents flicker from
         // transient YOLO bbox shifts or single-frame false positives.
+        // Matching is by IoU, NOT by exact bbox position: YOLO boxes jitter
+        // a few pixels between runs (and the frame-change gate guarantees the
+        // frame moved), so a position-keyed lookup would reset the counter
+        // every cycle and new items would never accumulate enough persistence.
         for (const detIdx of matchResult.unmatchedDetections) {
           const det = wasteDetections[detIdx];
           if (!det) continue;
 
-          const key = `${Math.round(det.bbox[0])}_${Math.round(det.bbox[1])}`;
-          const entry = unresolvedNewItemsRef.current.get(key);
-          if (entry) {
-            const iou = computeIoU(entry.bbox, det.bbox);
-            if (iou > 0.3) {
-              entry.count++;
-              entry.bbox = det.bbox;
+          let key: string | null = null;
+          let entry: { bbox: Bbox; count: number } | null = null;
+          let bestIoU = 0.3; // minimum overlap to count as the same item
+          for (const [k, e] of unresolvedNewItemsRef.current) {
+            const iou = computeIoU(e.bbox, det.bbox);
+            if (iou > bestIoU) {
+              bestIoU = iou;
+              key = k;
+              entry = e;
+            }
+          }
+          if (entry && key) {
+            entry.count++;
+            entry.bbox = det.bbox;
 
               if (entry.count >= NEW_ITEM_PERSIST_CYCLES) {
                 unresolvedNewItemsRef.current.delete(key);
@@ -1257,9 +1359,11 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
                   triggerApiEscalationFromResult(video, analysis, det);
                 }
               }
-            }
           } else {
-            unresolvedNewItemsRef.current.set(key, { bbox: det.bbox, count: 1 });
+            unresolvedNewItemsRef.current.set(
+              `${Math.round(det.bbox[0])}_${Math.round(det.bbox[1])}_${nextTrackIdRef.current}`,
+              { bbox: det.bbox, count: 1 },
+            );
           }
         }
 
@@ -1498,13 +1602,6 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
         resultSweepTimerRef.current = setTimeout(triggerResultApiSweep, RESULT_API_SWEEP_DELAY_MS);
       }
 
-      for (const result of valid) {
-        const cacheKey = `${result.itemName}::${result.wasteStream}`;
-        if (cacheKey !== lastCachedRef.current) {
-          cacheResult(result, localeRef.current);
-          lastCachedRef.current = cacheKey;
-        }
-      }
       inFlightRef.current = false;
     }
 

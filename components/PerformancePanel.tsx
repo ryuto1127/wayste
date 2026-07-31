@@ -41,13 +41,14 @@ export function PerformancePanel() {
     setThermalRatio(perfMonitor.getThermalRatio());
   }, [scale]);
 
-  // Subscribe to updates + poll every second when open
+  // Subscribe to updates + poll every second when open. The initial refresh
+  // is deferred a tick so the effect doesn't set state synchronously.
   useEffect(() => {
     if (!open) return;
-    refresh();
+    const initial = setTimeout(refresh, 0);
     const unsub = perfMonitor.subscribe(refresh);
     const interval = setInterval(refresh, 1000);
-    return () => { unsub(); clearInterval(interval); };
+    return () => { clearTimeout(initial); unsub(); clearInterval(interval); };
   }, [open, refresh]);
 
   // Draw chart whenever samples change

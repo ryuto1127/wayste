@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod/v4";
 import { redis, KEYS } from "@/lib/redis";
 import { logPilotEntry } from "@/lib/pilot-log";
+import { recordCalibrationPrediction } from "@/lib/calibration";
 import { uploadFrameToBlob } from "@/lib/blob-store";
 import { runInBackground } from "@/lib/background-task";
 import { generateRequestId } from "@/lib/request-id";
@@ -152,6 +153,16 @@ export async function POST(request: Request) {
           ) ?? undefined;
         }
       }
+      // Confidence calibration: predictions must be recorded where results
+      // are actually produced. In the default local-only deployment that is
+      // HERE (T1 results log via pilot-log) — /api/classify is 403-gated, so
+      // recording only there left /api/calibration with verdicts but zero
+      // predictions (accuracy permanently null). t2 entries are excluded:
+      // the classify route already records those in cloud pilot mode.
+      if (typeof entry.confidence === "number" && (entry.modelUsed ?? "T1") === "T1") {
+        await recordCalibrationPrediction(entry.confidence, "T1").catch(() => {});
+      }
+
       await logPilotEntry({
         timestamp,
         modelUsed: entry.modelUsed ?? "T1",

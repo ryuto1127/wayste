@@ -33,6 +33,9 @@ export async function makeKioskSessionToken(kioskToken: string): Promise<string>
 }
 
 function isLocalhostHost(host: string | null): boolean {
+  // Dev-only, like middleware's isLocalhost — a spoofed Host header must
+  // never activate the bypass on a production deployment.
+  if (process.env.NODE_ENV === "production") return false;
   if (!host) return false;
   // Strip port
   const h = host.split(":")[0];

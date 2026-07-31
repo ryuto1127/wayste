@@ -6,13 +6,16 @@
  * Fails fast with a clear error message rather than crashing on first request.
  */
 
-/** Env vars required for the classification API to function. */
+/** Env vars required for logging/review infrastructure (all deployments). */
 const REQUIRED_VARS = [
-  "OPENAI_API_KEY",
   "KV_REST_API_URL",
   "KV_REST_API_TOKEN",
   "BLOB_READ_WRITE_TOKEN",
 ] as const;
+
+/** Required only when the legacy cloud fallback is enabled — the default
+ *  local-only deployment classifies on-device and never calls OpenAI. */
+const CLOUD_FALLBACK_VARS = ["OPENAI_API_KEY"] as const;
 
 /** Env vars required only in production (Vercel). */
 const PRODUCTION_ONLY_VARS = [
@@ -33,6 +36,14 @@ export function validateEnv(): void {
   for (const key of REQUIRED_VARS) {
     if (!process.env[key]) {
       missing.push(key);
+    }
+  }
+
+  if (process.env.NEXT_PUBLIC_CLOUD_FALLBACK === "1") {
+    for (const key of CLOUD_FALLBACK_VARS) {
+      if (!process.env[key]) {
+        missing.push(`${key} (required when NEXT_PUBLIC_CLOUD_FALLBACK=1)`);
+      }
     }
   }
 

@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { Noto_Sans_JP } from "next/font/google";
-import { SiteStreamsProvider } from "@/lib/site-streams-context";
 import "./globals.css";
 
 const notoSansJP = Noto_Sans_JP({
@@ -56,7 +55,7 @@ export default function RootLayout({
         suppressHydrationWarning
         className="bg-white text-neutral-900 antialiased font-sans"
       >
-        <SiteStreamsProvider>{children}</SiteStreamsProvider>
+        {children}
       </body>
     </html>
   );

@@ -21,12 +21,12 @@
 - YOLO26m FP16 (ONNX Runtime Web) — browser object detection, 15 custom waste classes (`15class_v1.onnx`, 39 MB)
 - OpenAI `gpt-5.4-mini` — legacy cloud fallback, OFF by default; only used when `NEXT_PUBLIC_CLOUD_FALLBACK=1` (pilot experiments). Default kiosk path resolves low-confidence items as `needs_review` on-device
 - Upstash Redis (REST) / Vercel Blob / Vercel Serverless + Cron
-- Zod v4 / Jest v30 (503 tests, 26 suites) / EN+JA i18n (174 keys/locale)
+- Zod v4 / Jest v30 (487 tests, 25 suites) / EN+JA i18n (174 keys/locale)
 
 ## Commands
     npm run dev      # Dev server (Turbopack)
     npm run build    # Production build
-    npm test         # 503 Jest tests, 26 suites
+    npm test         # 487 Jest tests, 25 suites
     npm run lint     # ESLint
 
 ## Routes

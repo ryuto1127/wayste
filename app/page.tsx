@@ -18,8 +18,8 @@ export default function Page() {
               動くデモ完成済み — 導入・協業パートナー募集中
             </p>
             <h1
-              className="text-4xl md:text-6xl font-bold leading-tight mb-8 text-neutral-900"
-              style={{ wordBreak: "keep-all", overflowWrap: "break-word" }}
+              className="text-[1.75rem] sm:text-4xl md:text-6xl font-bold leading-tight mb-8 text-neutral-900"
+              style={{ wordBreak: "keep-all", overflowWrap: "anywhere" }}
             >
               <span className="inline-block">ゴミ箱に近づくだけで、</span>
               <span className="inline-block">
@@ -28,13 +28,13 @@ export default function Page() {
             </h1>
             <p
               className="text-lg md:text-xl text-neutral-600 mb-10 leading-relaxed"
-              style={{ wordBreak: "keep-all", overflowWrap: "break-word" }}
+              style={{ wordBreak: "keep-all", overflowWrap: "anywhere" }}
             >
-              <span className="inline-block">毎日、ゴミ箱の前で</span>
-              <span className="inline-block">迷っていませんか？</span>
+              <span className="sm:inline-block">毎日、ゴミ箱の前で</span>
+              <span className="sm:inline-block">迷っていませんか？</span>
               <br />
-              <span className="inline-block">AIが判断する。</span>
-              <span className="inline-block">あなたは普段通りに捨てるだけ。</span>
+              <span className="sm:inline-block">AIが判断する。</span>
+              <span className="sm:inline-block">あなたは普段通りに捨てるだけ。</span>
             </p>
             <a
               href="#cta"
@@ -75,11 +75,11 @@ export default function Page() {
             こんなこと、ありませんか？
           </p>
           <h2
-            className="text-3xl md:text-5xl font-bold text-center mb-16 text-neutral-900"
-            style={{ wordBreak: "keep-all", overflowWrap: "break-word" }}
+            className="text-2xl sm:text-3xl md:text-5xl font-bold text-center mb-16 text-neutral-900"
+            style={{ wordBreak: "keep-all", overflowWrap: "anywhere" }}
           >
-            <span className="inline-block">ゴミ分別、</span>
-            <span className="inline-block">3つの困りごと</span>
+            <span className="sm:inline-block">ゴミ分別、</span>
+            <span className="sm:inline-block">3つの困りごと</span>
           </h2>
           <div className="space-y-6">
             {[
@@ -96,7 +96,7 @@ export default function Page() {
                 </div>
                 <p
                   className="text-lg md:text-xl font-medium text-neutral-800 leading-relaxed pt-1"
-                  style={{ wordBreak: "keep-all", overflowWrap: "break-word" }}
+                  style={{ wordBreak: "keep-all", overflowWrap: "anywhere" }}
                 >
                   {text}
                 </p>
@@ -124,23 +124,23 @@ export default function Page() {
                 wayste とは
               </p>
               <h2
-                className="text-3xl md:text-4xl font-bold leading-snug mb-6 text-neutral-900"
-                style={{ wordBreak: "keep-all", overflowWrap: "break-word" }}
+                className="text-2xl sm:text-3xl md:text-4xl font-bold leading-snug mb-6 text-neutral-900"
+                style={{ wordBreak: "keep-all", overflowWrap: "anywhere" }}
               >
-                <span className="inline-block">ゴミ箱に近づくだけで、</span>
-                <span className="inline-block">正しい捨て先を教えてくれる、</span>
-                <span className="inline-block">
+                <span className="sm:inline-block">ゴミ箱に近づくだけで、</span>
+                <span className="sm:inline-block">正しい捨て先を教えてくれる、</span>
+                <span className="sm:inline-block">
                   <span className="text-emerald-600">AI分別キオスク</span>。
                 </span>
               </h2>
               <p
                 className="text-lg text-neutral-600 leading-relaxed"
-                style={{ wordBreak: "keep-all", overflowWrap: "break-word" }}
+                style={{ wordBreak: "keep-all", overflowWrap: "anywhere" }}
               >
-                <span className="inline-block">ゴミ箱の上に取り付けたカメラと画面が、</span>
-                <span className="inline-block">AIで瞬時に判定。</span>
-                <span className="inline-block">利用者は普段通りに捨てるだけで、</span>
-                <span className="inline-block">正しい分別ができます。</span>
+                <span className="sm:inline-block">ゴミ箱の上に取り付けたカメラと画面が、</span>
+                <span className="sm:inline-block">AIで瞬時に判定。</span>
+                <span className="sm:inline-block">利用者は普段通りに捨てるだけで、</span>
+                <span className="sm:inline-block">正しい分別ができます。</span>
               </p>
             </div>
           </div>
@@ -154,14 +154,15 @@ export default function Page() {
             わたしたちのビジョン
           </p>
           <h2
-            className="text-3xl md:text-5xl font-bold leading-relaxed"
-            style={{ wordBreak: "keep-all", overflowWrap: "break-word" }}
+            className="text-2xl sm:text-3xl md:text-5xl font-bold leading-relaxed"
+            style={{ wordBreak: "keep-all", overflowWrap: "anywhere" }}
           >
             <span className="inline-block">余計な手間を一切かけず、</span>
             <br />
             <span className="inline-block">普段通りのプロセスで、</span>
             <br />
-            <span className="inline-block">正しくゴミを捨てられる社会へ。</span>
+            <span className="inline-block">正しくゴミを</span>
+            <span className="inline-block">捨てられる社会へ。</span>
           </h2>
         </div>
       </section>
@@ -173,20 +174,20 @@ export default function Page() {
             技術 01
           </p>
           <h2
-            className="text-3xl md:text-5xl font-bold text-center mb-6 text-neutral-900"
-            style={{ wordBreak: "keep-all", overflowWrap: "break-word" }}
+            className="text-2xl sm:text-3xl md:text-5xl font-bold text-center mb-6 text-neutral-900"
+            style={{ wordBreak: "keep-all", overflowWrap: "anywhere" }}
           >
-            <span className="inline-block">形が似ていても、</span>
-            <span className="inline-block">材質を見分ける。</span>
+            <span className="sm:inline-block">形が似ていても、</span>
+            <span className="sm:inline-block">材質を見分ける。</span>
           </h2>
           <p
             className="text-lg text-neutral-600 text-center mb-16 max-w-2xl mx-auto"
-            style={{ wordBreak: "keep-all", overflowWrap: "break-word" }}
+            style={{ wordBreak: "keep-all", overflowWrap: "anywhere" }}
           >
-            <span className="inline-block">アルミ缶もペットボトルも、</span>
-            <span className="inline-block">AIが材質レベルで判別。</span>
-            <span className="inline-block">同じ「リサイクル」でも、</span>
-            <span className="inline-block">アイテムに合わせて捨て方を案内します。</span>
+            <span className="sm:inline-block">アルミ缶もペットボトルも、</span>
+            <span className="sm:inline-block">AIが材質レベルで判別。</span>
+            <span className="sm:inline-block">同じ「リサイクル」でも、</span>
+            <span className="sm:inline-block">アイテムに合わせて捨て方を案内します。</span>
           </p>
           <p className="text-sm text-neutral-500 text-center mb-8">
             このページの映像はすべて、実際に動作しているデモ画面の録画です。
@@ -223,20 +224,20 @@ export default function Page() {
             技術 02
           </p>
           <h2
-            className="text-3xl md:text-5xl font-bold text-center mb-6"
-            style={{ wordBreak: "keep-all", overflowWrap: "break-word" }}
+            className="text-2xl sm:text-3xl md:text-5xl font-bold text-center mb-6"
+            style={{ wordBreak: "keep-all", overflowWrap: "anywhere" }}
           >
-            <span className="inline-block">透明・反射する素材も、</span>
-            <span className="inline-block">しっかり判別。</span>
+            <span className="sm:inline-block">透明・反射する素材も、</span>
+            <span className="sm:inline-block">しっかり判別。</span>
           </h2>
           <p
             className="text-lg text-neutral-300 text-center mb-16 max-w-2xl mx-auto"
-            style={{ wordBreak: "keep-all", overflowWrap: "break-word" }}
+            style={{ wordBreak: "keep-all", overflowWrap: "anywhere" }}
           >
-            <span className="inline-block">背景が透けて見える透明物体は、</span>
-            <span className="inline-block">通常のAIには難しい課題。</span>
-            <span className="inline-block">waysteは素材の特徴を抽出して</span>
-            <span className="inline-block">見分けます。</span>
+            <span className="sm:inline-block">背景が透けて見える透明物体は、</span>
+            <span className="sm:inline-block">通常のAIには難しい課題。</span>
+            <span className="sm:inline-block">waysteは素材の特徴を抽出して</span>
+            <span className="sm:inline-block">見分けます。</span>
           </p>
           <div className="max-w-3xl mx-auto bg-neutral-800 aspect-[2880/1554]">
             <video
@@ -258,19 +259,19 @@ export default function Page() {
             技術 03
           </p>
           <h2
-            className="text-3xl md:text-5xl font-bold text-center mb-6 text-neutral-900"
-            style={{ wordBreak: "keep-all", overflowWrap: "break-word" }}
+            className="text-2xl sm:text-3xl md:text-5xl font-bold text-center mb-6 text-neutral-900"
+            style={{ wordBreak: "keep-all", overflowWrap: "anywhere" }}
           >
-            <span className="inline-block">複数のアイテムも、</span>
-            <span className="inline-block">同時に。</span>
+            <span className="sm:inline-block">複数のアイテムも、</span>
+            <span className="sm:inline-block">同時に。</span>
           </h2>
           <p
             className="text-lg text-neutral-600 text-center mb-16 max-w-2xl mx-auto"
-            style={{ wordBreak: "keep-all", overflowWrap: "break-word" }}
+            style={{ wordBreak: "keep-all", overflowWrap: "anywhere" }}
           >
-            <span className="inline-block">複数のアイテムを一度にかざしても、</span>
-            <span className="inline-block">それぞれの正解を同時に表示。</span>
-            <span className="inline-block">待ち時間ゼロの体験を実現します。</span>
+            <span className="sm:inline-block">複数のアイテムを一度にかざしても、</span>
+            <span className="sm:inline-block">それぞれの正解を同時に表示。</span>
+            <span className="sm:inline-block">待ち時間ゼロの体験を実現します。</span>
           </p>
           <div className="max-w-3xl mx-auto bg-neutral-100 aspect-[2880/1554]">
             <video
@@ -289,11 +290,11 @@ export default function Page() {
       <section className="py-24 md:py-32 px-6 md:px-12 bg-neutral-50">
         <div className="max-w-5xl mx-auto">
           <h2
-            className="text-3xl md:text-4xl font-bold text-center mb-16 text-neutral-900"
-            style={{ wordBreak: "keep-all", overflowWrap: "break-word" }}
+            className="text-2xl sm:text-3xl md:text-4xl font-bold text-center mb-16 text-neutral-900"
+            style={{ wordBreak: "keep-all", overflowWrap: "anywhere" }}
           >
-            <span className="inline-block">安心・</span>
-            <span className="inline-block">シンプルな設計</span>
+            <span className="sm:inline-block">安心・</span>
+            <span className="sm:inline-block">シンプルな設計</span>
           </h2>
           <div className="grid md:grid-cols-2 gap-8">
             <div className="p-10 bg-white rounded-3xl">
@@ -354,20 +355,20 @@ export default function Page() {
       <section className="py-24 md:py-32 px-6 md:px-12 bg-white">
         <div className="max-w-6xl mx-auto">
           <h2
-            className="text-3xl md:text-5xl font-bold text-center mb-6 text-neutral-900"
-            style={{ wordBreak: "keep-all", overflowWrap: "break-word" }}
+            className="text-2xl sm:text-3xl md:text-5xl font-bold text-center mb-6 text-neutral-900"
+            style={{ wordBreak: "keep-all", overflowWrap: "anywhere" }}
           >
-            <span className="inline-block">あらゆる空間に、</span>
-            <span className="inline-block">wayste</span>
+            <span className="sm:inline-block">あらゆる空間に、</span>
+            <span className="sm:inline-block">wayste</span>
           </h2>
           <p
             className="text-lg text-neutral-600 text-center mb-16 max-w-2xl mx-auto"
-            style={{ wordBreak: "keep-all", overflowWrap: "break-word" }}
+            style={{ wordBreak: "keep-all", overflowWrap: "anywhere" }}
           >
-            <span className="inline-block">オフィスから、大学、空港、</span>
-            <span className="inline-block">公共空間まで。</span>
-            <span className="inline-block">場所ごとの分別ルールに合わせて</span>
-            <span className="inline-block">柔軟に設定できます。</span>
+            <span className="sm:inline-block">オフィスから、大学、空港、</span>
+            <span className="sm:inline-block">公共空間まで。</span>
+            <span className="sm:inline-block">場所ごとの分別ルールに合わせて</span>
+            <span className="sm:inline-block">柔軟に設定できます。</span>
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 md:gap-6">
             {[
@@ -402,20 +403,20 @@ export default function Page() {
             開発状況
           </p>
           <h2
-            className="text-3xl md:text-5xl font-bold text-center mb-6 text-neutral-900"
-            style={{ wordBreak: "keep-all", overflowWrap: "break-word" }}
+            className="text-2xl sm:text-3xl md:text-5xl font-bold text-center mb-6 text-neutral-900"
+            style={{ wordBreak: "keep-all", overflowWrap: "anywhere" }}
           >
-            <span className="inline-block">アイデアではなく、</span>
-            <span className="inline-block">動くシステムがあります。</span>
+            <span className="sm:inline-block">アイデアではなく、</span>
+            <span className="sm:inline-block">動くシステムがあります。</span>
           </h2>
           <p
             className="text-lg text-neutral-600 text-center mb-16 max-w-2xl mx-auto"
-            style={{ wordBreak: "keep-all", overflowWrap: "break-word" }}
+            style={{ wordBreak: "keep-all", overflowWrap: "anywhere" }}
           >
-            <span className="inline-block">waysteのデモは完成済み。</span>
-            <span className="inline-block">あとは、実際の現場で</span>
-            <span className="inline-block">一緒に試してくれる</span>
-            <span className="inline-block">パートナーを探しています。</span>
+            <span className="sm:inline-block">waysteのデモは完成済み。</span>
+            <span className="sm:inline-block">あとは、実際の現場で</span>
+            <span className="sm:inline-block">一緒に試してくれる</span>
+            <span className="sm:inline-block">パートナーを探しています。</span>
           </p>
           <div className="grid sm:grid-cols-2 gap-6">
             {[
@@ -457,20 +458,20 @@ export default function Page() {
             wayste
           </p>
           <h2
-            className="text-3xl md:text-5xl font-bold mb-6 text-neutral-900"
-            style={{ wordBreak: "keep-all", overflowWrap: "break-word" }}
+            className="text-2xl sm:text-3xl md:text-5xl font-bold mb-6 text-neutral-900"
+            style={{ wordBreak: "keep-all", overflowWrap: "anywhere" }}
           >
-            <span className="inline-block">パイロット導入・協業の</span>
+            <span className="sm:inline-block">パイロット導入・協業の</span>
             <br />
-            <span className="inline-block">パートナーを募集中です</span>
+            <span className="sm:inline-block">パートナーを募集中です</span>
           </h2>
           <p
             className="text-lg text-neutral-600 mb-12 leading-relaxed"
-            style={{ wordBreak: "keep-all", overflowWrap: "break-word" }}
+            style={{ wordBreak: "keep-all", overflowWrap: "anywhere" }}
           >
-            <span className="inline-block">オフィス・大学・公共施設での実証実験のほか、</span>
-            <span className="inline-block">共同事業化・技術提供のご相談も歓迎します。</span>
-            <span className="inline-block">お気軽にご連絡ください。</span>
+            <span className="sm:inline-block">オフィス・大学・公共施設での実証実験のほか、</span>
+            <span className="sm:inline-block">共同事業化・技術提供のご相談も歓迎します。</span>
+            <span className="sm:inline-block">お気軽にご連絡ください。</span>
           </p>
           <a
             href="mailto:ryuto.2007.11.27@gmail.com?subject=wayste%20導入・協業のご相談"

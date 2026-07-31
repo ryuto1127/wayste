@@ -25,6 +25,7 @@ import { Readable } from "node:stream";
 import type { PilotLogEntry } from "@/lib/types";
 import { isAllowedBlobUrl } from "@/lib/blob-url";
 import { parsePilotLogEntry } from "@/lib/pilot-log-schema";
+import { timingSafeEqualStr } from "@/lib/crypto-utils";
 
 /** Mirror the threshold from /api/review/export */
 const CORRECT_CONFIDENCE_THRESHOLD = 0.80;
@@ -39,7 +40,7 @@ export async function GET(request: Request) {
     console.error("[cron/export-finetuning] CRON_SECRET is not set — refusing to run.");
     return NextResponse.json({ error: "Server misconfiguration" }, { status: 500 });
   }
-  if (authHeader !== `Bearer ${cronSecret}`) {
+  if (!(await timingSafeEqualStr(authHeader ?? "", `Bearer ${cronSecret}`))) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

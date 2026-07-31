@@ -11,6 +11,7 @@
 import { NextResponse } from "next/server";
 import { list, del, put } from "@vercel/blob";
 import { redis, KEYS } from "@/lib/redis";
+import { timingSafeEqualStr } from "@/lib/crypto-utils";
 
 const RETENTION_DAYS = parseInt(process.env.BLOB_RETENTION_DAYS || "90");
 
@@ -22,7 +23,7 @@ export async function GET(request: Request) {
     console.error("[cron/cleanup] CRON_SECRET is not set — refusing to run.");
     return NextResponse.json({ error: "Server misconfiguration" }, { status: 500 });
   }
-  if (authHeader !== `Bearer ${cronSecret}`) {
+  if (!(await timingSafeEqualStr(authHeader ?? "", `Bearer ${cronSecret}`))) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

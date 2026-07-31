@@ -21,7 +21,8 @@ const MAX_ENTRIES = 2000;
 export type AuditEventType =
   | "admin.login"
   | "admin.login_fail"
-  | "kiosk.session_mint";
+  | "kiosk.session_mint"
+  | "kiosk.session_fail";
 
 export interface AuditEvent {
   type: AuditEventType;

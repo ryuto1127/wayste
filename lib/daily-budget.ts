@@ -11,9 +11,9 @@
  * The first increment of the day sets a 25-hour TTL (+1h slack for DST).
  *
  * Configure via `OPENAI_DAILY_BUDGET` env var. Leave unset to disable
- * (useful in dev). Consumes 1 slot per OpenAI call, regardless of request
- * size — batch requests that produce N items still count as 1 call, matching
- * what OpenAI actually charges for.
+ * (useful in dev). Consumes 1 slot per OpenAI API call. Batch requests fan
+ * out to one OpenAI call PER ITEM (see /api/classify batch mode), so they
+ * must consume one slot per item — OpenAI bills each call separately.
  */
 import { redis } from "@/lib/redis";
 
@@ -40,7 +40,7 @@ export interface BudgetCheckResult {
  * `allowed: true` rather than denying everyone — availability is valued
  * over the budget guarantee. Operators should notice via other monitoring.
  */
-export async function consumeOpenAICall(): Promise<BudgetCheckResult> {
+export async function consumeOpenAICall(count: number = 1): Promise<BudgetCheckResult> {
   const capRaw = process.env.OPENAI_DAILY_BUDGET;
   const cap = capRaw ? parseInt(capRaw, 10) : null;
   if (!cap || Number.isNaN(cap) || cap <= 0) {
@@ -49,8 +49,8 @@ export async function consumeOpenAICall(): Promise<BudgetCheckResult> {
 
   try {
     const key = todayKey();
-    const used = await redis.incr(key);
-    if (used === 1) {
+    const used = await redis.incrby(key, count);
+    if (used === count) {
       await redis.expire(key, TTL_SECONDS);
     }
     if (used > cap) {

@@ -18,6 +18,9 @@ const REQUIRED_VARS = [
 const PRODUCTION_ONLY_VARS = [
   "ADMIN_API_KEY",
   "CRON_SECRET",
+  // Without this the kiosk gate has no secret to validate sessions against;
+  // middleware would deny all kiosk access (the dev bypass is dev-only).
+  "KIOSK_API_TOKEN",
 ] as const;
 
 let validated = false;

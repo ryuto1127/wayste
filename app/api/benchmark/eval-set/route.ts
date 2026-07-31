@@ -19,6 +19,7 @@ import { NextResponse } from "next/server";
 import { redis, KEYS } from "@/lib/redis";
 import { parsePilotLogEntry } from "@/lib/pilot-log-schema";
 import { selectEvalSamples, summarizeEvalSet } from "@/lib/benchmark/eval-set";
+import { timingSafeEqualStr } from "@/lib/crypto-utils";
 
 export const dynamic = "force-dynamic";
 
@@ -28,7 +29,7 @@ export async function GET(request: Request) {
     console.error("[benchmark/eval-set] CRON_SECRET is not set — refusing to run.");
     return NextResponse.json({ error: "Server misconfiguration" }, { status: 500 });
   }
-  if (request.headers.get("authorization") !== `Bearer ${cronSecret}`) {
+  if (!(await timingSafeEqualStr(request.headers.get("authorization") ?? "", `Bearer ${cronSecret}`))) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

@@ -53,8 +53,15 @@ function isAdminPath(pathname: string): boolean {
   );
 }
 
+/**
+ * Dev-only auth bypass check. Exact hostname match (port stripped) so a
+ * spoofed `Host: localhost.evil.com` can never pass, and never active in
+ * production builds regardless of the Host header.
+ */
 function isLocalhost(host: string): boolean {
-  return host.startsWith("localhost") || host.startsWith("127.0.0.1");
+  if (process.env.NODE_ENV === "production") return false;
+  const hostname = host.split(":")[0];
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]";
 }
 
 async function makeAdminSessionToken(adminKey: string): Promise<string> {
@@ -79,8 +86,12 @@ function buildCsp(nonce: string): string {
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' 'wasm-unsafe-eval'`,
     // Tailwind injects inline <style> tags
     "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' blob: data: https://*.public.blob.vercel-storage.com",
-    "connect-src 'self' https://cdn.jsdelivr.net https://storage.googleapis.com https://api.openai.com https://*.upstash.io",
+    // Pilot images load through the /api/pilot-image proxy ('self'); no
+    // client code talks to OpenAI/Upstash directly (server-only), so those
+    // hosts are deliberately NOT allowed — wildcard SaaS namespaces are
+    // attacker-provisionable exfiltration channels.
+    "img-src 'self' blob: data:",
+    "connect-src 'self' https://cdn.jsdelivr.net https://storage.googleapis.com",
     "media-src 'self' blob:",
     "worker-src 'self' blob:",
     "frame-ancestors 'none'",

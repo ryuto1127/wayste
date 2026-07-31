@@ -104,6 +104,16 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
+  // The free-form diagnostic fields (meta/yoloDetections/tierResults/...) are
+  // intentionally flexible, but a kiosk-authenticated client must not be able
+  // to grow Redis entries without bound — every admin surface loads the whole
+  // list. Cap the serialized entry (image excluded; it goes to Blob).
+  if (JSON.stringify(parsed.data.entry).length > 64_000) {
+    return NextResponse.json(
+      { error: "Entry too large." },
+      { status: 413 },
+    );
+  }
   const { image, entry } = parsed.data;
   const clientFaceDetected = parsed.data.faceDetected === true;
 

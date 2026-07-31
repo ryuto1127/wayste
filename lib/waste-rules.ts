@@ -29,6 +29,12 @@ interface CachedConfig {
 const configCache = new Map<string, CachedConfig>();
 
 export function loadSiteConfig(siteId: string = "japan-office"): SiteConfig {
+  // siteId can arrive from the client (classify request body). Constrain it
+  // to slug characters BEFORE it reaches the filesystem path — otherwise
+  // "../../package" reads arbitrary .json files relative to cwd.
+  if (!/^[a-z0-9-]{1,64}$/.test(siteId)) {
+    siteId = "japan-office";
+  }
   const now = Date.now();
   const cached = configCache.get(siteId);
   if (cached && now - cached.loadedAt < CONFIG_CACHE_TTL_MS) {

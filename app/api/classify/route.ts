@@ -387,18 +387,6 @@ export async function POST(request: Request) {
     // requestId not yet generated at this point
   }
 
-  // ── Daily OpenAI budget ceiling ──
-  // Hard cap on Vision API calls per UTC day. Prevents a leaked kiosk
-  // session from draining the OpenAI quota via rotating IPs.
-  const budget = await consumeOpenAICall();
-  if (!budget.allowed) {
-    console.warn(`[classify] Daily budget exceeded: ${budget.used}/${budget.cap}`);
-    return NextResponse.json(
-      { error: "daily_budget_exceeded", message: "Daily classification limit reached. Please try again tomorrow." },
-      { status: 503 },
-    );
-  }
-
   // ── Parse request ──
   let body: unknown;
   try {
@@ -420,6 +408,20 @@ export async function POST(request: Request) {
 
   const data = parsed.data;
   const isBatch = "items" in data;
+
+  // ── Daily OpenAI budget ceiling ──
+  // Hard cap on Vision API calls per UTC day. Prevents a leaked kiosk
+  // session from draining the OpenAI quota via rotating IPs.
+  // Runs AFTER validation (invalid requests must not burn budget) and
+  // consumes one slot per OpenAI call — batch mode makes one call per item.
+  const budget = await consumeOpenAICall(isBatch ? data.items.length : 1);
+  if (!budget.allowed) {
+    console.warn(`[classify] Daily budget exceeded: ${budget.used}/${budget.cap}`);
+    return NextResponse.json(
+      { error: "daily_budget_exceeded", message: "Daily classification limit reached. Please try again tomorrow." },
+      { status: 503 },
+    );
+  }
   const siteId = data.siteId;
   const locale = data.locale ?? "en";
   const meta = data.meta;

@@ -481,7 +481,7 @@ You can also trigger manual purges from the insights dashboard using the date-ra
 npm test
 ```
 
-465 unit tests across 19 suites covering the state machine, CV pipeline thresholds, threshold sensitivity derivation, override pattern matching, offline cache, notifications, classification API route, multi-item blob detection, sequential model loading, bbox utilities, dashboard metrics + integration, insights helpers, OpenAI pricing/budget, the cloud-vs-local shadow comparison, and analysis exports.
+503 unit tests across 26 suites covering the state machine, CV pipeline thresholds, threshold sensitivity derivation, override pattern matching (incl. Japanese/CJK patterns), offline cache, notifications, classification API route + the cloud-fallback default-off gate, kiosk auth, multi-item blob detection, sequential model loading, bbox utilities, dashboard metrics + integration, insights helpers, OpenAI pricing/budget, the cloud-vs-local shadow comparison, analysis exports, EN/JA i18n parity, the site-config payload contract, YOLO-rules compatibility with every site preset, and the on-device needs_review fallback.
 
 ---
 

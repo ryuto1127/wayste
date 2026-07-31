@@ -6,8 +6,17 @@ import type { Locale, TranslationKey } from "@/lib/i18n";
 import { t } from "@/lib/i18n";
 import type { CameraFeedHandle } from "./CameraFeed";
 
-/** Map a waste stream ID to its localised display label. */
-function streamLabel(locale: Locale, streamId: string): string {
+/**
+ * Map a waste stream ID to its display label.
+ *
+ * The site config's own stream label wins — it is what is printed on the
+ * physical bins, and the screen must never contradict the signage.
+ * The i18n map is only a fallback for configs without labels; the raw ID
+ * is a last resort.
+ */
+function streamLabel(locale: Locale, streamId: string, streams?: StreamDefinition[]): string {
+  const configLabel = streams?.find((s) => s.id === streamId)?.label;
+  if (configLabel) return configLabel;
   const map: Partial<Record<string, TranslationKey>> = {
     recycling: "recycling",
     compost: "compost",
@@ -140,16 +149,21 @@ export default function ResultScreen({
   const orderedResults = displayResults;
 
   // ── Voice announcement via Web Speech API ──
-  const announcedRef = React.useRef(false);
+  // Announced items are tracked per item key so that a result-set update
+  // (item added/removed while the screen stays up) announces only genuinely
+  // new items. Speech is cancelled ONLY on unmount — cancelling in the
+  // per-update effect cut announcements off mid-sentence.
+  const announcedItemsRef = React.useRef<Set<string>>(new Set());
   React.useEffect(() => {
-    if (!voiceEnabled || announcedRef.current || isNothingDetected) return;
+    if (!voiceEnabled || isNothingDetected) return;
     if (typeof window === "undefined" || !window.speechSynthesis) return;
-    announcedRef.current = true;
-
-    window.speechSynthesis.cancel();
 
     for (const result of results) {
-      const binName = streamLabel(locale, result.wasteStream);
+      const itemKey = `${result.itemName}::${result.wasteStream}`;
+      if (announcedItemsRef.current.has(itemKey)) continue;
+      announcedItemsRef.current.add(itemKey);
+
+      const binName = streamLabel(locale, result.wasteStream, streams);
       const announcement = result.needsReview
         ? T("voiceNeedsReview")
         : T("voiceResultAnnouncement")
@@ -172,9 +186,15 @@ export default function ResultScreen({
         window.speechSynthesis.speak(preUtterance);
       }
     }
+  }, [voiceEnabled, results, locale, T, isNothingDetected, streams]);
 
-    return () => { window.speechSynthesis.cancel(); };
-  }, [voiceEnabled, results, locale, T, isNothingDetected]);
+  React.useEffect(() => {
+    return () => {
+      if (typeof window !== "undefined" && window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+      }
+    };
+  }, []);
 
   // ── Nothing detected: simplified result screen ──
   if (isNothingDetected) {
@@ -303,7 +323,7 @@ function FullscreenResult({
     >
       {/* Screen reader summary */}
       <span className="sr-only">
-        {result.itemName}: {streamLabel(locale, result.wasteStream)}.
+        {result.itemName}: {streamLabel(locale, result.wasteStream, streams)}.
         {result.preAction && ` ${result.preAction}.`}
       </span>
 
@@ -325,15 +345,16 @@ function FullscreenResult({
       {/* Center hero — preAction + boxed arrow + stream name */}
       <div className="flex-1 flex flex-col items-center justify-center px-6">
         {/* PreAction / Special Instructions — prominent, above arrow.
-            Show specialInstructions only if it differs from preAction (site overrides
-            can produce near-identical text in both fields). */}
-        {(result.preAction || result.specialInstructions) && (
+            For needs_review results the reasoning IS the next-step guidance
+            ("check the label / ask staff") — show it here statically instead
+            of relegating it to the delayed scrolling ticker. */}
+        {(result.preAction || result.specialInstructions || (result.needsReview && result.reasoning)) && (
           <div className="bg-white rounded-2xl px-6 py-4 shadow-lg mb-6 max-w-lg">
             <p
               className="text-3xl font-black text-center leading-snug"
               style={{ color: result.binColor }}
             >
-              {result.specialInstructions || result.preAction}
+              {result.specialInstructions || result.preAction || result.reasoning}
             </p>
           </div>
         )}
@@ -349,7 +370,7 @@ function FullscreenResult({
 
         {/* Stream name */}
         <div className="text-6xl font-black text-white uppercase text-center">
-          {streamLabel(locale, result.wasteStream)}
+          {streamLabel(locale, result.wasteStream, streams)}
         </div>
 
         {/* Physical bin position dots */}
@@ -365,13 +386,14 @@ function FullscreenResult({
       {result.isCompound && result.components && result.components.length > 0 && (
         <div className="px-6 pb-6">
           <div className="bg-black/40 border border-white/20 rounded-xl px-5 py-3">
-            <CompoundBreakdown components={result.components} locale={locale} />
+            <CompoundBreakdown components={result.components} locale={locale} streams={streams} />
           </div>
         </div>
       )}
 
-      {/* Reasoning ticker — appears after 2.5s delay */}
-      <ReasoningTicker reasoning={result.reasoning} />
+      {/* Reasoning ticker — appears after a delay. Skipped for needs_review,
+          whose reasoning is already shown statically in the hero box. */}
+      {!result.needsReview && <ReasoningTicker reasoning={result.reasoning} />}
     </div>
   );
 }
@@ -426,7 +448,7 @@ function SplitScreenCard({
     >
       {/* Screen reader summary */}
       <span className="sr-only">
-        {result.itemName}: {streamLabel(locale, result.wasteStream)}.
+        {result.itemName}: {streamLabel(locale, result.wasteStream, streams)}.
         {result.preAction && ` ${result.preAction}.`}
       </span>
 
@@ -456,14 +478,15 @@ function SplitScreenCard({
 
         {/* Hero — preAction + direction arrow + stream name */}
         <div className="flex-1 flex flex-col items-center justify-center px-4">
-          {/* PreAction / Special Instructions — above arrow */}
-          {(result.preAction || result.specialInstructions) && (
+          {/* PreAction / Special Instructions — above arrow. needs_review
+              reasoning shown statically here (same as FullscreenResult). */}
+          {(result.preAction || result.specialInstructions || (result.needsReview && result.reasoning)) && (
             <div className="bg-white rounded-xl px-3 py-2.5 shadow mb-3 max-w-full">
               <p
                 className={`${preActionSize} font-black text-center leading-snug`}
                 style={{ color: result.binColor }}
               >
-                {result.specialInstructions || result.preAction}
+                {result.specialInstructions || result.preAction || result.reasoning}
               </p>
             </div>
           )}
@@ -478,7 +501,7 @@ function SplitScreenCard({
           )}
 
           <div className={`${binNameSize} font-black text-white uppercase text-center`}>
-            {streamLabel(locale, result.wasteStream)}
+            {streamLabel(locale, result.wasteStream, streams)}
           </div>
 
           {/* Physical bin position dots */}
@@ -494,13 +517,16 @@ function SplitScreenCard({
         {result.isCompound && result.components && result.components.length > 0 && (
           <div className="px-3 pb-3 shrink-0">
             <div className="bg-black/40 border border-white/20 rounded-lg px-3 py-2">
-              <SplitScreenCompoundBreakdown components={result.components} locale={locale} />
+              <SplitScreenCompoundBreakdown components={result.components} locale={locale} streams={streams} />
             </div>
           </div>
         )}
 
-        {/* Reasoning ticker — staggered delay for multi-item */}
-        <ReasoningTicker reasoning={result.reasoning} delay={2500 + animationDelay} />
+        {/* Reasoning ticker — staggered delay for multi-item; skipped for
+            needs_review, whose reasoning is shown statically above. */}
+        {!result.needsReview && (
+          <ReasoningTicker reasoning={result.reasoning} delay={2500 + animationDelay} />
+        )}
       </div>
     </div>
   );
@@ -513,9 +539,11 @@ function SplitScreenCard({
 function SplitScreenCompoundBreakdown({
   components,
   locale,
+  streams,
 }: {
   components: { partName: string; wasteStream: string; instruction: string; optional?: boolean }[];
   locale: Locale;
+  streams?: StreamDefinition[];
 }) {
   const T = useCallback(
     (key: TranslationKey) => t(locale, key),
@@ -538,7 +566,7 @@ function SplitScreenCompoundBreakdown({
             </span>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-1.5 flex-wrap">
-                <StreamBadge stream={c.wasteStream} />
+                <StreamBadge stream={c.wasteStream} locale={locale} streams={streams} />
                 <span className="text-xs font-semibold text-white truncate">
                   {c.partName}
                 </span>
@@ -656,9 +684,11 @@ function BinPositionIndicator({
 function CompoundBreakdown({
   components,
   locale,
+  streams,
 }: {
   components: { partName: string; wasteStream: string; instruction: string; optional?: boolean }[];
   locale: Locale;
+  streams?: StreamDefinition[];
 }) {
   const T = useCallback(
     (key: TranslationKey) => t(locale, key),
@@ -676,7 +706,7 @@ function CompoundBreakdown({
             key={i}
             className="flex items-start gap-2 bg-neutral-900/70 rounded-lg px-3 py-2"
           >
-            <StreamBadge stream={c.wasteStream} />
+            <StreamBadge stream={c.wasteStream} locale={locale} streams={streams} />
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-sm font-semibold text-white">{c.partName}</span>
@@ -693,7 +723,15 @@ function CompoundBreakdown({
   );
 }
 
-function StreamBadge({ stream }: { stream: string }) {
+function StreamBadge({
+  stream,
+  locale,
+  streams,
+}: {
+  stream: string;
+  locale: Locale;
+  streams?: StreamDefinition[];
+}) {
   const colorMap: Record<string, string> = {
     recycling: "bg-blue-600",
     compost: "bg-green-600",
@@ -706,13 +744,16 @@ function StreamBadge({ stream }: { stream: string }) {
     recyclable: "bg-blue-500",
     plastic: "bg-amber-500",
   };
-  const bg = colorMap[stream] ?? "bg-neutral-600";
+  // Prefer the bin color from site config so the badge matches signage.
+  const configColor = streams?.find((s) => s.id === stream)?.color;
+  const bg = configColor ? undefined : (colorMap[stream] ?? "bg-neutral-600");
 
   return (
     <span
-      className={`${bg} text-white text-[10px] font-bold uppercase px-2 py-0.5 rounded-md whitespace-nowrap mt-0.5`}
+      className={`${bg ?? ""} text-white text-[10px] font-bold px-2 py-0.5 rounded-md whitespace-nowrap mt-0.5`}
+      style={configColor ? { backgroundColor: configColor } : undefined}
     >
-      {stream}
+      {streamLabel(locale, stream, streams)}
     </span>
   );
 }

@@ -21,10 +21,11 @@ export default function CameraScreen({
     [locale]
   );
 
+  // This screen is mounted only while pipelineState === "classifying"
+  // (see KioskDisplay's uiScreen mapping), so there is no non-classifying
+  // visual state. The prop is kept for the breathing-animation hook below.
   const isClassifying = pipelineState === "classifying";
-  const borderColor = isClassifying
-    ? "border-amber-400/60"
-    : "border-blue-400/60";
+  const borderColor = "border-amber-400/60";
 
   // The detection ROI is a square centered in the frame, based on the shorter
   // dimension (height for 16:9). The margin is applied within that square.
@@ -48,32 +49,24 @@ export default function CameraScreen({
       {/* Status indicator */}
       <div className="absolute top-6 left-6 flex items-center gap-2 pointer-events-auto">
         <span className="relative flex h-3 w-3">
-          <span
-            className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
-              isClassifying ? "bg-amber-400" : "bg-blue-400"
-            }`}
-          />
-          <span
-            className={`relative inline-flex rounded-full h-3 w-3 ${
-              isClassifying ? "bg-amber-500" : "bg-blue-500"
-            }`}
-          />
+          <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 bg-amber-400" />
+          <span className="relative inline-flex rounded-full h-3 w-3 bg-amber-500" />
         </span>
         <span className="text-sm text-white/70 font-medium" role="status" aria-live="polite">
-          {isClassifying ? T("analyzingPleaseWait") : T("itemDetected")}
+          {T("analyzingPleaseWait")}
         </span>
       </div>
 
-      {/* Hold steady prompt */}
-      {!isClassifying && (
-        <div className="absolute bottom-8 left-1/2 -translate-x-1/2">
-          <div className="bg-amber-900/80 backdrop-blur-sm rounded-xl px-5 py-2.5">
-            <p className="text-amber-200 text-sm font-medium">
-              {T("holdForScan")}
-            </p>
-          </div>
+      {/* Hold-steady prompt — shown while analyzing. Keeping the item still
+          lets the frame settle, which is exactly what the detection pipeline
+          needs (the stale-frame escalation only fires on a stable frame). */}
+      <div className="absolute bottom-8 left-1/2 -translate-x-1/2">
+        <div className="bg-amber-900/80 backdrop-blur-sm rounded-xl px-5 py-2.5">
+          <p className="text-amber-200 text-sm font-medium">
+            {T("holdForScan")}
+          </p>
         </div>
-      )}
+      </div>
 
       {/* Corner scan markers — placed inside a center-square container
           that matches the YOLO/analyzer crop area (short-side based).

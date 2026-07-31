@@ -46,7 +46,7 @@ export function AdminNav({ locale, onToggleLocale }: AdminNavProps) {
         {crossLink.label}
       </Link>
       <Link
-        href="/"
+        href="/kiosk"
         className="px-2.5 py-1.5 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-xs transition-colors text-neutral-300 whitespace-nowrap"
       >
         {T("backToKiosk")}

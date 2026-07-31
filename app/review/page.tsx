@@ -243,7 +243,7 @@ function ImageReviewPage() {
         <PerformancePanel />
 
         {/* Analysis export */}
-        <AnalysisExportPanel locale={locale} />
+        <AnalysisExportPanel locale={locale} availableStreams={uniqueStreams} />
 
         {/* Bulk delete */}
         <BulkDeletePanel onDelete={bulkDelete} locale={locale} />
@@ -578,7 +578,15 @@ function EntryCard({
 type AnalysisVerdict = "correct" | "wrong" | "false_detection" | "unreviewed";
 type AnalysisModel = "T1" | "t2";
 
-function AnalysisExportPanel({ locale }: { locale: Locale }) {
+function AnalysisExportPanel({
+  locale,
+  availableStreams,
+}: {
+  locale: Locale;
+  /** Stream ids that actually occur in the loaded entries — the filter must
+   *  offer real values, not a hardcoded US-style list that may not exist. */
+  availableStreams: string[];
+}) {
   const [open, setOpen] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const ja = locale === "ja";
@@ -660,7 +668,9 @@ function AnalysisExportPanel({ locale }: { locale: Locale }) {
     { value: "t2", label: "GPT mini" },
   ];
 
-  const streamOptions = ["recycling", "compost", "landfill", "special", "needs_review"];
+  const streamOptions = availableStreams.length > 0
+    ? availableStreams
+    : ["recycling", "compost", "landfill", "special", "needs_review"];
 
   return (
     <div className="mb-6">
@@ -992,6 +1002,11 @@ function StreamPill({ stream }: { stream: string }) {
     landfill: "bg-neutral-600",
     special: "bg-orange-600",
     needs_review: "bg-purple-600",
+    // Japan-style streams (japan-office / pilot presets)
+    burnable: "bg-red-600",
+    recyclable: "bg-blue-600",
+    plastic: "bg-amber-600",
+    "non-burnable": "bg-gray-600",
   };
   return (
     <span className={`${colorMap[stream] ?? "bg-neutral-600"} text-white text-[10px] font-bold uppercase px-2 py-0.5 rounded-md`}>

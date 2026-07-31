@@ -869,7 +869,14 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           perfMonitor.recordYoloInference(yoloMs);
 
           const analysis = lastAnalysisRef.current;
-          handleYoloCycleResult(detections, yoloMs, video, analysis, currentAnalyzer);
+          try {
+            handleYoloCycleResult(detections, yoloMs, video, analysis, currentAnalyzer);
+          } catch (err) {
+            // A single bad cycle (e.g. a rule-resolution bug) must not kill the
+            // loop — that would strand the kiosk in `classifying` until timeout
+            // with no result and no log.
+            console.error("[yolo-loop] cycle handler failed:", err);
+          }
         }
         console.log(`[yolo-loop] stopped`);
       })();

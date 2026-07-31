@@ -85,7 +85,9 @@ export function applyOverrides(
     }
   }
 
-  const sorted = [...siteConfig.overrides].sort(
+  // Tolerate configs without overrides (e.g. the trimmed /api/site-config
+  // payload) — the kiosk resolves T1 results in the browser with that config.
+  const sorted = [...(siteConfig.overrides ?? [])].sort(
     (a, b) => b.pattern.length - a.pattern.length
   );
 

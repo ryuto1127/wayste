@@ -15,6 +15,7 @@
  * Falls back gracefully (returns empty array) if the model fails to load.
  */
 import type { YoloDetection } from "./types";
+import { computeLetterbox } from "./bbox-utils";
 
 // Lazy-loaded ONNX Runtime — only imported when initYolo() is called.
 type InferenceSession = import("onnxruntime-web").InferenceSession;
@@ -129,6 +130,11 @@ export async function warmUpYolo(): Promise<void> {
  * @param roiMargin - Fraction of frame to exclude on each side (matches CAPTURE_ROI_MARGIN)
  * @param minBoxArea - Minimum bounding box area in model-space pixels
  * @param confidenceThreshold - Minimum detection confidence
+ * @param fullFrame - When true, letterbox the ENTIRE video frame into the
+ *   model input (aspect preserved, gray padding) instead of center-cropping.
+ *   Detection coverage becomes the full camera view at the cost of smaller
+ *   effective object resolution. Bboxes stay in model space — map back with
+ *   `letterboxedBboxToVideoNorm()`.
  * @returns Array of detections, sorted by confidence descending. Empty on error.
  */
 export async function runYoloInference(
@@ -136,14 +142,17 @@ export async function runYoloInference(
   _roiMargin = 0.15,
   minBoxArea = 1500,
   confidenceThreshold = 0.40,
+  fullFrame = false,
 ): Promise<YoloDetection[]> {
   if (!session || !ort) return [];
 
   try {
-    // ── Preprocess: short-side square crop → resize to 640×640 ──
-    // Crop the same center square as the review image (short-side based,
-    // e.g. 720×720 from 1280×720), then resize to MODEL_INPUT_SIZE.
-    // This ensures YOLO sees the full field of view shown in the review page.
+    // ── Preprocess ──
+    // Default: short-side square crop → resize to 640×640. Crops the same
+    // center square as the review image so YOLO sees the field of view shown
+    // in the review page.
+    // fullFrame: the whole frame letterboxed into 640×640 (Ultralytics-style
+    // gray padding) — used by continuous mode for edge-to-edge coverage.
     const vw = video.videoWidth;
     const vh = video.videoHeight;
 
@@ -151,10 +160,17 @@ export async function runYoloInference(
     const ctx = canvas.getContext("2d");
     if (!ctx) return [];
 
-    const side = Math.min(vw, vh);
-    const roiX = Math.round((vw - side) / 2);
-    const roiY = Math.round((vh - side) / 2);
-    ctx.drawImage(video, roiX, roiY, side, side, 0, 0, MODEL_INPUT_SIZE, MODEL_INPUT_SIZE);
+    if (fullFrame) {
+      const { dx, dy, dw, dh } = computeLetterbox(vw, vh, MODEL_INPUT_SIZE);
+      ctx.fillStyle = "#727272"; // rgb(114,114,114) — YOLO letterbox convention
+      ctx.fillRect(0, 0, MODEL_INPUT_SIZE, MODEL_INPUT_SIZE);
+      ctx.drawImage(video, 0, 0, vw, vh, dx, dy, dw, dh);
+    } else {
+      const side = Math.min(vw, vh);
+      const roiX = Math.round((vw - side) / 2);
+      const roiY = Math.round((vh - side) / 2);
+      ctx.drawImage(video, roiX, roiY, side, side, 0, 0, MODEL_INPUT_SIZE, MODEL_INPUT_SIZE);
+    }
 
     const imageData = ctx.getImageData(0, 0, MODEL_INPUT_SIZE, MODEL_INPUT_SIZE);
     const { data } = imageData;

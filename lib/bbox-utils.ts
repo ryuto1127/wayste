@@ -109,6 +109,56 @@ export function greedyIoUMatch(
   return { matched, unmatchedTracked, unmatchedDetections };
 }
 
+// ── Letterbox (full-frame YOLO coverage) ──
+
+export interface LetterboxParams {
+  /** Destination rect of the video content inside the square model input. */
+  dx: number;
+  dy: number;
+  dw: number;
+  dh: number;
+}
+
+/**
+ * Compute where the full video frame lands inside the square model input
+ * when letterboxed (aspect preserved, padded on the short axis). Scale
+ * invariant — passing (aspectRatio, 1) gives the same normalized result
+ * as passing real pixel dimensions.
+ */
+export function computeLetterbox(vw: number, vh: number, size = 640): LetterboxParams {
+  if (vw <= 0 || vh <= 0) return { dx: 0, dy: 0, dw: size, dh: size };
+  const scale = size / Math.max(vw, vh);
+  const dw = Math.round(vw * scale);
+  const dh = Math.round(vh * scale);
+  return {
+    dx: Math.round((size - dw) / 2),
+    dy: Math.round((size - dh) / 2),
+    dw,
+    dh,
+  };
+}
+
+/**
+ * Map a model-space bbox from a letterboxed inference back to coordinates
+ * normalized to the FULL video frame (0–1). Values can fall slightly
+ * outside [0, 1] when a box bleeds into the padding — callers clip via
+ * overflow rather than clamping, so partial boxes at the edge stay honest.
+ */
+export function letterboxedBboxToVideoNorm(
+  bbox: Bbox,
+  vw: number,
+  vh: number,
+  size = 640,
+): Bbox {
+  const { dx, dy, dw, dh } = computeLetterbox(vw, vh, size);
+  return [
+    (bbox[0] - dx) / dw,
+    (bbox[1] - dy) / dh,
+    bbox[2] / dw,
+    bbox[3] / dh,
+  ];
+}
+
 // ── Frame Fingerprinting ──
 
 /**

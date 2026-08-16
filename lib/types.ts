@@ -302,6 +302,26 @@ export interface SiteConfig {
    * Default: 0.5.
    */
   sensitivity?: number;
+  /**
+   * Detection pipeline mode.
+   *   "gated" (default) — legacy pipeline: background-subtraction CV gates
+   *     decide when YOLO runs; full-screen idle → camera → result flow.
+   *   "continuous" — YOLO runs always-on at a paced cadence; a temporal
+   *     tracker (lib/detection-tracker.ts) smooths raw detections into
+   *     stable results shown over a persistent live camera view.
+   */
+  detectionMode?: "gated" | "continuous";
+  /**
+   * Continuous mode only: draw live bounding boxes + labels over the camera
+   * feed (demo/annotation view). No effect in gated mode.
+   */
+  showDetectionOverlay?: boolean;
+  /**
+   * Continuous mode only: persistent bin-map strip at the bottom edge —
+   * the physical bin row (streams with `position`), with the target bin lit
+   * and a flowing guide line from each detected item to its bin.
+   */
+  showBinMap?: boolean;
 }
 
 /** Physical bin position relative to the kiosk monitor. */

@@ -27,6 +27,10 @@ export interface ThresholdConfig {
   YOLO_FALLBACK_THRESHOLD: number;
   FG_PERSIST_FRAMES: number;
   OBJECT_GONE_FRAMES: number;
+  /** Continuous mode: smoothed confidence to SEED a new track (hysteresis high). */
+  TRACK_APPEAR_THRESHOLD: number;
+  /** Continuous mode: confidence floor to KEEP matching an existing track (hysteresis low). */
+  TRACK_KEEP_THRESHOLD: number;
 }
 
 function lerp(a: number, b: number, t: number): number {
@@ -79,6 +83,11 @@ export function computeThresholds(
   const YOLO_FALLBACK_THRESHOLD = lerp(0.80, 0.65, s);
   const FG_PERSIST_FRAMES = s > 0.7 ? 2 : 3;
   const OBJECT_GONE_FRAMES = s > 0.7 ? 2 : 3;
+  // Continuous-mode hysteresis: entry is strict, hold is lenient. The keep
+  // floor is also passed to YOLO as its confidence cutoff, so low-confidence
+  // frames still feed existing tracks instead of reading as "item vanished".
+  const TRACK_APPEAR_THRESHOLD = lerp(0.60, 0.45, s);
+  const TRACK_KEEP_THRESHOLD = TRACK_APPEAR_THRESHOLD * 0.65;
 
   return {
     ROI_FG_THRESHOLD,
@@ -89,5 +98,7 @@ export function computeThresholds(
     YOLO_FALLBACK_THRESHOLD,
     FG_PERSIST_FRAMES,
     OBJECT_GONE_FRAMES,
+    TRACK_APPEAR_THRESHOLD,
+    TRACK_KEEP_THRESHOLD,
   };
 }

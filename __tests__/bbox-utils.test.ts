@@ -2,6 +2,8 @@ import {
   computeIoU,
   greedyIoUMatch,
   frameDiff,
+  computeLetterbox,
+  letterboxedBboxToVideoNorm,
   type Bbox,
 } from "@/lib/bbox-utils";
 
@@ -148,5 +150,52 @@ describe("frameDiff", () => {
 
   it("returns 255 for empty arrays", () => {
     expect(frameDiff(new Uint8Array(0), new Uint8Array(0))).toBe(255);
+  });
+});
+
+describe("computeLetterbox", () => {
+  it("letterboxes a 16:9 landscape frame with vertical padding", () => {
+    expect(computeLetterbox(1280, 720)).toEqual({ dx: 0, dy: 140, dw: 640, dh: 360 });
+  });
+
+  it("letterboxes a portrait frame with horizontal padding", () => {
+    expect(computeLetterbox(720, 1280)).toEqual({ dx: 140, dy: 0, dw: 360, dh: 640 });
+  });
+
+  it("fills the input exactly for a square frame", () => {
+    expect(computeLetterbox(720, 720)).toEqual({ dx: 0, dy: 0, dw: 640, dh: 640 });
+  });
+
+  it("is scale invariant — aspect ratio gives the same layout as pixel dims", () => {
+    expect(computeLetterbox(16 / 9, 1)).toEqual(computeLetterbox(1280, 720));
+  });
+
+  it("degrades safely on invalid dimensions", () => {
+    expect(computeLetterbox(0, 720)).toEqual({ dx: 0, dy: 0, dw: 640, dh: 640 });
+  });
+});
+
+describe("letterboxedBboxToVideoNorm", () => {
+  it("maps the full content area to the full frame", () => {
+    const norm = letterboxedBboxToVideoNorm([0, 140, 640, 360], 1280, 720);
+    expect(norm[0]).toBeCloseTo(0);
+    expect(norm[1]).toBeCloseTo(0);
+    expect(norm[2]).toBeCloseTo(1);
+    expect(norm[3]).toBeCloseTo(1);
+  });
+
+  it("maps a centered box to centered normalized coords", () => {
+    // 64×36 model-space box centered in the 640×360 content area
+    const norm = letterboxedBboxToVideoNorm([288, 302, 64, 36], 1280, 720);
+    expect(norm[0]).toBeCloseTo(0.45);
+    expect(norm[1]).toBeCloseTo(0.45);
+    expect(norm[2]).toBeCloseTo(0.1);
+    expect(norm[3]).toBeCloseTo(0.1);
+  });
+
+  it("lets edge boxes bleed slightly outside [0,1] instead of clamping", () => {
+    // Box overlapping the top padding boundary
+    const norm = letterboxedBboxToVideoNorm([0, 120, 100, 100], 1280, 720);
+    expect(norm[1]).toBeLessThan(0);
   });
 });

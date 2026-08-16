@@ -77,12 +77,15 @@ export interface InferenceBackend {
   init(): Promise<boolean>;
   /** Check if the backend is ready for inference. */
   isReady(): boolean;
-  /** Run inference on a video frame. Returns detections sorted by confidence desc. */
+  /** Run inference on a video frame. Returns detections sorted by confidence desc.
+   *  `fullFrame` letterboxes the whole frame instead of center-cropping
+   *  (continuous mode — edge-to-edge coverage). */
   detect(
     video: HTMLVideoElement,
     roiMargin?: number,
     minBoxArea?: number,
     confidenceThreshold?: number,
+    fullFrame?: boolean,
   ): Promise<YoloDetection[]>;
 }
 
@@ -114,9 +117,10 @@ class OnnxBackend implements InferenceBackend {
     _roiMargin = 0,
     minBoxArea = 1500,
     confidenceThreshold = 0.40,
+    fullFrame = false,
   ): Promise<YoloDetection[]> {
     if (!this.yolo) return [];
-    return this.yolo.runYoloInference(video, _roiMargin, minBoxArea, confidenceThreshold);
+    return this.yolo.runYoloInference(video, _roiMargin, minBoxArea, confidenceThreshold, fullFrame);
   }
 }
 
@@ -150,23 +154,33 @@ class HttpBackend implements InferenceBackend {
     _roiMargin = 0,
     minBoxArea = 1500,
     confidenceThreshold = 0.40,
+    fullFrame = false,
   ): Promise<YoloDetection[]> {
     if (!this.ready) return [];
 
     try {
       const vw = video.videoWidth;
       const vh = video.videoHeight;
-      // Crop the largest centered square (short-side based, e.g. 720×720
-      // from 1280×720) — matches ONNX backend and OpenAI classification.
-      const side = Math.min(vw, vh);
-      const roiX = Math.round((vw - side) / 2);
-      const roiY = Math.round((vh - side) / 2);
 
       const canvas = new OffscreenCanvas(640, 640);
       const ctx = canvas.getContext("2d");
       if (!ctx) return [];
 
-      ctx.drawImage(video, roiX, roiY, side, side, 0, 0, 640, 640);
+      if (fullFrame) {
+        // Letterbox the whole frame — matches the ONNX backend's fullFrame path.
+        const { computeLetterbox } = await import("./bbox-utils");
+        const { dx, dy, dw, dh } = computeLetterbox(vw, vh, 640);
+        ctx.fillStyle = "#727272";
+        ctx.fillRect(0, 0, 640, 640);
+        ctx.drawImage(video, 0, 0, vw, vh, dx, dy, dw, dh);
+      } else {
+        // Crop the largest centered square (short-side based, e.g. 720×720
+        // from 1280×720) — matches ONNX backend and OpenAI classification.
+        const side = Math.min(vw, vh);
+        const roiX = Math.round((vw - side) / 2);
+        const roiY = Math.round((vh - side) / 2);
+        ctx.drawImage(video, roiX, roiY, side, side, 0, 0, 640, 640);
+      }
       const blob = await canvas.convertToBlob({ type: "image/jpeg", quality: 0.85 });
 
       const formData = new FormData();

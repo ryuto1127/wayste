@@ -92,6 +92,29 @@ describe("computeThresholds", () => {
     });
   });
 
+  describe("continuous-mode tracker thresholds", () => {
+    it("derives TRACK_APPEAR_THRESHOLD across the sensitivity range", () => {
+      expect(computeThresholds(0.0).TRACK_APPEAR_THRESHOLD).toBeCloseTo(0.60, 4);
+      expect(computeThresholds(0.5).TRACK_APPEAR_THRESHOLD).toBeCloseTo(0.525, 4);
+      expect(computeThresholds(1.0).TRACK_APPEAR_THRESHOLD).toBeCloseTo(0.45, 4);
+    });
+
+    it("keeps TRACK_KEEP_THRESHOLD strictly below TRACK_APPEAR_THRESHOLD (hysteresis)", () => {
+      for (const s of [0.0, 0.3, 0.5, 0.7, 1.0]) {
+        const th = computeThresholds(s);
+        expect(th.TRACK_KEEP_THRESHOLD).toBeLessThan(th.TRACK_APPEAR_THRESHOLD);
+        expect(th.TRACK_KEEP_THRESHOLD).toBeCloseTo(th.TRACK_APPEAR_THRESHOLD * 0.65, 4);
+      }
+    });
+
+    it("keeps the appear bar below the instant-resolve bar so tracks can exist as needs_review", () => {
+      for (const s of [0.0, 0.5, 1.0]) {
+        const th = computeThresholds(s);
+        expect(th.TRACK_APPEAR_THRESHOLD).toBeLessThan(th.YOLO_FALLBACK_THRESHOLD);
+      }
+    });
+  });
+
   describe("calibration override", () => {
     const calibration: Calibration = {
       noiseFgMean: 0.01,

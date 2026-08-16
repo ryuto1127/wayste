@@ -37,10 +37,12 @@ import {
 } from "@/lib/bbox-utils";
 // kioskAuthHeaders replaced by session token (server-generated, HMAC-signed)
 import { recordSort } from "@/lib/kiosk-counter";
+import { DetectionTracker, type Track } from "@/lib/detection-tracker";
 import CameraFeed, { type CameraFeedHandle } from "./CameraFeed";
 import IdleScreen from "./IdleScreen";
 import CameraScreen from "./CameraScreen";
 import ResultScreen from "./ResultScreen";
+import LiveDetectionView, { type LiveTrackView } from "./LiveDetectionView";
 import SystemStatusBadge from "./SystemStatusBadge";
 
 // ── Timing constants ──
@@ -93,6 +95,29 @@ const UNRESOLVED_ESCALATION_CYCLES = 5;
 /** Delay (ms) after entering result state before firing a proactive API sweep
  *  to catch items outside YOLO's vocabulary. Only fires for T1-only results. */
 const RESULT_API_SWEEP_DELAY_MS = 1_500;
+
+// ── Continuous mode (site config detectionMode: "continuous") ──
+/** Fallback pacing between YOLO cycles when the camera's frame rate is
+ *  unknown (~30fps). The loop matches the camera's real rate when readable —
+ *  running faster than the camera delivers frames would re-process identical
+ *  images (pure heat, zero information). Inference time counts toward the
+ *  interval; slow devices degrade to their natural rate, and thermal
+ *  throttling halves the cadence. */
+const CONTINUOUS_YOLO_INTERVAL_MS = 33;
+/** Clamp for camera-derived pacing: 15ms allows 60fps cameras; 100ms floor
+ *  keeps even a misreported rate from stalling the loop. */
+const CONTINUOUS_INTERVAL_CLAMP: [number, number] = [15, 100];
+/** Min bbox area (model-space px²) in continuous mode. Full-frame letterbox
+ *  shrinks a 16:9 frame to 640×360 inside the model input — objects are
+ *  ~1/4 the area they'd be in the gated center-crop, so the gated default
+ *  (1500) would silently drop everything but close-ups. */
+const CONTINUOUS_MIN_BOX_AREA = 400;
+/** How long a confirmed track may stay below the instant-resolve bar before
+ *  it is resolved on-device as needs_review (never show nothing). */
+const CONTINUOUS_NEEDS_REVIEW_MS = 1_500;
+/** Minimum spacing between pilot-log posts in continuous mode — a person
+ *  walking through with items must not spam the log with uploads. */
+const CONTINUOUS_LOG_MIN_INTERVAL_MS = 4_000;
 
 // ── Cloud fallback (pilot experiments only) ──
 /** OFF by default: items YOLO can't confidently resolve become `needs_review`
@@ -200,6 +225,22 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
   /** Incremented each time the pipeline returns to idle after a classification.
    *  Drives idle-screen stats refresh. */
   const [statsVersion, setStatsVersion] = useState(0);
+
+  // ── Continuous mode (site-config driven) ──
+  const [continuousMode, setContinuousMode] = useState(false);
+  const [showOverlay, setShowOverlay] = useState(false);
+  const [showBinMap, setShowBinMap] = useState(false);
+  const [liveTracks, setLiveTracks] = useState<LiveTrackView[]>([]);
+  /** Camera aspect ratio (w/h) — the overlay needs it to map full-frame
+   *  letterboxed model coords onto the object-cover video display. */
+  const [videoAspect, setVideoAspect] = useState(16 / 9);
+  const detectionModeRef = useRef<"gated" | "continuous">("gated");
+  const trackerRef = useRef<DetectionTracker | null>(null);
+  /** Result cards keyed by track id (continuous mode only). */
+  const continuousCardsRef = useRef<Map<number, TrackedResult>>(new Map());
+  const lastContinuousLogRef = useRef(0);
+  /** Starter installed by the main pipeline effect, invoked by the mode effect. */
+  const startContinuousLoopRef = useRef<(() => void) | null>(null);
 
   // ── Voice guidance (site-config driven — end-users cannot toggle) ──
   const [voiceEnabled, setVoiceEnabled] = useState(false);
@@ -339,6 +380,13 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           if (typeof data.mirrorCamera === "boolean") {
             setMirrorCamera(data.mirrorCamera);
           }
+          // Detection mode + overlay are site-config driven too. The ref must
+          // be set before the state flips so the CV interval stops running
+          // gated transitions before the continuous loop starts.
+          detectionModeRef.current = data.detectionMode ?? "gated";
+          setContinuousMode(detectionModeRef.current === "continuous");
+          setShowOverlay(data.showDetectionOverlay ?? false);
+          setShowBinMap(data.showBinMap ?? false);
         })
         .catch(() => {
           if (cancelled) return;
@@ -550,6 +598,10 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
     }
     const analyzer = analyzerRef.current;
 
+    // Expose the continuous-loop starter (declared below, hoisted) to the
+    // mode effect — it fires once site config reports detectionMode.
+    startContinuousLoopRef.current = startContinuousLoop;
+
     const interval = setInterval(() => {
       const video = cameraRef.current?.getVideo();
       if (!video) return;
@@ -637,6 +689,12 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
         thresholdsRef.current = computeThresholds(sensitivity, cal);
         lastCalibrationRef.current = cal;
       }
+
+      // ── Continuous mode: no gated transitions ──
+      // The CV loop still feeds analysis meta (sharpness for pilot logs),
+      // thermal monitoring, and rolling calibration above — but detection
+      // and all UI state are driven by the continuous YOLO loop.
+      if (detectionModeRef.current === "continuous") return;
 
       const th = thresholdsRef.current;
 
@@ -936,6 +994,229 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       // it would permanently block every future escalation — the on-device
       // needs_review path would silently die until a confident YOLO hit.
       inFlightRef.current = false;
+    }
+
+    // ═══════════════════════════════════════
+    // ── CONTINUOUS MODE (always-on YOLO + temporal tracker) ──
+    // ═══════════════════════════════════════
+
+    /** Always-on YOLO loop, paced to ~10fps. Unlike the gated loop there is
+     *  no frame-change gate: a static frame must keep feeding the tracker or
+     *  a motionless item would read as "vanished" and start coasting. */
+    function startContinuousLoop() {
+      if (yoloRunningRef.current) return;
+      yoloRunningRef.current = true;
+      const gen = ++yoloGenRef.current;
+      console.log(`[continuous] loop started (gen ${gen})`);
+      (async () => {
+        while (yoloRunningRef.current && yoloGenRef.current === gen) {
+          const video = cameraRef.current?.getVideo();
+          const backend = inferenceRef.current;
+          if (!video || !backend?.isReady() || !siteConfigRef.current) {
+            await new Promise((r) => setTimeout(r, 200));
+            continue;
+          }
+          const t0 = Date.now();
+          let detections: YoloDetection[] = [];
+          try {
+            // Floor at the KEEP threshold (hysteresis low) — low-confidence
+            // frames must still reach existing tracks. fullFrame: continuous
+            // mode covers the entire camera view, not the center square.
+            detections = await backend.detect(
+              video, 0, CONTINUOUS_MIN_BOX_AREA,
+              thresholdsRef.current.TRACK_KEEP_THRESHOLD, true,
+            );
+          } catch {
+            // A single failed inference must not kill the loop.
+          }
+          const cycleMs = Date.now() - t0;
+          perfMonitor.recordYoloInference(cycleMs);
+          if (!yoloRunningRef.current || yoloGenRef.current !== gen) break;
+          try {
+            handleContinuousCycle(detections, Date.now(), video, cycleMs);
+          } catch (err) {
+            console.error("[continuous] cycle handler failed:", err);
+          }
+          // Pace the loop to the camera's actual frame rate (no point
+          // running YOLO faster than new frames arrive); halve under
+          // thermal throttling.
+          const cameraFps = (video.srcObject as MediaStream | null)
+            ?.getVideoTracks?.()[0]?.getSettings?.().frameRate;
+          const baseInterval = cameraFps && cameraFps > 0
+            ? Math.min(
+                Math.max(1000 / cameraFps, CONTINUOUS_INTERVAL_CLAMP[0]),
+                CONTINUOUS_INTERVAL_CLAMP[1],
+              )
+            : CONTINUOUS_YOLO_INTERVAL_MS;
+          const targetInterval = thermalRef.current.throttling
+            ? baseInterval * 2
+            : baseInterval;
+          const sleepMs = Math.max(5, targetInterval - (Date.now() - t0));
+          await new Promise((r) => setTimeout(r, sleepMs));
+        }
+        console.log(`[continuous] loop stopped (gen ${gen})`);
+      })();
+    }
+
+    /** One continuous-mode cycle: feed the tracker, sync result cards to
+     *  displayable tracks, publish overlay state. */
+    function handleContinuousCycle(
+      detections: YoloDetection[],
+      now: number,
+      video: HTMLVideoElement,
+      cycleMs: number,
+    ) {
+      const th = thresholdsRef.current;
+      const siteConfig = siteConfigRef.current;
+      if (!siteConfig) return;
+      if (!trackerRef.current) trackerRef.current = new DetectionTracker();
+
+      // Keep the overlay's aspect mapping in sync (bail-out when unchanged).
+      const aspect = video.videoWidth / video.videoHeight;
+      if (Number.isFinite(aspect) && aspect > 0) {
+        setVideoAspect((prev) => (Math.abs(prev - aspect) < 0.01 ? prev : aspect));
+      }
+
+      const wasteDetections = detections.filter((d) => !isYoloClassNotWaste(d.className));
+      const { tracks, events } = trackerRef.current.update(wasteDetections, now, {
+        appearConfidence: th.TRACK_APPEAR_THRESHOLD,
+        keepConfidence: th.TRACK_KEEP_THRESHOLD,
+      });
+
+      const cards = continuousCardsRef.current;
+      let changed = false;
+      const displayable = tracks.filter((t) => DetectionTracker.isDisplayable(t));
+      const displayableIds = new Set(displayable.map((t) => t.id));
+
+      // ── Drop cards whose track vanished or was parked-suppressed ──
+      for (const id of [...cards.keys()]) {
+        if (!displayableIds.has(id)) {
+          cards.delete(id);
+          changed = true;
+        }
+      }
+
+      const resolveTrack = (t: Track): TrackedResult | null => {
+        const r = resolveYoloDetection(
+          { classId: t.classId, className: t.className, confidence: t.confidence, bbox: [...t.bbox] },
+          siteConfig,
+          localeRef.current,
+        );
+        if (!r) return null;
+        return { ...r, _trackBbox: [...t.bbox], _trackId: t.id, _locked: true };
+      };
+
+      for (const t of displayable) {
+        const existing = cards.get(t.id);
+        if (!existing) {
+          // Confident → instant on-device resolution via YOLO rules.
+          if (t.confidence >= th.YOLO_FALLBACK_THRESHOLD) {
+            const card = resolveTrack(t);
+            if (card) {
+              cards.set(t.id, card);
+              changed = true;
+              console.log(`[continuous] HIT: ${card.itemName} (${(t.confidence * 100).toFixed(0)}%)`);
+              maybeLogContinuous(video, card, detections, cycleMs);
+              continue;
+            }
+          }
+          // Below the instant bar (or no rule): give confidence a moment to
+          // firm up, then resolve on-device as needs_review — the kiosk must
+          // always answer, never scan silently.
+          if (now - (t.confirmedAt ?? now) >= CONTINUOUS_NEEDS_REVIEW_MS) {
+            const base = buildLocalNeedsReviewResult(localeRef.current, siteConfig);
+            const card: TrackedResult = {
+              ...base, _trackBbox: [...t.bbox], _trackId: t.id, _locked: false,
+            };
+            cards.set(t.id, card);
+            changed = true;
+            console.log(`[continuous] unresolved ${t.className} → needs_review`);
+            maybeLogContinuous(video, card, detections, cycleMs);
+          }
+        } else {
+          existing._trackBbox = [...t.bbox];
+          // needs_review cards upgrade once confidence clears the instant bar.
+          if (!existing._locked && t.confidence >= th.YOLO_FALLBACK_THRESHOLD) {
+            const card = resolveTrack(t);
+            if (card) {
+              cards.set(t.id, card);
+              changed = true;
+              console.log(`[continuous] upgraded needs_review → ${card.itemName}`);
+            }
+          }
+        }
+      }
+
+      // ── Item swapped at the same location → replace the card ──
+      for (const ev of events) {
+        if (ev.type !== "classChanged") continue;
+        const t = ev.track;
+        if (!cards.has(t.id) || !displayableIds.has(t.id)) continue;
+        const card = t.confidence >= th.YOLO_FALLBACK_THRESHOLD ? resolveTrack(t) : null;
+        if (card) {
+          cards.set(t.id, card);
+        } else {
+          const base = buildLocalNeedsReviewResult(localeRef.current, siteConfig);
+          cards.set(t.id, { ...base, _trackBbox: [...t.bbox], _trackId: t.id, _locked: false });
+        }
+        changed = true;
+        console.log(`[continuous] class swap ${ev.previousClassName} → ${t.className}`);
+      }
+
+      if (changed) {
+        const arr = [...cards.values()].slice(0, 4);
+        sortByPhysicalPosition(arr);
+        if (arr.length === 0 && stableResultsRef.current.length > 0) {
+          // Session over — items left the scene after results were shown.
+          recordSort();
+          setStatsVersion((v) => v + 1);
+        }
+        setStableResults(arr);
+        setResultRequestIds(arr.map(() => undefined));
+      }
+
+      // ── Overlay state — every cycle (~10fps) so boxes follow items live ──
+      setLiveTracks(
+        tracks
+          .filter((t) => !t.parked)
+          .map((t) => {
+            const card = cards.get(t.id);
+            return {
+              id: t.id,
+              bbox: [...t.bbox] as [number, number, number, number],
+              tentative: !card,
+              label: card ? card.itemName : null,
+              color: card ? card.binColor : null,
+              streamId: card ? (card.wasteStream as string) : null,
+              confidence: t.confidence,
+            };
+          }),
+      );
+    }
+
+    /** Throttled pilot-log for continuous mode — reuses the gated path's
+     *  face-gated logger, spaced out so walk-throughs don't spam uploads. */
+    function maybeLogContinuous(
+      video: HTMLVideoElement,
+      result: ClassificationResponse,
+      detections: YoloDetection[],
+      cycleMs: number,
+    ) {
+      const analysis = lastAnalysisRef.current;
+      if (!analysis) return;
+      if (Date.now() - lastContinuousLogRef.current < CONTINUOUS_LOG_MIN_INTERVAL_MS) return;
+      lastContinuousLogRef.current = Date.now();
+      const waste = detections.filter((d) => !isYoloClassNotWaste(d.className));
+      logYoloOnlyResult(
+        video, result, detections, cycleMs, analysis, "T1", undefined, undefined,
+        {
+          tier1: waste
+            .map((d) => ({ itemName: d.className, confidence: d.confidence, x: d.bbox[0] + d.bbox[2] / 2 }))
+            .sort((a, b) => b.confidence - a.confidence)
+            .slice(0, 5),
+        },
+        [result],
+      );
     }
 
     /** Escalate to API when YOLO can't resolve after frame stale timeout. */
@@ -1680,6 +1961,14 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
     }
   }, [classify, transition, T]);
 
+  // ── Start the continuous loop once site config selects the mode ──
+  // (The loop itself waits for the camera, model, and site config to be
+  // ready, so firing early is safe.)
+  useEffect(() => {
+    if (!continuousMode) return;
+    startContinuousLoopRef.current?.();
+  }, [continuousMode]);
+
 
   // ── Derive which full-screen UI to show ──
   if (!mounted) return null;
@@ -1735,35 +2024,54 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
         </div>
       )}
 
-      {/* Full-screen UI states */}
-      {uiScreen === "idle" && (
-        <IdleScreen
-          locale={locale}
-          statsVersion={statsVersion}
-        />
-      )}
-
-      {uiScreen === "camera" && (
-        <CameraScreen
-          pipelineState={pipelineState}
-          locale={locale}
-          yoloTargetInset={YOLO_TARGET_INSET}
-        />
-      )}
-
-      {uiScreen === "result" && stableResults.length > 0 && (
-        <ResultScreen
+      {/* Continuous mode: one persistent live view — camera + annotations +
+          compact result cards. No idle/camera/result screen switching. */}
+      {continuousMode ? (
+        <LiveDetectionView
+          tracks={liveTracks}
           results={stableResults}
-          locale={locale}
-          voiceEnabled={voiceEnabled}
           streams={siteStreams}
-          cameraRef={cameraRef}
-          mirrorCamera={mirrorCamera}
+          locale={locale}
+          mirror={mirrorCamera}
+          showOverlay={showOverlay}
+          showBinMap={showBinMap}
+          videoAspect={videoAspect}
         />
+      ) : (
+        <>
+          {/* Full-screen UI states (gated mode) */}
+          {uiScreen === "idle" && (
+            <IdleScreen
+              locale={locale}
+              statsVersion={statsVersion}
+            />
+          )}
+
+          {uiScreen === "camera" && (
+            <CameraScreen
+              pipelineState={pipelineState}
+              locale={locale}
+              yoloTargetInset={YOLO_TARGET_INSET}
+            />
+          )}
+
+          {uiScreen === "result" && stableResults.length > 0 && (
+            <ResultScreen
+              results={stableResults}
+              locale={locale}
+              voiceEnabled={voiceEnabled}
+              streams={siteStreams}
+              cameraRef={cameraRef}
+              mirrorCamera={mirrorCamera}
+            />
+          )}
+        </>
       )}
 
-      {/* System status badge — hidden during result screen to avoid overlap */}
-      {uiScreen !== "result" && (
+      {/* System status badge — hidden during result screen to avoid overlap,
+          and hidden under the bin-map strip (bottom-left collision) unless
+          there's a thermal warning worth surfacing. */}
+      {(continuousMode ? (!showBinMap || thermalWarning) : uiScreen !== "result") && (
         <SystemStatusBadge thermalWarning={thermalWarning} />
       )}
     </div>

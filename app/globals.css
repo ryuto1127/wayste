@@ -56,6 +56,38 @@ body {
   }
 }
 
+/* Bin-map guide line — dashes flow along the path from the detected item
+   toward its target bin (path is drawn item → bin, so a negative offset
+   moves dashes forward). */
+@keyframes dashFlow {
+  to {
+    stroke-dashoffset: -18;
+  }
+}
+
+/* Bin-map target slot — soft glow pulse in the bin's own color
+   (per-slot --pulse-color custom prop). */
+@keyframes binPulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 var(--pulse-color, rgba(255, 255, 255, 0.4));
+  }
+  50% {
+    box-shadow: 0 0 22px 6px var(--pulse-color, rgba(255, 255, 255, 0.4));
+  }
+}
+
+/* Continuous-mode result cards — the bin-direction arrow nudges along its
+   own pointing direction (per-card --nudge-x / --nudge-y custom props).
+   Draws the eye toward the physical bin without stealing the whole screen. */
+@keyframes arrowNudge {
+  0%, 100% {
+    transform: translate(0, 0);
+  }
+  50% {
+    transform: translate(var(--nudge-x, 0px), var(--nudge-y, 0px));
+  }
+}
+
 /* Classifying breathing — subtle scale pulse on the scan markers while
    the model is analyzing. Signals "thinking" without stealing focus. */
 @keyframes breathe {

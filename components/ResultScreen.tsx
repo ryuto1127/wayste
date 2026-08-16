@@ -597,8 +597,10 @@ const positionLabelKey: Record<BinPosition, TranslationKey> = {
   "far-right": "binPositionFarRight",
 };
 
-/** Map a BinPosition to its i18n arrow key. */
-const positionArrowKey: Record<BinPosition, TranslationKey> = {
+/** Map a BinPosition to its i18n arrow key.
+ *  Exported — LiveDetectionView (continuous mode) reuses the same glyph
+ *  convention so both result surfaces point the same way. */
+export const positionArrowKey: Record<BinPosition, TranslationKey> = {
   "far-left": "binPositionArrowFarLeft",
   "left": "binPositionArrowLeft",
   "center": "binPositionArrowCenter",

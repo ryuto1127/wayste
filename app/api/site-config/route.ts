@@ -23,6 +23,13 @@ export async function GET() {
     voiceEnabled: config.voiceEnabled ?? false,
     ...(typeof config.mirrorCamera === "boolean" && { mirrorCamera: config.mirrorCamera }),
     streams: config.streams,
+    ...(config.detectionMode && { detectionMode: config.detectionMode }),
+    ...(typeof config.showDetectionOverlay === "boolean" && {
+      showDetectionOverlay: config.showDetectionOverlay,
+    }),
+    ...(typeof config.showBinMap === "boolean" && {
+      showBinMap: config.showBinMap,
+    }),
     sensitivity: config.sensitivity,
     reviewThreshold: config.reviewThreshold,
     defaultStream: config.defaultStream,

@@ -61,6 +61,8 @@ export const translations = {
 
     // Pipeline states
     itemDetected: "Item detected",
+    liveHint: "Show your item to the camera",
+    detecting: "Detecting...",
     holdForScan: "Hold steady for identification",
     identifyingItem: "Identifying item...",
     poorVisibility: "Try showing more of the item",
@@ -274,6 +276,8 @@ export const translations = {
 
     // Pipeline states
     itemDetected: "アイテムを検出しました",
+    liveHint: "ゴミをカメラにかざしてください",
+    detecting: "検出中...",
     holdForScan: "識別のため動かさないでください",
     identifyingItem: "アイテムを識別中...",
     poorVisibility: "アイテムをもっと見せてください",

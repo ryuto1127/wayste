@@ -333,6 +333,46 @@ export interface SiteConfig {
    * and a flowing guide line from each detected item to its bin.
    */
   showBinMap?: boolean;
+  /**
+   * Continuous mode only: per-site overrides for the temporal tracker's
+   * tuning knobs (lib/detection-tracker.ts DEFAULT_TRACKER_CONFIG). Omitted
+   * fields keep their defaults. JSON-only tuning per the site-config
+   * convention — e.g. a busy exhibition might lengthen coastMs or shorten
+   * parkedAfterMs without a code change.
+   */
+  trackerTuning?: TrackerTuning;
+}
+
+/** Optional per-site tracker overrides — mirrors lib/detection-tracker.ts
+ *  TrackerConfig (kept structurally assignable to Partial<TrackerConfig>;
+ *  defined here separately so browser-safe type modules don't import the
+ *  tracker implementation). */
+export interface TrackerTuning {
+  /** Minimum IoU to consider a detection the same object as a track. */
+  minIoU?: number;
+  /** Matched cycles within confirmWindow needed to confirm a track. */
+  confirmHits?: number;
+  confirmWindow?: number;
+  /** Minimum wall-clock age (ms) before a track can confirm. */
+  confirmMinAgeMs?: number;
+  /** Consecutive misses that kill a tentative track. */
+  tentativeMaxMisses?: number;
+  /** How long a confirmed track survives occlusion (ms). */
+  coastMs?: number;
+  /** Consecutive foreign-class matches before a class swap. */
+  classSwapCycles?: number;
+  /** Minimum duration (ms) of a foreign-class streak before swapping. */
+  classSwapMinMs?: number;
+  /** Hard cap on simultaneously alive tracks. */
+  maxTracks?: number;
+  /** Stationary time before a confirmed track is suppressed as parked (ms). */
+  parkedAfterMs?: number;
+  /** Center movement (640-space px) that counts as "the object moved". */
+  parkedMoveTolerance?: number;
+  /** EMA alpha for confidence smoothing. */
+  emaAlpha?: number;
+  /** Blend factor for bbox smoothing. */
+  bboxAlpha?: number;
 }
 
 /** Physical bin position relative to the kiosk monitor. */

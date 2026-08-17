@@ -30,6 +30,7 @@ export async function GET() {
     ...(typeof config.showBinMap === "boolean" && {
       showBinMap: config.showBinMap,
     }),
+    ...(config.trackerTuning && { trackerTuning: config.trackerTuning }),
     sensitivity: config.sensitivity,
     reviewThreshold: config.reviewThreshold,
     defaultStream: config.defaultStream,

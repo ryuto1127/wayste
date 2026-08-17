@@ -1071,7 +1071,8 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       const th = thresholdsRef.current;
       const siteConfig = siteConfigRef.current;
       if (!siteConfig) return;
-      if (!trackerRef.current) trackerRef.current = new DetectionTracker();
+      // Site config may override tracker tuning knobs (JSON-only, per site).
+      if (!trackerRef.current) trackerRef.current = new DetectionTracker(siteConfig.trackerTuning);
 
       // Keep the overlay's aspect mapping in sync (bail-out when unchanged).
       const aspect = video.videoWidth / video.videoHeight;

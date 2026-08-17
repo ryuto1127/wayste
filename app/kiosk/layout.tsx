@@ -1,4 +1,5 @@
 import type { Viewport } from "next";
+import WakeLock from "@/components/WakeLock";
 
 export const viewport: Viewport = {
   width: "device-width",
@@ -14,6 +15,7 @@ export default function KioskLayout({
 }) {
   return (
     <div className="fixed inset-0 overflow-hidden bg-neutral-950 text-white">
+      <WakeLock />
       {children}
     </div>
   );

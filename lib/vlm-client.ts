@@ -150,6 +150,10 @@ export function parseVlmResponse(
   content: string,
   validStreamIds: Set<string>,
 ): VlmJudgment | null {
+  // Thinking-mode models may prepend <think>…</think>; the braces inside
+  // would corrupt extraction — use only what follows the reasoning block.
+  const thinkClose = content.lastIndexOf("</think>");
+  if (thinkClose !== -1) content = content.slice(thinkClose + "</think>".length);
   const start = content.indexOf("{");
   const end = content.lastIndexOf("}");
   if (start < 0 || end <= start) return null;

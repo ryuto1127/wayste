@@ -25,6 +25,20 @@ import {
   RawImage,
 } from "@huggingface/transformers";
 
+/** Chat-template text with thinking DISABLED — Qwen3.5 defaults to a
+ *  "thinking" preamble that burns seconds and the whole token budget
+ *  before any JSON appears. Falls back for templates without the flag. */
+function chatText(proc: { apply_chat_template: (c: unknown, o: unknown) => string }, conversation: unknown): string {
+  try {
+    return proc.apply_chat_template(conversation, {
+      add_generation_prompt: true,
+      enable_thinking: false,
+    });
+  } catch {
+    return proc.apply_chat_template(conversation, { add_generation_prompt: true });
+  }
+}
+
 type InMessage =
   | { type: "init"; modelId: string; dtype?: string }
   | { type: "judge"; id: number; image: string; prompt: string; maxNewTokens?: number };
@@ -74,6 +88,21 @@ async function handleInit(msg: Extract<InMessage, { type: "init" }>) {
       device: "webgpu",
       progress_callback,
     });
+
+    // Warmup: the FIRST generate pays WebGPU shader compilation (can be
+    // 10s+). Run a throwaway judgment on a tiny gray image now, while the
+    // gauge still shows "loading to GPU" — so "ready" means actually fast.
+    try {
+      const warm = new RawImage(new Uint8ClampedArray(64 * 64 * 3).fill(114), 64, 64, 3);
+      const conv = [
+        { role: "user", content: [{ type: "image" }, { type: "text", text: "ok" }] },
+      ];
+      const inputs = await processor(chatText(processor, conv), warm);
+      await model.generate({ ...inputs, max_new_tokens: 2, do_sample: false });
+    } catch (err) {
+      console.warn("[vlm-worker] warmup failed (non-fatal):", err);
+    }
+
     post({ type: "ready" });
   } catch (err) {
     post({ type: "init-error", error: String(err) });
@@ -93,9 +122,7 @@ async function handleJudge(msg: Extract<InMessage, { type: "judge" }>) {
         ],
       },
     ];
-    const text = processor.apply_chat_template(conversation, {
-      add_generation_prompt: true,
-    });
+    const text = chatText(processor, conversation);
     const inputs = await processor(text, image);
     const outputs = await model.generate({
       ...inputs,

@@ -172,6 +172,10 @@ const FACE_ZONE_TTL_MS = 2_500;
 const FACE_SWEEP_CANVAS_SIZE = 256;
 /** Cap on remembered background zones (FIFO). */
 const BACKGROUND_ZONE_CAP = 16;
+/** Sustained whole-scene instability longer than this means the CAMERA
+ *  MOVED (not a passer-by): learned scenery zones are now wrong coordinates
+ *  and are discarded; once the scene settles, the baseline re-learns. */
+const VIEW_CHANGE_UNSTABLE_MS = 2_000;
 
 // ── Cloud fallback (pilot experiments only) ──
 /** OFF by default: items YOLO can't confidently resolve become `needs_review`
@@ -311,6 +315,10 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
   const backgroundZonesRef = useRef<Bbox[]>([]);
   /** End of the startup baseline-learning window (0 = not started). */
   const baselineUntilRef = useRef(0);
+  /** When sustained whole-scene instability began (0 = scene stable). */
+  const sceneUnstableSinceRef = useRef(0);
+  /** True once the current instability episode was treated as a camera move. */
+  const viewChangeHandledRef = useRef(false);
   /** Latest face sweep result (model-space boxes + timestamp). */
   const faceZonesRef = useRef<{ boxes: Bbox[]; at: number }>({ boxes: [], at: 0 });
   /** Reusable small canvas for the face sweep (HTMLCanvas — MediaPipe input). */
@@ -328,6 +336,15 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
   const vlmBrowserModRef = useRef<typeof import("@/lib/vlm-browser") | null>(null);
   /** When the last VLM judgment started — thermal-adaptive spacing. */
   const lastVlmJudgeAtRef = useRef(0);
+  /** Demo system panel: thermal level / degradation ratio / measured fps. */
+  const [sysStats, setSysStats] = useState<{ level: 0 | 1 | 2; ratio: number; fps: number; yoloMs: number } | null>(null);
+  const continuousCycleCountRef = useRef(0);
+  const lastStatsAtRef = useRef(0);
+  /** EMA of YOLO inference time per cycle — the fps bottleneck readout. */
+  const yoloMsEmaRef = useRef(0);
+  /** Alternator for overlay setState — boxes redraw at half the loop rate
+   *  (CSS transitions bridge the gap); React render cost was eating fps. */
+  const overlayFlipRef = useRef(false);
 
   // ── Voice guidance (site-config driven — end-users cannot toggle) ──
   const [voiceEnabled, setVoiceEnabled] = useState(false);
@@ -448,26 +465,57 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
     }
   }, []);
 
-  /** Operator pressed start: the camera angle is final. Reset everything
-   *  that observed the aiming phase, then begin detection + baseline. */
-  const handleStartContinuous = useCallback(() => {
+  /** Full reset of everything continuous-mode has learned/tracked —
+   *  used on start, and by the operator's back-to-setup escape hatch. */
+  const resetContinuousPipeline = useCallback(() => {
     analyzerRef.current?.reset();
     trackerRef.current?.reset();
     continuousCardsRef.current = new Map();
     backgroundZonesRef.current = [];
     baselineUntilRef.current = 0;
+    sceneUnstableSinceRef.current = 0;
+    viewChangeHandledRef.current = false;
     lastContinuousCycleAtRef.current = 0;
     vlmJudgedRef.current.clear();
     faceZonesRef.current = { boxes: [], at: 0 };
     setStableResults([]);
     setLiveTracks([]);
+  }, []);
+
+  /** Operator pressed start: the camera angle is final. Reset everything
+   *  that observed the aiming phase, then begin detection + baseline. */
+  const handleStartContinuous = useCallback(() => {
+    resetContinuousPipeline();
     try {
       sessionStorage.setItem("wayste_continuous_started", "1");
     } catch {
       // Best-effort persistence only.
     }
     setContinuousStarted(true);
-  }, []);
+  }, [resetContinuousPipeline]);
+
+  // ── Operator escape hatch: Esc returns to the camera-aiming setup phase
+  // (kiosks carry no on-screen settings; a keyboard is a setup-time tool
+  // end-users don't have). Everything learned is discarded — press start
+  // again once the new angle is final.
+  useEffect(() => {
+    if (!continuousMode) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      console.log("[continuous] Esc — back to camera setup");
+      yoloRunningRef.current = false;
+      yoloGenRef.current++;
+      resetContinuousPipeline();
+      try {
+        sessionStorage.removeItem("wayste_continuous_started");
+      } catch {
+        // Best-effort only.
+      }
+      setContinuousStarted(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [continuousMode, resetContinuousPipeline]);
 
   // ── Subscribe to model loading status ──
   useEffect(() => {
@@ -817,6 +865,13 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           thermal.durations.push(analysisDuration);
           if (thermal.durations.length > 30) thermal.durations.shift();
           const avg = thermal.durations.reduce((a, b) => a + b, 0) / thermal.durations.length;
+          // Self-correcting baseline: the first 60 samples may coincide with
+          // one-time load (model download/compile), inflating the baseline
+          // and blinding the ladder. If we now run clearly FASTER than the
+          // baseline, the current speed is the truer baseline — adopt it.
+          if (avg < thermal.baseline * 0.7) {
+            thermal.baseline = Math.max(avg, 0.1);
+          }
           const ratio = avg / thermal.baseline;
           const prevLevel = thermal.level;
           // Graduated ladder with hysteresis: escalate at 2× / 4× the
@@ -854,6 +909,22 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       // thermal monitoring, and rolling calibration above — but detection
       // and all UI state are driven by the continuous YOLO loop.
       if (detectionModeRef.current === "continuous") {
+        // Demo system panel: refresh measured fps / thermal stats ~1/s.
+        if (Date.now() - lastStatsAtRef.current >= 1_000) {
+          const dtSec = lastStatsAtRef.current > 0
+            ? (Date.now() - lastStatsAtRef.current) / 1000
+            : 0;
+          const fps = dtSec > 0 ? continuousCycleCountRef.current / dtSec : 0;
+          continuousCycleCountRef.current = 0;
+          lastStatsAtRef.current = Date.now();
+          const ratio =
+            thermal.baseline > 0 && thermal.durations.length > 0
+              ? thermal.durations.reduce((a, b) => a + b, 0) /
+                thermal.durations.length /
+                thermal.baseline
+              : 1;
+          setSysStats({ level: thermal.level, ratio, fps, yoloMs: yoloMsEmaRef.current });
+        }
         // Watchdog: the loop stamps every iteration; a long silence means a
         // hung await or zombie exit. Restart — self-heal, don't sit dead.
         const lastCycle = lastContinuousCycleAtRef.current;
@@ -1208,6 +1279,8 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           }
           const cycleMs = Date.now() - t0;
           perfMonitor.recordYoloInference(cycleMs);
+          yoloMsEmaRef.current =
+            yoloMsEmaRef.current === 0 ? cycleMs : yoloMsEmaRef.current * 0.8 + cycleMs * 0.2;
           if (!yoloRunningRef.current || yoloGenRef.current !== gen) break;
 
           // ── Face sweep (~1fps): veto zones for the unknown fallback ──
@@ -1227,6 +1300,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           } catch (err) {
             console.error("[continuous] cycle handler failed:", err);
           }
+          continuousCycleCountRef.current++;
           // Pace the loop to the camera's actual frame rate (no point
           // running YOLO faster than new frames arrive); halve under
           // thermal throttling.
@@ -1342,15 +1416,44 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       // filters the noise; cards resolve as needs_review.
       const analysisForBlobs = lastAnalysisRef.current;
       const hasAspect = Number.isFinite(aspect) && aspect > 0;
+      const sceneUnstable =
+        !analysisForBlobs?.isSettled ||
+        analysisForBlobs.roiForegroundRatio > SCENE_UNSTABLE_FG_RATIO;
+
+      // ── Auto view-change handling ──
+      // A passer-by destabilizes the scene for a moment; a MOVED CAMERA
+      // destabilizes it until the background model re-converges. Sustained
+      // instability therefore means the learned scenery zones point at
+      // wrong coordinates — discard them and, once the scene settles in
+      // its new framing, re-learn the baseline. No operator action needed.
+      if (sceneUnstable) {
+        if (sceneUnstableSinceRef.current === 0) {
+          sceneUnstableSinceRef.current = now;
+        } else if (
+          !viewChangeHandledRef.current &&
+          now - sceneUnstableSinceRef.current >= VIEW_CHANGE_UNSTABLE_MS
+        ) {
+          viewChangeHandledRef.current = true;
+          console.log("[continuous] sustained scene change → camera moved: clearing scenery zones");
+          backgroundZonesRef.current = [];
+          analyzerRef.current?.boostBackgroundAdaptation();
+        }
+      } else {
+        if (viewChangeHandledRef.current) {
+          console.log("[continuous] scene settled — re-learning background baseline");
+          baselineUntilRef.current = now + CONTINUOUS_BASELINE_MS;
+        }
+        sceneUnstableSinceRef.current = 0;
+        viewChangeHandledRef.current = false;
+      }
+
       const faceZones =
         now - faceZonesRef.current.at < FACE_ZONE_TTL_MS ? faceZonesRef.current.boxes : [];
       let synthetic = hasAspect
         ? buildUnknownDetections({
             lowConfDetections,
             blobs: analysisForBlobs?.isSettled ? analysisForBlobs.blobs : [],
-            sceneUnstable:
-              !analysisForBlobs?.isSettled ||
-              analysisForBlobs.roiForegroundRatio > SCENE_UNSTABLE_FG_RATIO,
+            sceneUnstable,
             confidentDetections,
             knownTrackBboxes: trackerRef.current
               .getTracks()
@@ -1469,23 +1572,28 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       }
       maybeJudgeUnresolvedWithVlm(tracks, cards, video);
 
-      // ── Overlay state — every cycle (~10fps) so boxes follow items live ──
-      setLiveTracks(
-        tracks
-          .filter((t) => !t.parked)
-          .map((t) => {
-            const card = cards.get(t.id);
-            return {
-              id: t.id,
-              bbox: [...t.bbox] as [number, number, number, number],
-              tentative: !card,
-              label: card ? card.itemName : null,
-              color: card ? card.binColor : null,
-              streamId: card ? (card.wasteStream as string) : null,
-              confidence: t.confidence,
-            };
-          }),
-      );
+      // ── Overlay state — every OTHER cycle (React render cost at the full
+      // loop rate was eating fps; the 75ms CSS transition bridges the gap).
+      // Card changes always publish immediately.
+      overlayFlipRef.current = !overlayFlipRef.current;
+      if (changed || overlayFlipRef.current) {
+        setLiveTracks(
+          tracks
+            .filter((t) => !t.parked)
+            .map((t) => {
+              const card = cards.get(t.id);
+              return {
+                id: t.id,
+                bbox: [...t.bbox] as [number, number, number, number],
+                tentative: !card,
+                label: card ? card.itemName : null,
+                color: card ? card.binColor : null,
+                streamId: card ? (card.wasteStream as string) : null,
+                confidence: t.confidence,
+              };
+            }),
+        );
+      }
     }
 
     /** Tier 1.5: pick ONE unresolved (needs_review) card whose track is
@@ -2551,6 +2659,49 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
             />
           )}
         </>
+      )}
+
+      {/* Demo system panel (annotation mode only): thermal load ladder,
+          CV degradation ratio, measured detection fps, AI-judge state —
+          shows the adaptive machinery working, live. */}
+      {continuousMode && continuousStarted && showOverlay && sysStats && (
+        <div className="absolute top-5 left-5 z-30 flex items-center gap-3 bg-neutral-900/80 backdrop-blur-md rounded-xl px-4 py-2 text-xs font-mono text-neutral-300 pointer-events-none select-none">
+          <span className="flex items-center gap-1.5">
+            <span
+              className={`inline-block w-2 h-2 rounded-full ${
+                sysStats.level === 2
+                  ? "bg-red-400"
+                  : sysStats.level === 1
+                    ? "bg-amber-400"
+                    : "bg-emerald-400"
+              }`}
+            />
+            {T("sysLoad")}{" "}
+            {sysStats.level === 2
+              ? T("sysLoadHot")
+              : sysStats.level === 1
+                ? T("sysLoadWarm")
+                : T("sysLoadNormal")}{" "}
+            ×{sysStats.ratio.toFixed(1)}
+          </span>
+          <span className="text-neutral-600">|</span>
+          <span>{Math.round(sysStats.fps)} fps</span>
+          <span className="text-neutral-600">|</span>
+          <span>YOLO {Math.round(sysStats.yoloMs)}ms</span>
+          <span className="text-neutral-600">|</span>
+          <span>
+            VLM{" "}
+            {vlmProgress?.state === "preparing"
+              ? `${T("sysVlmPreparing")} ${Math.round(vlmProgress.fraction * 100)}%`
+              : vlmProgress?.state === "ready"
+                ? sysStats.level >= 2
+                  ? T("sysVlmPaused")
+                  : vlmInFlightRef.current
+                    ? T("sysVlmJudging")
+                    : T("sysVlmIdle")
+                : T("sysVlmOff")}
+          </span>
+        </div>
       )}
 
       {/* Browser-VLM preparation gauge — a determinate bar with real MB

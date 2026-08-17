@@ -290,6 +290,29 @@ export default function LiveDetectionView({
                       {r.specialInstructions ?? r.preAction ?? r.reasoning}
                     </p>
                   )}
+                  {/* Compound item: one piece of waste, several destinations —
+                      each part with its own stream color and bin name. */}
+                  {r.isCompound && r.components && r.components.length > 0 && (
+                    <div className="mt-2 flex flex-col gap-1">
+                      {r.components.map((c, i) => {
+                        const cStream = streams.find((s) => s.id === c.wasteStream);
+                        return (
+                          <div key={i} className="flex items-center gap-2 text-sm leading-snug">
+                            <span
+                              className="inline-block w-2.5 h-2.5 rounded-full shrink-0"
+                              style={{ backgroundColor: cStream?.color ?? "#525252" }}
+                            />
+                            <span className="text-neutral-100 font-semibold whitespace-nowrap">
+                              {c.partName}
+                            </span>
+                            <span className="text-neutral-400 truncate">
+                              → {cStream?.label ?? c.wasteStream}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               </div>
             );

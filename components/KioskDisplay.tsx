@@ -40,7 +40,7 @@ import {
 import { recordSort } from "@/lib/kiosk-counter";
 import { DetectionTracker, type Track } from "@/lib/detection-tracker";
 import { syncContinuousCards } from "@/lib/continuous-cards";
-import { synthesizeUnknownDetections, UNKNOWN_OBJECT_CLASS_ID } from "@/lib/unknown-object";
+import { buildUnknownDetections, UNKNOWN_OBJECT_CLASS_ID } from "@/lib/unknown-object";
 import CameraFeed, { type CameraFeedHandle } from "./CameraFeed";
 import IdleScreen from "./IdleScreen";
 import CameraScreen from "./CameraScreen";
@@ -125,6 +125,16 @@ const CONTINUOUS_LOG_MIN_INTERVAL_MS = 4_000;
  *  interval assumes it hung (stuck await, zombie exit) and restarts it.
  *  An unattended kiosk must self-heal, not sit dead until someone notices. */
 const CONTINUOUS_WATCHDOG_MS = 10_000;
+/** YOLO boxes below TRACK_KEEP_THRESHOLD but above this floor are treated as
+ *  class-agnostic "unknown object" evidence — the class guess is unreliable
+ *  down there, but the box still marks an object-shaped thing. Ratio of the
+ *  keep threshold, with an absolute floor against pure noise. */
+const UNKNOWN_CANDIDATE_FLOOR_RATIO = 0.45;
+const UNKNOWN_CANDIDATE_MIN_CONF = 0.12;
+/** Above this ROI foreground ratio the whole scene is changing (camera bump,
+ *  pan, lighting shift) — background-subtraction blobs are meaningless and
+ *  must not spawn unknown-object candidates. */
+const SCENE_UNSTABLE_FG_RATIO = 0.35;
 
 // ── Cloud fallback (pilot experiments only) ──
 /** OFF by default: items YOLO can't confidently resolve become `needs_review`
@@ -1052,12 +1062,15 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           const t0 = Date.now();
           let detections: YoloDetection[] = [];
           try {
-            // Floor at the KEEP threshold (hysteresis low) — low-confidence
-            // frames must still reach existing tracks. fullFrame: continuous
-            // mode covers the entire camera view, not the center square.
+            // Detect down to the unknown-candidate floor — boxes in
+            // [floor, keep) become class-agnostic unknown evidence, boxes
+            // ≥ keep feed tracks normally. fullFrame: continuous mode
+            // covers the entire camera view, not the center square.
+            const keep = thresholdsRef.current.TRACK_KEEP_THRESHOLD;
             detections = await backend.detect(
               video, 0, CONTINUOUS_MIN_BOX_AREA,
-              thresholdsRef.current.TRACK_KEEP_THRESHOLD, true,
+              Math.max(UNKNOWN_CANDIDATE_MIN_CONF, keep * UNKNOWN_CANDIDATE_FLOOR_RATIO),
+              true,
             );
           } catch {
             // A single failed inference must not kill the loop.
@@ -1112,34 +1125,51 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       }
 
       const wasteDetections = detections.filter((d) => !isYoloClassNotWaste(d.className));
+      // Split at the keep threshold: below it YOLO's class guess is
+      // unreliable — those boxes become class-agnostic unknown evidence.
+      const confidentDetections = wasteDetections.filter(
+        (d) => d.confidence >= th.TRACK_KEEP_THRESHOLD,
+      );
+      const lowConfDetections = wasteDetections.filter(
+        (d) => d.confidence < th.TRACK_KEEP_THRESHOLD,
+      );
 
       // ── Class-agnostic fallback ──
-      // Object-like CV blobs that no YOLO detection or known-class track
-      // covers become synthetic unknown_object detections. The tracker gives
-      // them the same temporal treatment as real detections, and the card
-      // layer resolves them as needs_review — a fully out-of-vocabulary item
-      // must never leave the kiosk silently unresponsive.
+      // A fully out-of-vocabulary item must never leave the kiosk silently
+      // unresponsive. Primary evidence: low-confidence YOLO boxes (robust
+      // to camera/background motion). Secondary: CV blobs — fixed-camera
+      // net for objects YOLO gives zero boxes, auto-suspended while the
+      // whole scene is changing. The tracker's temporal confirmation
+      // filters the noise; cards resolve as needs_review.
       const analysisForBlobs = lastAnalysisRef.current;
-      const synthetic =
-        analysisForBlobs?.isSettled && Number.isFinite(aspect) && aspect > 0
-          ? synthesizeUnknownDetections(
-              analysisForBlobs.blobs,
-              wasteDetections,
-              trackerRef.current
-                .getTracks()
-                .filter((t) => t.classId !== UNKNOWN_OBJECT_CLASS_ID)
-                .map((t) => t.bbox),
-              aspect,
-              th.TRACK_APPEAR_THRESHOLD,
-            )
-          : [];
+      const hasAspect = Number.isFinite(aspect) && aspect > 0;
+      const synthetic = hasAspect
+        ? buildUnknownDetections({
+            lowConfDetections,
+            blobs: analysisForBlobs?.isSettled ? analysisForBlobs.blobs : [],
+            sceneUnstable:
+              !analysisForBlobs?.isSettled ||
+              analysisForBlobs.roiForegroundRatio > SCENE_UNSTABLE_FG_RATIO,
+            confidentDetections,
+            knownTrackBboxes: trackerRef.current
+              .getTracks()
+              .filter((t) => t.classId !== UNKNOWN_OBJECT_CLASS_ID)
+              .map((t) => t.bbox),
+            videoAspect: aspect,
+            confidence: th.TRACK_APPEAR_THRESHOLD,
+          })
+        : [];
 
+      // Content bounds let the tracker clear edge-exited items fast while
+      // still coasting through mid-frame occlusion.
+      const lb = computeLetterbox(hasAspect ? aspect : 16 / 9, 1, YOLO_MODEL_SIZE);
       const { tracks, events } = trackerRef.current.update(
-        [...wasteDetections, ...synthetic],
+        [...confidentDetections, ...synthetic],
         now,
         {
           appearConfidence: th.TRACK_APPEAR_THRESHOLD,
           keepConfidence: th.TRACK_KEEP_THRESHOLD,
+          contentBounds: { x0: lb.dx, y0: lb.dy, x1: lb.dx + lb.dw, y1: lb.dy + lb.dh },
         },
       );
 

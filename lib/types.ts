@@ -357,8 +357,12 @@ export interface TrackerTuning {
   confirmMinAgeMs?: number;
   /** Consecutive misses that kill a tentative track. */
   tentativeMaxMisses?: number;
-  /** How long a confirmed track survives occlusion (ms). */
+  /** How long a confirmed track survives mid-frame occlusion (ms). */
   coastMs?: number;
+  /** Coast time when the track vanished at the frame edge (item left the scene). */
+  edgeCoastMs?: number;
+  /** Distance (model-space px) from a content bound that counts as "at the edge". */
+  edgeMarginPx?: number;
   /** Consecutive foreign-class matches before a class swap. */
   classSwapCycles?: number;
   /** Minimum duration (ms) of a foreign-class streak before swapping. */

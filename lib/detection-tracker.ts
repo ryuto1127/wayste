@@ -69,6 +69,11 @@ export interface TrackerThresholds {
   appearConfidence: number;
   /** Floor the caller already applied to detections (hysteresis low). Informational. */
   keepConfidence: number;
+  /** Visible content area in model space (letterbox content rect). When
+   *  provided, tracks that disappear while touching these bounds use the
+   *  fast edgeCoastMs instead of coastMs — "left the scene" clears quickly,
+   *  "occluded mid-frame" still coasts. */
+  contentBounds?: { x0: number; y0: number; x1: number; y1: number };
 }
 
 export interface TrackerConfig {
@@ -84,8 +89,19 @@ export interface TrackerConfig {
   confirmMinAgeMs: number;
   /** Consecutive misses that kill a tentative (unconfirmed) track. */
   tentativeMaxMisses: number;
-  /** How long a confirmed track survives with no matching detection (ms). */
+  /** How long a confirmed track survives with no matching detection (ms).
+   *  Applies to MID-FRAME disappearance — almost always occlusion (a hand
+   *  or person briefly in front of the item). */
   coastMs: number;
+  /** Coast time for a track that disappears while touching the frame edge —
+   *  almost always the item actually LEAVING the scene, so the result
+   *  should clear fast. Kept slightly above zero to absorb 1–2 frames of
+   *  edge-detection flicker. Only active when the caller provides
+   *  `contentBounds` (the tracker can't know the frame edges otherwise). */
+  edgeCoastMs: number;
+  /** How close (model-space px) a bbox must be to a content bound to count
+   *  as "at the edge". */
+  edgeMarginPx: number;
   /** Consecutive foreign-class matches before the track swaps class. */
   classSwapCycles: number;
   /** Minimum wall-clock duration (ms) of a consistent foreign-class streak
@@ -110,6 +126,8 @@ export const DEFAULT_TRACKER_CONFIG: TrackerConfig = {
   confirmMinAgeMs: 200,
   tentativeMaxMisses: 2,
   coastMs: 1500,
+  edgeCoastMs: 250,
+  edgeMarginPx: 24,
   classSwapCycles: 3,
   classSwapMinMs: 200,
   maxTracks: 8,
@@ -262,6 +280,7 @@ export class DetectionTracker {
     }
 
     // ── Unmatched tracks: miss ──
+    const bounds = thresholds.contentBounds;
     const removed = new Set<number>();
     for (const trackId of match.unmatchedTracked) {
       const track = byId.get(trackId);
@@ -274,7 +293,17 @@ export class DetectionTracker {
         if (track.missStreak >= cfg.tentativeMaxMisses) removed.add(trackId);
       } else {
         track.state = "coasting";
-        if (now - track.lastMatchedAt >= cfg.coastMs) {
+        // Edge exit (bbox touching a frame edge when it vanished) means the
+        // item left the scene — clear fast. Mid-frame vanish is occlusion —
+        // give it the full coast.
+        const atEdge =
+          bounds !== undefined &&
+          (track.bbox[0] <= bounds.x0 + cfg.edgeMarginPx ||
+            track.bbox[1] <= bounds.y0 + cfg.edgeMarginPx ||
+            track.bbox[0] + track.bbox[2] >= bounds.x1 - cfg.edgeMarginPx ||
+            track.bbox[1] + track.bbox[3] >= bounds.y1 - cfg.edgeMarginPx);
+        const coastLimit = atEdge ? cfg.edgeCoastMs : cfg.coastMs;
+        if (now - track.lastMatchedAt >= coastLimit) {
           removed.add(trackId);
           events.push({ type: "lost", trackId });
         }

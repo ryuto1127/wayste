@@ -165,6 +165,47 @@ describe("DetectionTracker", () => {
     });
   });
 
+  describe("edge exit vs mid-frame occlusion", () => {
+    // 16:9 letterbox content bounds in 640-space
+    const BOUNDS = { x0: 0, y0: 140, x1: 640, y1: 500 };
+    const TH_B = { ...TH, contentBounds: BOUNDS };
+
+    it("drops an edge-exited track after edgeCoastMs, not coastMs", () => {
+      const tracker = new DetectionTracker();
+      // Item at the left content edge
+      const edgeDet = det("can", 0.9, [2, 250, 80, 120]);
+      for (let i = 0; i < 4; i++) tracker.update([edgeDet], i * CYCLE_MS, TH_B);
+      // Vanishes — 300ms later (>= edgeCoastMs 250, << coastMs 1500) it's gone
+      tracker.update([], 400, TH_B);
+      const gone = tracker.update([], 700, TH_B);
+      expect(gone.tracks).toHaveLength(0);
+    });
+
+    it("still coasts a mid-frame disappearance through the full coastMs", () => {
+      const tracker = new DetectionTracker();
+      const midDet = det("can", 0.9, [280, 280, 80, 120]);
+      for (let i = 0; i < 4; i++) tracker.update([midDet], i * CYCLE_MS, TH_B);
+      // 700ms of absence — an edge track would be gone; mid-frame coasts
+      let at = 400;
+      let update = tracker.update([], at, TH_B);
+      for (let i = 0; i < 6; i++) {
+        at += CYCLE_MS;
+        update = tracker.update([], at, TH_B);
+      }
+      expect(update.tracks).toHaveLength(1);
+      expect(update.tracks[0].state).toBe("coasting");
+    });
+
+    it("keeps full coastMs everywhere when no contentBounds are provided", () => {
+      const tracker = new DetectionTracker();
+      const edgeDet = det("can", 0.9, [2, 250, 80, 120]);
+      for (let i = 0; i < 4; i++) tracker.update([edgeDet], i * CYCLE_MS, TH);
+      tracker.update([], 400, TH);
+      const still = tracker.update([], 900, TH);
+      expect(still.tracks).toHaveLength(1);
+    });
+  });
+
   describe("multi-item", () => {
     it("tracks a second item entering while the first is displayed", () => {
       const tracker = new DetectionTracker();

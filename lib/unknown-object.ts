@@ -1,20 +1,26 @@
 /**
- * Class-agnostic fallback for continuous mode — the "YOLO saw nothing but
+ * Class-agnostic fallback for continuous mode — the "YOLO can't NAME it but
  * something is clearly there" net.
  *
- * YOLO only proposes boxes for shapes resembling its 15 trained classes; a
- * fully out-of-vocabulary item (umbrella, gadget, toy) can produce zero
- * detections, which would leave the kiosk silently unresponsive — the worst
- * production failure mode. The background-subtraction CV pipeline
- * (lib/frame-analyzer.ts) already runs in continuous mode and detects
- * "something entered the scene" without knowing what it is.
+ * A fully out-of-vocabulary item (umbrella, gadget, toy) may produce no
+ * confident YOLO detection, which would leave the kiosk silently
+ * unresponsive — the worst production failure mode. Two evidence sources
+ * fill the gap, both funneled into synthetic `unknown_object` detections
+ * that the DetectionTracker treats like any other: temporal confirmation
+ * filters the noise, the card layer answers needs_review, and if YOLO later
+ * recognizes the object the class-swap vote upgrades the track.
  *
- * This module turns persistent, object-like CV blobs that no YOLO detection
- * or known track covers into synthetic `unknown_object` detections. Feeding
- * them into the DetectionTracker gives them the full temporal treatment for
- * free: N-of-M + wall-clock confirmation filters blob noise, the card layer
- * resolves them as needs_review (no YOLO rule exists for the class), and if
- * YOLO later recognizes the object the class-swap vote upgrades the track.
+ * 1. LOW-CONFIDENCE YOLO BOXES (primary — robust to camera/background
+ *    motion). Below the keep threshold YOLO's class guess is unreliable,
+ *    but the box itself still says "object-shaped thing here". Each frame
+ *    is judged independently, so a moving camera or busy background cannot
+ *    corrupt this source the way it corrupts background subtraction.
+ *
+ * 2. CV BLOBS (secondary — fixed-camera net for objects YOLO gives ZERO
+ *    boxes). Background subtraction sees any "difference from the empty
+ *    scene" with no shape prior, but is inherently unreliable while the
+ *    camera or the whole scene moves — callers must suppress it during
+ *    global motion (`sceneUnstable`).
  *
  * Pure logic, browser-safe, unit-tested.
  */
@@ -106,4 +112,67 @@ export function synthesizeUnknownDetections(
     });
   }
   return out;
+}
+
+/** Cap on low-confidence candidates per cycle — the tracker's maxTracks
+ *  also guards, but flooding it with weak boxes wastes matching work. */
+const MAX_LOW_CONF_CANDIDATES = 3;
+
+/**
+ * Build all unknown_object candidates for one cycle.
+ *
+ * `lowConfDetections` are YOLO boxes below the keep threshold (class guess
+ * unreliable → treated as class-agnostic evidence). `blobs` participate only
+ * while `sceneUnstable` is false — background subtraction lies during camera
+ * or whole-scene motion. Candidates overlapping a confident detection or a
+ * known-class track are suppressed, and blob candidates duplicating a
+ * low-confidence box are dropped (the YOLO box is the tighter of the two).
+ */
+export function buildUnknownDetections(params: {
+  lowConfDetections: YoloDetection[];
+  blobs: BlobInfo[];
+  sceneUnstable: boolean;
+  confidentDetections: YoloDetection[];
+  knownTrackBboxes: Bbox[];
+  videoAspect: number;
+  /** Confidence stamped on synthetic detections — the tracker's appear
+   *  threshold, so candidates can seed tracks (temporal filtering then
+   *  decides whether they were real). */
+  confidence: number;
+  modelSize?: number;
+}): YoloDetection[] {
+  const {
+    lowConfDetections, blobs, sceneUnstable, confidentDetections,
+    knownTrackBboxes, videoAspect, confidence, modelSize = 640,
+  } = params;
+
+  const coveredByKnown = (bbox: Bbox) =>
+    confidentDetections.some((d) => overlapOverMinArea(bbox, d.bbox as Bbox) > MAX_KNOWN_OVERLAP) ||
+    knownTrackBboxes.some((tb) => overlapOverMinArea(bbox, tb) > MAX_KNOWN_OVERLAP);
+
+  // Primary: low-confidence YOLO boxes, strongest first.
+  const fromYolo: YoloDetection[] = [];
+  for (const d of [...lowConfDetections].sort((a, b) => b.confidence - a.confidence)) {
+    if (fromYolo.length >= MAX_LOW_CONF_CANDIDATES) break;
+    if (coveredByKnown(d.bbox as Bbox)) continue;
+    if (fromYolo.some((u) => overlapOverMinArea(u.bbox as Bbox, d.bbox as Bbox) > MAX_KNOWN_OVERLAP)) continue;
+    fromYolo.push({
+      classId: UNKNOWN_OBJECT_CLASS_ID,
+      className: UNKNOWN_OBJECT_CLASS,
+      confidence,
+      bbox: [...d.bbox] as Bbox,
+    });
+  }
+
+  // Secondary: CV blobs — fixed-camera only, and never duplicating a
+  // low-confidence candidate that already covers the same region.
+  const fromBlobs = sceneUnstable
+    ? []
+    : synthesizeUnknownDetections(
+        blobs, confidentDetections, knownTrackBboxes, videoAspect, confidence, modelSize,
+      ).filter(
+        (b) => !fromYolo.some((u) => overlapOverMinArea(u.bbox as Bbox, b.bbox as Bbox) > MAX_KNOWN_OVERLAP),
+      );
+
+  return [...fromYolo, ...fromBlobs];
 }

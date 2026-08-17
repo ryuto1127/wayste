@@ -5,6 +5,7 @@
 
 import {
   synthesizeUnknownDetections,
+  buildUnknownDetections,
   blobToModelBbox,
   UNKNOWN_OBJECT_CLASS,
   UNKNOWN_OBJECT_CLASS_ID,
@@ -107,5 +108,74 @@ describe("synthesizeUnknownDetections", () => {
       [farDet], [], ASPECT_16_9, APPEAR,
     );
     expect(out).toHaveLength(1);
+  });
+});
+
+describe("buildUnknownDetections", () => {
+  const APPEAR = 0.5;
+  const base = {
+    blobs: [] as BlobInfo[],
+    sceneUnstable: false,
+    confidentDetections: [] as YoloDetection[],
+    knownTrackBboxes: [] as Bbox[],
+    videoAspect: ASPECT_16_9,
+    confidence: APPEAR,
+  };
+
+  it("turns a low-confidence YOLO box into unknown evidence", () => {
+    const out = buildUnknownDetections({
+      ...base,
+      lowConfDetections: [det([100, 200, 80, 120], 0.2)],
+    });
+    expect(out).toHaveLength(1);
+    expect(out[0].className).toBe(UNKNOWN_OBJECT_CLASS);
+    expect(out[0].confidence).toBe(APPEAR);
+    expect(out[0].bbox).toEqual([100, 200, 80, 120]);
+  });
+
+  it("suppresses low-confidence boxes covered by a confident detection", () => {
+    const out = buildUnknownDetections({
+      ...base,
+      lowConfDetections: [det([102, 202, 78, 118], 0.2)],
+      confidentDetections: [det([100, 200, 80, 120], 0.8)],
+    });
+    expect(out).toHaveLength(0);
+  });
+
+  it("caps low-confidence candidates and dedupes overlapping ones", () => {
+    const out = buildUnknownDetections({
+      ...base,
+      lowConfDetections: [
+        det([100, 200, 80, 120], 0.30),
+        det([104, 204, 80, 120], 0.28), // duplicate of the first
+        det([300, 200, 80, 120], 0.25),
+        det([450, 200, 80, 120], 0.22),
+        det([560, 200, 60, 120], 0.20), // over the cap
+      ],
+    });
+    expect(out.length).toBeLessThanOrEqual(3);
+    // The duplicate must not appear as a second candidate
+    const xs = out.map((d) => Math.round(d.bbox[0] / 50));
+    expect(new Set(xs).size).toBe(out.length);
+  });
+
+  it("uses blob evidence only while the scene is stable", () => {
+    const stable = buildUnknownDetections({ ...base, lowConfDetections: [], blobs: [blob()] });
+    expect(stable).toHaveLength(1);
+    const unstable = buildUnknownDetections({
+      ...base, lowConfDetections: [], blobs: [blob()], sceneUnstable: true,
+    });
+    expect(unstable).toHaveLength(0);
+  });
+
+  it("drops a blob duplicating a low-confidence candidate (YOLO box wins)", () => {
+    // Centered blob lands around [250, 270, 154, 86] in model space
+    const out = buildUnknownDetections({
+      ...base,
+      lowConfDetections: [det([250, 270, 150, 90], 0.2)],
+      blobs: [blob()],
+    });
+    expect(out).toHaveLength(1);
+    expect(out[0].bbox).toEqual([250, 270, 150, 90]);
   });
 });

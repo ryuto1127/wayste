@@ -30,6 +30,11 @@ export interface CardSyncThresholds {
   /** How long a confirmed track may stay below the instant bar before it is
    *  resolved on-device as needs_review. */
   needsReviewMs: number;
+  /** Optional gate consulted before CREATING a needs_review card. Lets the
+   *  caller require e.g. a steady track (low travelEma) so patterns riding
+   *  on moving clothing/hands never surface as cards. Instant hits and
+   *  upgrades are unaffected. Absent → always allowed. */
+  needsReviewGate?: (track: Track) => boolean;
 }
 
 /** Resolution hooks the caller provides — site rules and locale live there. */
@@ -120,7 +125,10 @@ export function syncContinuousCards(
       }
       // Below the instant bar (or no rule): give confidence a moment to
       // firm up, then resolve on-device as needs_review.
-      if (now - (t.confirmedAt ?? now) >= thresholds.needsReviewMs) {
+      if (
+        now - (t.confirmedAt ?? now) >= thresholds.needsReviewMs &&
+        (thresholds.needsReviewGate?.(t) ?? true)
+      ) {
         const card = needsReviewCard(t);
         cards.set(t.id, card);
         changed = true;

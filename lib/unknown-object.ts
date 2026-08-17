@@ -115,8 +115,18 @@ export function synthesizeUnknownDetections(
 }
 
 /** Cap on low-confidence candidates per cycle — the tracker's maxTracks
- *  also guards, but flooding it with weak boxes wastes matching work. */
-const MAX_LOW_CONF_CANDIDATES = 3;
+ *  also guards, but flooding it with weak boxes wastes matching work, and
+ *  more than two simultaneous "確認が必要" cards is noise, not guidance. */
+const MAX_LOW_CONF_CANDIDATES = 2;
+
+/** Minimum bbox area (model-space px²) for a low-confidence candidate.
+ *  Weak evidence must at least be item-sized — this excludes rings,
+ *  buttons, badges, and other small features riding on a person. */
+const MIN_LOW_CONF_AREA = 1200;
+
+/** Overlap (intersection / smaller box) with a suppression zone —
+ *  background baseline regions or detected faces — that kills a candidate. */
+const MAX_ZONE_OVERLAP = 0.35;
 
 /**
  * Build all unknown_object candidates for one cycle.
@@ -134,6 +144,9 @@ export function buildUnknownDetections(params: {
   sceneUnstable: boolean;
   confidentDetections: YoloDetection[];
   knownTrackBboxes: Bbox[];
+  /** Regions that must never spawn unknown candidates: the startup
+   *  background baseline (window handles, furniture) and detected faces. */
+  suppressZones?: Bbox[];
   videoAspect: number;
   /** Confidence stamped on synthetic detections — the tracker's appear
    *  threshold, so candidates can seed tracks (temporal filtering then
@@ -143,18 +156,22 @@ export function buildUnknownDetections(params: {
 }): YoloDetection[] {
   const {
     lowConfDetections, blobs, sceneUnstable, confidentDetections,
-    knownTrackBboxes, videoAspect, confidence, modelSize = 640,
+    knownTrackBboxes, suppressZones = [], videoAspect, confidence, modelSize = 640,
   } = params;
 
   const coveredByKnown = (bbox: Bbox) =>
     confidentDetections.some((d) => overlapOverMinArea(bbox, d.bbox as Bbox) > MAX_KNOWN_OVERLAP) ||
     knownTrackBboxes.some((tb) => overlapOverMinArea(bbox, tb) > MAX_KNOWN_OVERLAP);
+  const inSuppressedZone = (bbox: Bbox) =>
+    suppressZones.some((z) => overlapOverMinArea(bbox, z) > MAX_ZONE_OVERLAP);
 
   // Primary: low-confidence YOLO boxes, strongest first.
   const fromYolo: YoloDetection[] = [];
   for (const d of [...lowConfDetections].sort((a, b) => b.confidence - a.confidence)) {
     if (fromYolo.length >= MAX_LOW_CONF_CANDIDATES) break;
+    if (d.bbox[2] * d.bbox[3] < MIN_LOW_CONF_AREA) continue;
     if (coveredByKnown(d.bbox as Bbox)) continue;
+    if (inSuppressedZone(d.bbox as Bbox)) continue;
     if (fromYolo.some((u) => overlapOverMinArea(u.bbox as Bbox, d.bbox as Bbox) > MAX_KNOWN_OVERLAP)) continue;
     fromYolo.push({
       classId: UNKNOWN_OBJECT_CLASS_ID,
@@ -171,7 +188,9 @@ export function buildUnknownDetections(params: {
     : synthesizeUnknownDetections(
         blobs, confidentDetections, knownTrackBboxes, videoAspect, confidence, modelSize,
       ).filter(
-        (b) => !fromYolo.some((u) => overlapOverMinArea(u.bbox as Bbox, b.bbox as Bbox) > MAX_KNOWN_OVERLAP),
+        (b) =>
+          !inSuppressedZone(b.bbox as Bbox) &&
+          !fromYolo.some((u) => overlapOverMinArea(u.bbox as Bbox, b.bbox as Bbox) > MAX_KNOWN_OVERLAP),
       );
 
   return [...fromYolo, ...fromBlobs];

@@ -168,6 +168,23 @@ describe("buildUnknownDetections", () => {
     expect(unstable).toHaveLength(0);
   });
 
+  it("suppresses candidates inside a suppression zone (background/face veto)", () => {
+    const out = buildUnknownDetections({
+      ...base,
+      lowConfDetections: [det([100, 200, 80, 120], 0.2)],
+      suppressZones: [[90, 190, 110, 140]],
+    });
+    expect(out).toHaveLength(0);
+  });
+
+  it("rejects low-confidence boxes below the minimum item size (ring/button)", () => {
+    const out = buildUnknownDetections({
+      ...base,
+      lowConfDetections: [det([100, 200, 25, 25], 0.3)],
+    });
+    expect(out).toHaveLength(0);
+  });
+
   it("drops a blob duplicating a low-confidence candidate (YOLO box wins)", () => {
     // Centered blob lands around [250, 270, 154, 86] in model space
     const out = buildUnknownDetections({

@@ -18,6 +18,11 @@ import type { ClassificationResponse, TrackedResult } from "@/lib/types";
 
 /** Instant bar matching the default-sensitivity YOLO_FALLBACK_THRESHOLD. */
 const TH: CardSyncThresholds = { instantConfidence: 0.725, needsReviewMs: 1500 };
+/** Same thresholds with a steadiness gate (as the kiosk passes in). */
+const TH_GATED: CardSyncThresholds = {
+  ...TH,
+  needsReviewGate: (t) => t.travelEma <= 8,
+};
 
 function track(overrides: Partial<Track> = {}): Track {
   return {
@@ -39,6 +44,8 @@ function track(overrides: Partial<Track> = {}): Track {
     swapClassId: -1,
     swapCount: 0,
     swapSince: 0,
+    travelEma: 0,
+    lastRawCenter: [160, 200],
     ...overrides,
   };
 }
@@ -304,6 +311,28 @@ describe("syncContinuousCards", () => {
       expect(next.cards.get(t.id)!._trackBbox).toEqual([150, 120, 120, 200]);
       // ...but a bbox follow alone must not re-render the card list.
       expect(next.changed).toBe(false);
+    });
+  });
+
+  describe("needsReviewGate (steadiness)", () => {
+    it("blocks a needs_review card for a fast-moving track (clothing on a walker)", () => {
+      const moving = track({ className: "mystery", classId: -1, confidence: 0.5, travelEma: 30 });
+      const out = syncContinuousCards([moving], [], new Map(), TH_GATED, 2000, resolvers);
+      expect(out.cards.size).toBe(0);
+    });
+
+    it("allows the card once the track settles", () => {
+      const steady = track({ className: "mystery", classId: -1, confidence: 0.5, travelEma: 3 });
+      const out = syncContinuousCards([steady], [], new Map(), TH_GATED, 2000, resolvers);
+      expect(out.cards.size).toBe(1);
+      expect(out.cards.get(1)!.needsReview).toBe(true);
+    });
+
+    it("never gates instant hits", () => {
+      const movingConfident = track({ confidence: 0.9, travelEma: 30 });
+      const out = syncContinuousCards([movingConfident], [], new Map(), TH_GATED, 2000, resolvers);
+      expect(out.cards.size).toBe(1);
+      expect(out.cards.get(1)!.needsReview).toBe(false);
     });
   });
 });

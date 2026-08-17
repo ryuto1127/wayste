@@ -54,6 +54,13 @@ export interface Track {
   swapCount: number;
   /** When the current swap-candidate streak started (ms). */
   swapSince: number;
+  /** EMA of per-cycle raw-detection center displacement (model-space px).
+   *  Low = the object is being held/placed steadily; high = it's riding on
+   *  something that moves (a walking person's clothing, a carried bag).
+   *  Callers use this to gate "presented item" decisions. */
+  travelEma: number;
+  /** Raw detection center from the last matched cycle (travelEma input). */
+  lastRawCenter: [number, number];
 }
 
 export type TrackerEvent =
@@ -257,11 +264,14 @@ export class DetectionTracker {
         }
       }
 
-      // ── Parked bookkeeping ──
+      // ── Motion bookkeeping ──
       // Movement is judged on the RAW detection center: the smoothed track
       // bbox halves each step of real motion, which would make a genuinely
       // moved object look stationary and keep it suppressed.
       const c = center(det.bbox as Bbox);
+      track.travelEma =
+        track.travelEma * 0.7 + centerDistance(c, track.lastRawCenter) * 0.3;
+      track.lastRawCenter = c;
       if (centerDistance(c, track.anchorCenter) > cfg.parkedMoveTolerance) {
         track.anchorCenter = c;
         track.anchorSince = now;
@@ -346,6 +356,8 @@ export class DetectionTracker {
         swapClassId: -1,
         swapCount: 0,
         swapSince: now,
+        travelEma: 0,
+        lastRawCenter: c,
       });
     }
 

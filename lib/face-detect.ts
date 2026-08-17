@@ -85,6 +85,43 @@ export async function warmupFaceDetector(): Promise<void> {
   await getDetector();
 }
 
+/** A detected face's bounding box, in pixels of the source image. */
+export interface FaceBox {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/**
+ * Returns bounding boxes of all detected faces, in source-image pixels.
+ * Empty array when no faces are found or the detector is unavailable.
+ *
+ * Used by continuous mode's unknown-object fallback to VETO candidate
+ * regions on people — the kiosk must never draw a detection box on a face,
+ * and clothing/skin near a face is a person, not presented waste. Detection
+ * runs fully on-device; nothing is stored or sent anywhere.
+ */
+export async function detectFaceBoxes(
+  source: HTMLCanvasElement | HTMLVideoElement | HTMLImageElement,
+): Promise<FaceBox[]> {
+  const fd = await getDetector();
+  if (!fd) return [];
+  try {
+    const result = fd.detect(source);
+    const boxes: FaceBox[] = [];
+    for (const d of result.detections) {
+      const bb = d.boundingBox;
+      if (!bb) continue;
+      boxes.push({ x: bb.originX, y: bb.originY, w: bb.width, h: bb.height });
+    }
+    return boxes;
+  } catch (err) {
+    console.warn("[face-detect] Box detection error:", err);
+    return [];
+  }
+}
+
 /**
  * Returns true if one or more faces are detected in the image source.
  *

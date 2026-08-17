@@ -135,6 +135,26 @@ const UNKNOWN_CANDIDATE_MIN_CONF = 0.12;
  *  pan, lighting shift) — background-subtraction blobs are meaningless and
  *  must not spawn unknown-object candidates. */
 const SCENE_UNSTABLE_FG_RATIO = 0.35;
+/** For this long after the continuous loop's first cycle, unknown candidates
+ *  are LEARNED as background zones instead of tracked — whatever is visible
+ *  at startup (window handles, furniture, wall fixtures) is scenery, not an
+ *  item someone brought. */
+const CONTINUOUS_BASELINE_MS = 4_000;
+/** An unknown track that has sat still this long is background that slipped
+ *  past the baseline — demote its region to a background zone. */
+const UNKNOWN_STATIC_TO_ZONE_MS = 20_000;
+/** Max per-cycle raw-center travel (model-space px) for a track to count as
+ *  "steadily presented". needs_review cards are only created for steady
+ *  tracks — patterns riding on moving clothing/hands never surface. */
+const STEADY_MAX_TRAVEL_PX = 8;
+/** How often to sweep the frame for faces (veto zones), and how long a
+ *  sweep's result stays valid. */
+const FACE_SWEEP_INTERVAL_MS = 1_200;
+const FACE_ZONE_TTL_MS = 2_500;
+/** Face sweep runs on a small letterboxed canvas of this size. */
+const FACE_SWEEP_CANVAS_SIZE = 256;
+/** Cap on remembered background zones (FIFO). */
+const BACKGROUND_ZONE_CAP = 16;
 
 // ── Cloud fallback (pilot experiments only) ──
 /** OFF by default: items YOLO can't confidently resolve become `needs_review`
@@ -263,6 +283,15 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
   /** Whether an unknown-object (blob-backed) track is currently displayed —
    *  freezes BG adaptation so the blob sustaining it isn't absorbed. */
   const hasUnknownTrackRef = useRef(false);
+  /** Regions (model space) that must not spawn unknown candidates: startup
+   *  scenery + demoted long-static unknowns. FIFO-capped. */
+  const backgroundZonesRef = useRef<Bbox[]>([]);
+  /** End of the startup baseline-learning window (0 = not started). */
+  const baselineUntilRef = useRef(0);
+  /** Latest face sweep result (model-space boxes + timestamp). */
+  const faceZonesRef = useRef<{ boxes: Bbox[]; at: number }>({ boxes: [], at: 0 });
+  /** Reusable small canvas for the face sweep (HTMLCanvas — MediaPipe input). */
+  const faceSweepCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // ── Voice guidance (site-config driven — end-users cannot toggle) ──
   const [voiceEnabled, setVoiceEnabled] = useState(false);
@@ -1078,6 +1107,19 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           const cycleMs = Date.now() - t0;
           perfMonitor.recordYoloInference(cycleMs);
           if (!yoloRunningRef.current || yoloGenRef.current !== gen) break;
+
+          // ── Face sweep (~1fps): veto zones for the unknown fallback ──
+          // The kiosk must never box a face, and clothing near a face is a
+          // person, not presented waste. Fully on-device; nothing stored.
+          if (Date.now() - faceZonesRef.current.at >= FACE_SWEEP_INTERVAL_MS) {
+            try {
+              await sweepFaceZones(video);
+            } catch {
+              // Face veto is best-effort — never block the pipeline.
+            }
+            if (!yoloRunningRef.current || yoloGenRef.current !== gen) break;
+          }
+
           try {
             handleContinuousCycle(detections, Date.now(), video, cycleMs);
           } catch (err) {
@@ -1102,6 +1144,60 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
         }
         console.log(`[continuous] loop stopped (gen ${gen})`);
       })();
+    }
+
+    /** Detect faces on a small letterboxed copy of the frame and store their
+     *  model-space boxes (padded) as veto zones for the unknown fallback. */
+    async function sweepFaceZones(video: HTMLVideoElement) {
+      const { detectFaceBoxes } = await import("@/lib/face-detect");
+      if (!faceSweepCanvasRef.current) {
+        faceSweepCanvasRef.current = document.createElement("canvas");
+        faceSweepCanvasRef.current.width = FACE_SWEEP_CANVAS_SIZE;
+        faceSweepCanvasRef.current.height = FACE_SWEEP_CANVAS_SIZE;
+      }
+      const canvas = faceSweepCanvasRef.current;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      const vw = video.videoWidth;
+      const vh = video.videoHeight;
+      if (!vw || !vh) return;
+      // Same letterbox layout as the YOLO input, at sweep resolution — face
+      // boxes then map to model space with a single scale factor.
+      const lb = computeLetterbox(vw, vh, FACE_SWEEP_CANVAS_SIZE);
+      ctx.fillStyle = "#000";
+      ctx.fillRect(0, 0, FACE_SWEEP_CANVAS_SIZE, FACE_SWEEP_CANVAS_SIZE);
+      ctx.drawImage(video, 0, 0, vw, vh, lb.dx, lb.dy, lb.dw, lb.dh);
+
+      const faces = await detectFaceBoxes(canvas);
+      const scale = YOLO_MODEL_SIZE / FACE_SWEEP_CANVAS_SIZE;
+      faceZonesRef.current = {
+        at: Date.now(),
+        boxes: faces.map((f) => {
+          // Pad 25% on each side — hair/shoulders belong to the person too.
+          const padX = f.w * 0.25;
+          const padY = f.h * 0.25;
+          return [
+            (f.x - padX) * scale,
+            (f.y - padY) * scale,
+            (f.w + padX * 2) * scale,
+            (f.h + padY * 2) * scale,
+          ] as Bbox;
+        }),
+      };
+    }
+
+    /** Remember a region as scenery (FIFO-capped, overlap-deduped). */
+    function addBackgroundZone(bbox: Bbox) {
+      const zones = backgroundZonesRef.current;
+      const overlaps = (a: Bbox, b: Bbox) => {
+        const ix = Math.max(0, Math.min(a[0] + a[2], b[0] + b[2]) - Math.max(a[0], b[0]));
+        const iy = Math.max(0, Math.min(a[1] + a[3], b[1] + b[3]) - Math.max(a[1], b[1]));
+        const minArea = Math.min(a[2] * a[3], b[2] * b[3]);
+        return minArea > 0 && (ix * iy) / minArea > 0.5;
+      };
+      if (zones.some((z) => overlaps(z, bbox))) return;
+      zones.push([...bbox] as Bbox);
+      if (zones.length > BACKGROUND_ZONE_CAP) zones.shift();
     }
 
     /** One continuous-mode cycle: feed the tracker, sync result cards to
@@ -1143,7 +1239,9 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       // filters the noise; cards resolve as needs_review.
       const analysisForBlobs = lastAnalysisRef.current;
       const hasAspect = Number.isFinite(aspect) && aspect > 0;
-      const synthetic = hasAspect
+      const faceZones =
+        now - faceZonesRef.current.at < FACE_ZONE_TTL_MS ? faceZonesRef.current.boxes : [];
+      let synthetic = hasAspect
         ? buildUnknownDetections({
             lowConfDetections,
             blobs: analysisForBlobs?.isSettled ? analysisForBlobs.blobs : [],
@@ -1155,10 +1253,22 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
               .getTracks()
               .filter((t) => t.classId !== UNKNOWN_OBJECT_CLASS_ID)
               .map((t) => t.bbox),
+            suppressZones: [...backgroundZonesRef.current, ...faceZones],
             videoAspect: aspect,
             confidence: th.TRACK_APPEAR_THRESHOLD,
           })
         : [];
+
+      // ── Startup baseline: whatever is visible in the first seconds is
+      // scenery (window handles, fixtures), not an item someone brought.
+      // Learn those regions as background zones instead of tracking them.
+      if (baselineUntilRef.current === 0) {
+        baselineUntilRef.current = now + CONTINUOUS_BASELINE_MS;
+      }
+      if (now < baselineUntilRef.current) {
+        for (const cand of synthetic) addBackgroundZone(cand.bbox as Bbox);
+        synthetic = [];
+      }
 
       // Content bounds let the tracker clear edge-exited items fast while
       // still coasting through mid-frame occlusion.
@@ -1178,6 +1288,22 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
         (t) => t.classId === UNKNOWN_OBJECT_CLASS_ID && DetectionTracker.isDisplayable(t),
       );
 
+      // ── Demote long-static unknowns to scenery ──
+      // Background that slipped past the startup baseline (revealed by a
+      // lighting change, or present before a watchdog restart) will sit
+      // still indefinitely — a real presented item doesn't. Zone it; the
+      // candidate feed then starves and the track coasts out.
+      for (const t of tracks) {
+        if (
+          t.classId === UNKNOWN_OBJECT_CLASS_ID &&
+          now - t.firstSeenAt >= UNKNOWN_STATIC_TO_ZONE_MS &&
+          t.travelEma <= STEADY_MAX_TRAVEL_PX
+        ) {
+          console.log(`[continuous] static unknown track ${t.id} → background zone`);
+          addBackgroundZone(t.bbox);
+        }
+      }
+
       const { cards, changed, actions, sessionEnded } = syncContinuousCards(
         tracks,
         events,
@@ -1185,6 +1311,9 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
         {
           instantConfidence: th.YOLO_FALLBACK_THRESHOLD,
           needsReviewMs: CONTINUOUS_NEEDS_REVIEW_MS,
+          // Only steadily-presented tracks earn a needs_review card —
+          // patterns riding on moving clothing/hands never surface.
+          needsReviewGate: (t) => t.travelEma <= STEADY_MAX_TRAVEL_PX,
         },
         now,
         {

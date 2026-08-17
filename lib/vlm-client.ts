@@ -129,7 +129,9 @@ export function buildVlmPrompt(
   const streamList = streams
     .map((s) => `"${s.id}" (${s.label}: ${s.description})`)
     .join(", ");
-  const names = canonicalNames.slice(0, 60).join(", ");
+  // Every name here is prompt-prefill the user waits through on each
+  // judgment (WebGPU prefill is the dominant latency term) — cap tight.
+  const names = canonicalNames.slice(0, 24).join(", ");
   const lang = locale === "ja" ? "Japanese" : "English";
   return [
     `You are a waste-sorting assistant. Identify the single main item in the photo and assign it to exactly one stream.`,

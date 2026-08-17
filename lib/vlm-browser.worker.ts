@@ -112,7 +112,11 @@ async function handleInit(msg: Extract<InMessage, { type: "init" }>) {
 async function handleJudge(msg: Extract<InMessage, { type: "judge" }>) {
   try {
     if (!processor || !model) throw new Error("model not ready");
-    const image = await (await RawImage.read(msg.image)).resize(448, 448);
+    // 336px (= 12 vision patches/side) instead of 448: ~45% fewer image
+    // tokens to prefill, which is the bulk of per-judgment latency on
+    // WebGPU. The input is a single-item crop, not a scene — naming one
+    // object survives the resolution cut; multi-second waits don't.
+    const image = await (await RawImage.read(msg.image)).resize(336, 336);
     const conversation = [
       {
         role: "user",
@@ -128,8 +132,10 @@ async function handleJudge(msg: Extract<InMessage, { type: "judge" }>) {
       ...inputs,
       // The answer is one short JSON object (~40 tokens). Generation is
       // sequential, so every unused token in this budget is latency the
-      // user waits through when the model rambles before stopping.
-      max_new_tokens: msg.maxNewTokens ?? 96,
+      // user waits through when the model rambles before stopping. 64 is
+      // ~1.5× the longest well-formed answer seen in testing; the parser
+      // tolerates a clipped trailing field but not a missing stream id.
+      max_new_tokens: msg.maxNewTokens ?? 64,
       do_sample: false,
     });
     const decoded = processor.batch_decode(

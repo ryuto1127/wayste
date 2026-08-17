@@ -94,9 +94,31 @@ describe("computeThresholds", () => {
 
   describe("continuous-mode tracker thresholds", () => {
     it("derives TRACK_APPEAR_THRESHOLD across the sensitivity range", () => {
-      expect(computeThresholds(0.0).TRACK_APPEAR_THRESHOLD).toBeCloseTo(0.60, 4);
-      expect(computeThresholds(0.5).TRACK_APPEAR_THRESHOLD).toBeCloseTo(0.525, 4);
-      expect(computeThresholds(1.0).TRACK_APPEAR_THRESHOLD).toBeCloseTo(0.45, 4);
+      expect(computeThresholds(0.0).TRACK_APPEAR_THRESHOLD).toBeCloseTo(0.50, 4);
+      expect(computeThresholds(0.5).TRACK_APPEAR_THRESHOLD).toBeCloseTo(0.40, 4);
+      expect(computeThresholds(1.0).TRACK_APPEAR_THRESHOLD).toBeCloseTo(0.30, 4);
+    });
+
+    it("orders the continuous bars keep < appear < resolve", () => {
+      for (const s of [0.0, 0.5, 0.7, 1.0]) {
+        const th = computeThresholds(s);
+        expect(th.TRACK_KEEP_THRESHOLD).toBeLessThan(th.TRACK_APPEAR_THRESHOLD);
+        expect(th.TRACK_APPEAR_THRESHOLD).toBeLessThan(th.TRACK_RESOLVE_THRESHOLD);
+      }
+    });
+
+    it("resolves well below the gated single-frame bar", () => {
+      // Continuous mode has temporal voting; gated mode decides on one
+      // frame. Equalizing them makes correct detections read 確認が必要.
+      for (const s of [0.0, 0.5, 1.0]) {
+        const th = computeThresholds(s);
+        expect(th.TRACK_RESOLVE_THRESHOLD).toBeLessThan(th.YOLO_FALLBACK_THRESHOLD - 0.1);
+      }
+    });
+
+    it("leaves a needs_review band between appearing and being named", () => {
+      const th = computeThresholds(0.7);
+      expect(th.TRACK_RESOLVE_THRESHOLD - th.TRACK_APPEAR_THRESHOLD).toBeGreaterThan(0.05);
     });
 
     it("keeps TRACK_KEEP_THRESHOLD strictly below TRACK_APPEAR_THRESHOLD (hysteresis)", () => {
@@ -107,12 +129,7 @@ describe("computeThresholds", () => {
       }
     });
 
-    it("keeps the appear bar below the instant-resolve bar so tracks can exist as needs_review", () => {
-      for (const s of [0.0, 0.5, 1.0]) {
-        const th = computeThresholds(s);
-        expect(th.TRACK_APPEAR_THRESHOLD).toBeLessThan(th.YOLO_FALLBACK_THRESHOLD);
-      }
-    });
+
   });
 
   describe("calibration override", () => {

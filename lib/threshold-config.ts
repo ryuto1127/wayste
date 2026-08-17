@@ -31,6 +31,17 @@ export interface ThresholdConfig {
   TRACK_APPEAR_THRESHOLD: number;
   /** Continuous mode: confidence floor to KEEP matching an existing track (hysteresis low). */
   TRACK_KEEP_THRESHOLD: number;
+  /**
+   * Continuous mode: smoothed confidence at which a confirmed track is
+   * resolved to a bin outright. Deliberately far below the gated mode's
+   * `YOLO_FALLBACK_THRESHOLD`: there, one frame decides, so the bar must be
+   * high. Here a track has already survived N-of-M voting plus a wall-clock
+   * age gate, and its confidence is EMA-smoothed — that temporal evidence
+   * is what a single high threshold was standing in for. Keeping the gated
+   * bar in continuous mode makes the kiosk answer "確認が必要" for items it
+   * has, in fact, identified correctly for a full second.
+   */
+  TRACK_RESOLVE_THRESHOLD: number;
 }
 
 function lerp(a: number, b: number, t: number): number {
@@ -86,8 +97,17 @@ export function computeThresholds(
   // Continuous-mode hysteresis: entry is strict, hold is lenient. The keep
   // floor is also passed to YOLO as its confidence cutoff, so low-confidence
   // frames still feed existing tracks instead of reading as "item vanished".
-  const TRACK_APPEAR_THRESHOLD = lerp(0.60, 0.45, s);
+  //
+  // The range sits well below the gated bar because these thresholds are
+  // read against a model that is confident but not over-confident on its
+  // five classes, and every track they admit still has to clear temporal
+  // voting. Raising them back up reintroduces "確認が必要" on plainly
+  // correct detections; lowering them further lets single-frame noise in.
+  const TRACK_APPEAR_THRESHOLD = lerp(0.50, 0.30, s);
   const TRACK_KEEP_THRESHOLD = TRACK_APPEAR_THRESHOLD * 0.65;
+  // A band above "appear" where the item is tracked but not named yet —
+  // this is what routes an uncertain item to needs_review / the VLM tier.
+  const TRACK_RESOLVE_THRESHOLD = TRACK_APPEAR_THRESHOLD + 0.08;
 
   return {
     ROI_FG_THRESHOLD,
@@ -100,5 +120,6 @@ export function computeThresholds(
     OBJECT_GONE_FRAMES,
     TRACK_APPEAR_THRESHOLD,
     TRACK_KEEP_THRESHOLD,
+    TRACK_RESOLVE_THRESHOLD,
   };
 }

@@ -1524,7 +1524,9 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
         events,
         continuousCardsRef.current,
         {
-          instantConfidence: th.YOLO_FALLBACK_THRESHOLD,
+          // Continuous mode resolves at the tracker-calibrated bar, not the
+          // gated single-frame bar — see TRACK_RESOLVE_THRESHOLD.
+          instantConfidence: th.TRACK_RESOLVE_THRESHOLD,
           needsReviewMs: CONTINUOUS_NEEDS_REVIEW_MS,
           // Only steadily-presented tracks earn a needs_review card —
           // patterns riding on moving clothing/hands never surface.

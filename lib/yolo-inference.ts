@@ -26,6 +26,10 @@ let session: InferenceSession | null = null;
 let loading: Promise<boolean> | null = null;
 /** The execution provider that was actually used ("webgpu" | "wasm"). */
 let activeProvider: string = "unknown";
+/** Reusable preprocess canvas — continuous mode runs up to ~30 inferences/s,
+ *  and allocating a fresh OffscreenCanvas per call churns GC on long runs.
+ *  Inference calls are sequential (callers await), so sharing is safe. */
+let preprocessCanvas: OffscreenCanvas | null = null;
 
 /** Input size expected by the YOLO model. */
 const MODEL_INPUT_SIZE = 640;
@@ -156,8 +160,11 @@ export async function runYoloInference(
     const vw = video.videoWidth;
     const vh = video.videoHeight;
 
-    const canvas = new OffscreenCanvas(MODEL_INPUT_SIZE, MODEL_INPUT_SIZE);
-    const ctx = canvas.getContext("2d");
+    if (!preprocessCanvas) {
+      preprocessCanvas = new OffscreenCanvas(MODEL_INPUT_SIZE, MODEL_INPUT_SIZE);
+    }
+    const canvas = preprocessCanvas;
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
     if (!ctx) return [];
 
     if (fullFrame) {

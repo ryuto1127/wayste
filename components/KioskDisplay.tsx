@@ -40,6 +40,7 @@ import {
 import { recordSort } from "@/lib/kiosk-counter";
 import { DetectionTracker, type Track } from "@/lib/detection-tracker";
 import { syncContinuousCards } from "@/lib/continuous-cards";
+import { synthesizeUnknownDetections, UNKNOWN_OBJECT_CLASS_ID } from "@/lib/unknown-object";
 import CameraFeed, { type CameraFeedHandle } from "./CameraFeed";
 import IdleScreen from "./IdleScreen";
 import CameraScreen from "./CameraScreen";
@@ -120,6 +121,10 @@ const CONTINUOUS_NEEDS_REVIEW_MS = 1_500;
 /** Minimum spacing between pilot-log posts in continuous mode — a person
  *  walking through with items must not spam the log with uploads. */
 const CONTINUOUS_LOG_MIN_INTERVAL_MS = 4_000;
+/** If the continuous YOLO loop produces no iteration for this long, the CV
+ *  interval assumes it hung (stuck await, zombie exit) and restarts it.
+ *  An unattended kiosk must self-heal, not sit dead until someone notices. */
+const CONTINUOUS_WATCHDOG_MS = 10_000;
 
 // ── Cloud fallback (pilot experiments only) ──
 /** OFF by default: items YOLO can't confidently resolve become `needs_review`
@@ -243,6 +248,11 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
   const lastContinuousLogRef = useRef(0);
   /** Starter installed by the main pipeline effect, invoked by the mode effect. */
   const startContinuousLoopRef = useRef<(() => void) | null>(null);
+  /** Timestamp of the last continuous-loop iteration — watchdog input. */
+  const lastContinuousCycleAtRef = useRef(0);
+  /** Whether an unknown-object (blob-backed) track is currently displayed —
+   *  freezes BG adaptation so the blob sustaining it isn't absorbed. */
+  const hasUnknownTrackRef = useRef(false);
 
   // ── Voice guidance (site-config driven — end-users cannot toggle) ──
   const [voiceEnabled, setVoiceEnabled] = useState(false);
@@ -626,13 +636,19 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       // All result states (including nothing_detected) freeze BG to prevent
       // non-waste objects from being absorbed. boostBackgroundAdaptation()
       // rapidly corrects on exit (gone check or timeout).
+      // Continuous mode: idle rate, EXCEPT while an unknown-object track is
+      // displayed — its CV blob is the diff against the pre-item background,
+      // and absorbing the item would starve the synthetic detections that
+      // sustain the track (card would vanish with the item still there).
       const currentState = stateRef.current;
       const bgRate =
-        currentState === "idle" || currentState === "cooldown"
-          ? BG_RATE_IDLE
-          : currentState === "result"
-            ? BG_RATE_RESULT
-            : BG_RATE_FROZEN;
+        detectionModeRef.current === "continuous"
+          ? (hasUnknownTrackRef.current ? BG_RATE_FROZEN : BG_RATE_IDLE)
+          : currentState === "idle" || currentState === "cooldown"
+            ? BG_RATE_IDLE
+            : currentState === "result"
+              ? BG_RATE_RESULT
+              : BG_RATE_FROZEN;
       analyzer.setBgRate(bgRate);
 
       // Keep analyzer's idle threshold in sync for rolling calibration
@@ -696,7 +712,19 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       // The CV loop still feeds analysis meta (sharpness for pilot logs),
       // thermal monitoring, and rolling calibration above — but detection
       // and all UI state are driven by the continuous YOLO loop.
-      if (detectionModeRef.current === "continuous") return;
+      if (detectionModeRef.current === "continuous") {
+        // Watchdog: the loop stamps every iteration; a long silence means a
+        // hung await or zombie exit. Restart — self-heal, don't sit dead.
+        const lastCycle = lastContinuousCycleAtRef.current;
+        if (lastCycle > 0 && Date.now() - lastCycle > CONTINUOUS_WATCHDOG_MS) {
+          console.warn("[continuous] watchdog: loop stalled — restarting");
+          lastContinuousCycleAtRef.current = Date.now();
+          yoloRunningRef.current = false;
+          yoloGenRef.current++; // invalidate any hung in-flight iteration
+          startContinuousLoop();
+        }
+        return;
+      }
 
       const th = thresholdsRef.current;
 
@@ -1012,6 +1040,9 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       console.log(`[continuous] loop started (gen ${gen})`);
       (async () => {
         while (yoloRunningRef.current && yoloGenRef.current === gen) {
+          // Stamp every iteration (including waits) — the CV interval's
+          // watchdog restarts the loop if this goes silent.
+          lastContinuousCycleAtRef.current = Date.now();
           const video = cameraRef.current?.getVideo();
           const backend = inferenceRef.current;
           if (!video || !backend?.isReady() || !siteConfigRef.current) {
@@ -1081,10 +1112,41 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       }
 
       const wasteDetections = detections.filter((d) => !isYoloClassNotWaste(d.className));
-      const { tracks, events } = trackerRef.current.update(wasteDetections, now, {
-        appearConfidence: th.TRACK_APPEAR_THRESHOLD,
-        keepConfidence: th.TRACK_KEEP_THRESHOLD,
-      });
+
+      // ── Class-agnostic fallback ──
+      // Object-like CV blobs that no YOLO detection or known-class track
+      // covers become synthetic unknown_object detections. The tracker gives
+      // them the same temporal treatment as real detections, and the card
+      // layer resolves them as needs_review — a fully out-of-vocabulary item
+      // must never leave the kiosk silently unresponsive.
+      const analysisForBlobs = lastAnalysisRef.current;
+      const synthetic =
+        analysisForBlobs?.isSettled && Number.isFinite(aspect) && aspect > 0
+          ? synthesizeUnknownDetections(
+              analysisForBlobs.blobs,
+              wasteDetections,
+              trackerRef.current
+                .getTracks()
+                .filter((t) => t.classId !== UNKNOWN_OBJECT_CLASS_ID)
+                .map((t) => t.bbox),
+              aspect,
+              th.TRACK_APPEAR_THRESHOLD,
+            )
+          : [];
+
+      const { tracks, events } = trackerRef.current.update(
+        [...wasteDetections, ...synthetic],
+        now,
+        {
+          appearConfidence: th.TRACK_APPEAR_THRESHOLD,
+          keepConfidence: th.TRACK_KEEP_THRESHOLD,
+        },
+      );
+
+      // BG freeze input: is a blob-backed unknown track currently displayed?
+      hasUnknownTrackRef.current = tracks.some(
+        (t) => t.classId === UNKNOWN_OBJECT_CLASS_ID && DetectionTracker.isDisplayable(t),
+      );
 
       const { cards, changed, actions, sessionEnded } = syncContinuousCards(
         tracks,

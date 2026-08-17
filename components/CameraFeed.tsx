@@ -34,8 +34,14 @@ const CameraFeed = forwardRef<CameraFeedHandle, CameraFeedProps>(function Camera
 
   useEffect(() => {
     let mounted = true;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
-    async function startCamera() {
+    // An unattended kiosk must self-heal: a camera that fails to start
+    // (transient OS error, device busy, permission granted later) or dies
+    // mid-run (USB unplug, OS sleep) is retried forever with backoff.
+    // While down, `ready` is false so getVideo() returns null and both
+    // detection pipelines simply wait instead of processing frozen frames.
+    async function startCamera(attempt = 0) {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
           video: {
@@ -52,6 +58,18 @@ const CameraFeed = forwardRef<CameraFeedHandle, CameraFeedProps>(function Camera
         }
 
         streamRef.current = stream;
+        setError(null);
+        // Device disappeared mid-run → drop to "starting" and reconnect.
+        for (const track of stream.getTracks()) {
+          track.onended = () => {
+            if (!mounted) return;
+            console.warn("[camera] track ended — reconnecting");
+            setReady(false);
+            streamRef.current?.getTracks().forEach((tr) => tr.stop());
+            streamRef.current = null;
+            retryTimer = setTimeout(() => startCamera(0), 1000);
+          };
+        }
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
           videoRef.current.onloadedmetadata = () => {
@@ -70,6 +88,8 @@ const CameraFeed = forwardRef<CameraFeedHandle, CameraFeedProps>(function Camera
         } else {
           setError(t(locale, "cameraFailedToStart"));
         }
+        const delayMs = Math.min(2000 * 2 ** attempt, 15_000);
+        retryTimer = setTimeout(() => startCamera(attempt + 1), delayMs);
       }
     }
 
@@ -77,6 +97,7 @@ const CameraFeed = forwardRef<CameraFeedHandle, CameraFeedProps>(function Camera
 
     return () => {
       mounted = false;
+      if (retryTimer) clearTimeout(retryTimer);
       streamRef.current?.getTracks().forEach((t) => t.stop());
     };
   }, []);

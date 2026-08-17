@@ -43,7 +43,7 @@ const PIXEL_COUNT = AW * AH;
 // 10% edge margin filters out camera edge noise, furniture, and
 // vibration while still providing early detection before items reach
 // YOLO's 640×640 analysis zone.
-const ROI_INSET = 0.10;
+export const ROI_INSET = 0.10;
 const ROI_X0 = Math.round(AW * ROI_INSET);        // 12
 const ROI_X1 = Math.round(AW * (1 - ROI_INSET));  // 108
 const ROI_Y0 = Math.round(AH * ROI_INSET);        // 12

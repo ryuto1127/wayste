@@ -33,6 +33,7 @@ import {
   frameDiff,
   greedyIoUMatch,
   computeIoU,
+  computeLetterbox,
   type Bbox,
 } from "@/lib/bbox-utils";
 // kioskAuthHeaders replaced by session token (server-generated, HMAC-signed)
@@ -1177,6 +1178,10 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
             .slice(0, 5),
         },
         [result],
+        undefined,
+        // Continuous-mode detections are full-frame letterboxed — log the
+        // matching letterboxed square, not the gated center crop.
+        true,
       );
     }
 
@@ -1643,14 +1648,33 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       allResults?: ClassificationResponse[],
       /** CV blob count and YOLO detection count for diagnostics. */
       counts?: { blobCount: number; yoloDetectionCount: number },
+      /** True when detections came from a full-frame letterboxed inference
+       *  (continuous mode) — the logged image must then be the same
+       *  letterboxed square, or bboxNorm won't line up with the pixels. */
+      fullFrameCapture = false,
     ) {
-      // Capture the same center short-side square that YOLO sees (e.g. 720×720
-      // from 1280×720). Log images preserve full resolution for fine-tuning.
+      // Capture the exact square the detections were produced in, so logged
+      // bboxNorm values align with the stored image (review overlays and
+      // fine-tuning export draw boxes on it). Log images preserve full
+      // resolution for fine-tuning.
+      //   gated:      center short-side square crop (e.g. 720×720 from 1280×720)
+      //   continuous: FULL frame letterboxed into a long-side square, matching
+      //               the model input in `lib/yolo-inference.ts` fullFrame mode
       const vw = video.videoWidth;
       const vh = video.videoHeight;
-      const side = Math.min(vw, vh);
-      const roiX = Math.round((vw - side) / 2);
-      const roiY = Math.round((vh - side) / 2);
+      const side = fullFrameCapture ? Math.max(vw, vh) : Math.min(vw, vh);
+      const drawCaptureSquare = (ctx: OffscreenCanvasRenderingContext2D) => {
+        if (fullFrameCapture) {
+          const { dx, dy, dw, dh } = computeLetterbox(vw, vh, side);
+          ctx.fillStyle = "#727272"; // same padding as the YOLO letterbox input
+          ctx.fillRect(0, 0, side, side);
+          ctx.drawImage(video, 0, 0, vw, vh, dx, dy, dw, dh);
+        } else {
+          const roiX = Math.round((vw - side) / 2);
+          const roiY = Math.round((vh - side) / 2);
+          ctx.drawImage(video, roiX, roiY, side, side, 0, 0, side, side);
+        }
+      };
 
       // ── Client-side face detection gate ──
       // BlazeFace is destructive to OffscreenCanvas (transferToImageBitmap),
@@ -1661,7 +1685,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       const faceCanvas = new OffscreenCanvas(side, side);
       const faceCtx = faceCanvas.getContext("2d");
       if (!faceCtx) return;
-      faceCtx.drawImage(video, roiX, roiY, side, side, 0, 0, side, side);
+      drawCaptureSquare(faceCtx);
 
       let faceDetected = false;
       try {
@@ -1689,6 +1713,8 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
         requiresVerification: result.needsReview ?? false,
         latencyMs,
         yoloDetections: toDetectionLogs(detections),
+        captureSpace: (fullFrameCapture ? "letterbox" : "center_square") as
+          "letterbox" | "center_square",
         meta: {
           sharpnessScore: analysis.sharpnessScore,
           imageQuality: imageQualityBand(analysis),
@@ -1709,8 +1735,8 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       }
 
       // No face → capture and upload. `faceCanvas` was drained by
-      // `transferToImageBitmap` inside `containsFace`, so redraw the ROI
-      // onto a fresh canvas for the JPEG encode. Pass faceDetected: false
+      // `transferToImageBitmap` inside `containsFace`, so redraw the capture
+      // square onto a fresh canvas for the JPEG encode. Pass faceDetected: false
       // so the server knows the client already checked — server still
       // re-runs its own detector (`/api/pilot-log/route.ts`) as the
       // authoritative floor, matching the pattern in `/api/classify`.
@@ -1718,7 +1744,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
         const uploadCanvas = new OffscreenCanvas(side, side);
         const uploadCtx = uploadCanvas.getContext("2d");
         if (!uploadCtx) return;
-        uploadCtx.drawImage(video, roiX, roiY, side, side, 0, 0, side, side);
+        drawCaptureSquare(uploadCtx);
         const blob = await uploadCanvas.convertToBlob({ type: "image/jpeg", quality: 0.82 });
         const dataUrl: string = await new Promise((resolve, reject) => {
           const reader = new FileReader();

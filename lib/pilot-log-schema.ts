@@ -76,6 +76,7 @@ export const PilotLogEntrySchema = z.object({
   requestId: z.string().max(128).optional(),
   meta: MetaSchema.optional(),
   yoloDetections: z.array(YoloDetectionSchema).max(64).optional(),
+  captureSpace: z.enum(["center_square", "letterbox"]).optional(),
   overrideApplied: z.boolean().optional(),
   rgbAnalysis: RgbAnalysisSchema.optional(),
   tierResults: TierResultsSchema.optional(),

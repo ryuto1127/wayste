@@ -44,7 +44,8 @@ import { buildUnknownDetections, UNKNOWN_OBJECT_CLASS_ID } from "@/lib/unknown-o
 import {
   judgeCropWithVlm,
   cropTrackToDataUrl,
-  isLocalVlmEndpointAllowed,
+  cropContainsFace,
+  getVlmMode,
   type VlmJudgment,
 } from "@/lib/vlm-client";
 import { buildClassificationResult } from "@/lib/waste-rules-core";
@@ -274,6 +275,12 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
   const [continuousMode, setContinuousMode] = useState(false);
   const [showOverlay, setShowOverlay] = useState(false);
   const [showBinMap, setShowBinMap] = useState(false);
+  /** Continuous mode starts in a setup phase: live camera only, so the
+   *  operator can aim the camera. Detection (and the background baseline)
+   *  begins when they press start — a baseline learned mid-aiming would be
+   *  garbage. Persisted per browser session so crash/HMR reloads self-heal
+   *  without a human, while a fresh session (new install day) asks again. */
+  const [continuousStarted, setContinuousStarted] = useState(false);
   const [liveTracks, setLiveTracks] = useState<LiveTrackView[]>([]);
   /** Camera aspect ratio (w/h) — the overlay needs it to map full-frame
    *  letterboxed model coords onto the object-cover video display. */
@@ -406,6 +413,38 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
 
   // Prevent SSR — this component requires browser APIs (camera, OffscreenCanvas)
   useEffect(() => setMounted(true), []);
+
+  // Same-session reloads skip the camera-aiming setup phase.
+  useEffect(() => {
+    try {
+      if (sessionStorage.getItem("wayste_continuous_started") === "1") {
+        setContinuousStarted(true);
+      }
+    } catch {
+      // sessionStorage unavailable (private mode etc.) — setup shows again.
+    }
+  }, []);
+
+  /** Operator pressed start: the camera angle is final. Reset everything
+   *  that observed the aiming phase, then begin detection + baseline. */
+  const handleStartContinuous = useCallback(() => {
+    analyzerRef.current?.reset();
+    trackerRef.current?.reset();
+    continuousCardsRef.current = new Map();
+    backgroundZonesRef.current = [];
+    baselineUntilRef.current = 0;
+    lastContinuousCycleAtRef.current = 0;
+    vlmJudgedRef.current.clear();
+    faceZonesRef.current = { boxes: [], at: 0 };
+    setStableResults([]);
+    setLiveTracks([]);
+    try {
+      sessionStorage.setItem("wayste_continuous_started", "1");
+    } catch {
+      // Best-effort persistence only.
+    }
+    setContinuousStarted(true);
+  }, []);
 
   // ── Subscribe to model loading status ──
   useEffect(() => {
@@ -1408,8 +1447,8 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       video: HTMLVideoElement,
     ) {
       const vlmCfg = siteConfigRef.current?.localVlm;
-      if (!vlmCfg?.endpoint || !vlmCfg.model) return;
-      if (!isLocalVlmEndpointAllowed(vlmCfg.endpoint)) return;
+      const vlmMode = getVlmMode(vlmCfg);
+      if (!vlmMode) return;
       if (vlmInFlightRef.current) return;
 
       for (const [id, card] of cards) {
@@ -1430,10 +1469,16 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           try {
             const siteConfig = siteConfigRef.current;
             if (!siteConfig) return;
+            // "server" mode sends the crop off-device — face-gate it first
+            // (the proxy re-checks server-side as the authoritative floor).
+            if (vlmMode === "server" && (await cropContainsFace(video, bbox))) {
+              console.log(`[vlm] track ${id}: crop contains a face — not sent`);
+              return;
+            }
             const dataUrl = await cropTrackToDataUrl(video, bbox);
             if (!dataUrl) return;
             const judgment = await judgeCropWithVlm(
-              dataUrl, vlmCfg, siteConfig, localeRef.current,
+              dataUrl, vlmCfg!, siteConfig, localeRef.current,
             );
             const latencyMs = Date.now() - t0;
             if (!judgment) {
@@ -2299,13 +2344,13 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
     }
   }, [classify, transition, T]);
 
-  // ── Start the continuous loop once site config selects the mode ──
-  // (The loop itself waits for the camera, model, and site config to be
-  // ready, so firing early is safe.)
+  // ── Start the continuous loop once the mode is selected AND the operator
+  // has confirmed the camera angle. (The loop itself waits for the camera,
+  // model, and site config to be ready, so firing early is safe.)
   useEffect(() => {
-    if (!continuousMode) return;
+    if (!continuousMode || !continuousStarted) return;
     startContinuousLoopRef.current?.();
-  }, [continuousMode]);
+  }, [continuousMode, continuousStarted]);
 
 
   // ── Derive which full-screen UI to show ──
@@ -2363,18 +2408,39 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       )}
 
       {/* Continuous mode: one persistent live view — camera + annotations +
-          compact result cards. No idle/camera/result screen switching. */}
+          compact result cards. No idle/camera/result screen switching.
+          Before the operator confirms the camera angle, only the live frame
+          and a start button are shown (setup phase). */}
       {continuousMode ? (
-        <LiveDetectionView
-          tracks={liveTracks}
-          results={stableResults}
-          streams={siteStreams}
-          locale={locale}
-          mirror={mirrorCamera}
-          showOverlay={showOverlay}
-          showBinMap={showBinMap}
-          videoAspect={videoAspect}
-        />
+        continuousStarted ? (
+          <LiveDetectionView
+            tracks={liveTracks}
+            results={stableResults}
+            streams={siteStreams}
+            locale={locale}
+            mirror={mirrorCamera}
+            showOverlay={showOverlay}
+            showBinMap={showBinMap}
+            videoAspect={videoAspect}
+          />
+        ) : (
+          <div className="absolute inset-0 z-10 select-none">
+            <div className="absolute top-8 left-1/2 -translate-x-1/2 pointer-events-none">
+              <div className="bg-neutral-900/70 backdrop-blur-sm rounded-2xl px-6 py-3">
+                <p className="text-neutral-100 text-lg font-medium">{T("setupHint")}</p>
+              </div>
+            </div>
+            <div className="absolute bottom-12 left-1/2 -translate-x-1/2">
+              <button
+                type="button"
+                onClick={handleStartContinuous}
+                className="bg-emerald-500 hover:bg-emerald-400 active:scale-95 transition text-neutral-950 text-2xl font-bold rounded-2xl px-10 py-5 shadow-xl focus-visible:outline-2 focus-visible:outline-emerald-300"
+              >
+                {T("startDetection")}
+              </button>
+            </div>
+          </div>
+        )
       ) : (
         <>
           {/* Full-screen UI states (gated mode) */}

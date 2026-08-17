@@ -6,6 +6,7 @@
 
 import {
   isLocalVlmEndpointAllowed,
+  getVlmMode,
   parseVlmResponse,
   buildVlmPrompt,
   modelBboxToVideoRect,
@@ -31,6 +32,22 @@ describe("isLocalVlmEndpointAllowed", () => {
     expect(isLocalVlmEndpointAllowed("http://192.168.1.10:11434/v1")).toBe(false);
     expect(isLocalVlmEndpointAllowed("ftp://localhost/v1")).toBe(false);
     expect(isLocalVlmEndpointAllowed("not a url")).toBe(false);
+  });
+});
+
+describe("getVlmMode", () => {
+  it("resolves local mode for a loopback endpoint with a model", () => {
+    expect(getVlmMode({ endpoint: "http://localhost:11434/v1", model: "qwen2.5vl:3b" })).toBe("local");
+  });
+
+  it("resolves server mode for the literal \"server\" endpoint (no model needed)", () => {
+    expect(getVlmMode({ endpoint: "server" })).toBe("server");
+  });
+
+  it("returns null for missing config, missing local model, or foreign URLs", () => {
+    expect(getVlmMode(undefined)).toBeNull();
+    expect(getVlmMode({ endpoint: "http://localhost:11434/v1" })).toBeNull();
+    expect(getVlmMode({ endpoint: "https://evil.example.com/v1", model: "x" })).toBeNull();
   });
 });
 

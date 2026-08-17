@@ -26,12 +26,33 @@ import type { StreamDefinition, SiteConfig } from "./types";
 import { computeLetterbox, type Bbox } from "./bbox-utils";
 
 export interface LocalVlmConfig {
-  /** OpenAI-compatible base URL, e.g. "http://localhost:11434/v1" (Ollama). */
+  /** Where judgments run:
+   *  - an OpenAI-compatible LOOPBACK base URL, e.g. "http://localhost:11434/v1"
+   *    (Ollama) — fully on-device, frames never leave the machine; or
+   *  - the literal string "server" — crops go to this deployment's own
+   *    `/api/vlm` proxy (same origin), which forwards to the VLM the
+   *    operator configured in SERVER env vars. Works for web-hosted kiosks
+   *    with no local runtime; crops leave the device, so they are
+   *    face-gated client-side AND re-checked on the server. */
   endpoint: string;
-  /** Model identifier as the local runtime knows it, e.g. "qwen2.5vl:3b". */
-  model: string;
+  /** Model identifier for the LOCAL runtime, e.g. "qwen2.5vl:3b".
+   *  Ignored in "server" mode (the server's env decides). */
+  model?: string;
   /** Per-judgment timeout. Local small VLMs answer in 0.3–3s. */
   timeoutMs?: number;
+}
+
+export type VlmMode = "local" | "server";
+
+/** Literal endpoint value selecting the same-origin server proxy. */
+export const SERVER_VLM_ENDPOINT = "server";
+
+/** Resolve the configured mode, or null when the config can't be used. */
+export function getVlmMode(config: LocalVlmConfig | undefined): VlmMode | null {
+  if (!config?.endpoint) return null;
+  if (config.endpoint === SERVER_VLM_ENDPOINT) return "server";
+  if (isLocalVlmEndpointAllowed(config.endpoint) && config.model) return "local";
+  return null;
 }
 
 export interface VlmJudgment {
@@ -144,8 +165,10 @@ export function parseVlmResponse(
 }
 
 /**
- * Ask the local VLM to judge one JPEG crop (data URL). Returns null on any
- * failure — the caller keeps the needs_review card, never blocks on this.
+ * Ask the configured VLM to judge one JPEG crop (data URL). Returns null on
+ * any failure — the caller keeps the needs_review card, never blocks on this.
+ * "server" mode posts to the same-origin `/api/vlm` proxy; anything else
+ * must be a loopback OpenAI-compatible endpoint.
  */
 export async function judgeCropWithVlm(
   imageDataUrl: string,
@@ -154,8 +177,12 @@ export async function judgeCropWithVlm(
   locale: string,
   signal?: AbortSignal,
 ): Promise<VlmJudgment | null> {
-  if (!isLocalVlmEndpointAllowed(config.endpoint)) {
-    console.warn("[vlm] endpoint rejected (loopback only):", config.endpoint);
+  const mode = getVlmMode(config);
+  if (mode === "server") {
+    return judgeViaServerProxy(imageDataUrl, config, locale, signal);
+  }
+  if (mode !== "local") {
+    console.warn("[vlm] endpoint rejected (loopback or \"server\" only):", config.endpoint);
     return null;
   }
 
@@ -213,6 +240,70 @@ export async function judgeCropWithVlm(
   } finally {
     clearTimeout(timeout);
     signal?.removeEventListener("abort", onOuterAbort);
+  }
+}
+
+/** "server" mode: same-origin proxy call. The server holds the real VLM
+ *  endpoint in env vars (never in the client-readable site config), builds
+ *  the same constrained prompt, re-checks the crop for faces, and returns a
+ *  parsed judgment. */
+async function judgeViaServerProxy(
+  imageDataUrl: string,
+  config: LocalVlmConfig,
+  locale: string,
+  signal?: AbortSignal,
+): Promise<VlmJudgment | null> {
+  const controller = new AbortController();
+  const timeout = setTimeout(
+    () => controller.abort(),
+    config.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+  );
+  const onOuterAbort = () => controller.abort();
+  signal?.addEventListener("abort", onOuterAbort);
+  try {
+    const res = await fetch("/api/vlm", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ image: imageDataUrl, locale }),
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      console.warn(`[vlm] server proxy HTTP ${res.status}`);
+      return null;
+    }
+    const data = (await res.json()) as { judgment?: VlmJudgment | null };
+    return data.judgment ?? null;
+  } catch (err) {
+    if (!(err instanceof DOMException && err.name === "AbortError")) {
+      console.warn("[vlm] server proxy failed:", err);
+    }
+    return null;
+  } finally {
+    clearTimeout(timeout);
+    signal?.removeEventListener("abort", onOuterAbort);
+  }
+}
+
+/** Face gate for crops that will LEAVE the device ("server" mode): returns
+ *  true when the crop contains a face — the caller must then skip the
+ *  judgment entirely. Errors fail closed (treated as face present). */
+export async function cropContainsFace(
+  video: HTMLVideoElement,
+  modelBbox: Bbox,
+): Promise<boolean> {
+  try {
+    const vw = video.videoWidth;
+    const vh = video.videoHeight;
+    if (!vw || !vh) return true;
+    const rect = modelBboxToVideoRect(modelBbox, vw, vh);
+    const canvas = new OffscreenCanvas(rect.w, rect.h);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return true;
+    ctx.drawImage(video, rect.x, rect.y, rect.w, rect.h, 0, 0, rect.w, rect.h);
+    const { containsFace } = await import("./face-detect");
+    return await containsFace(canvas);
+  } catch {
+    return true;
   }
 }
 

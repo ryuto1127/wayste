@@ -204,9 +204,10 @@ export function buildClassificationResult(
   const binColor = isReview
     ? "#D97706"
     : (streamDef?.color ?? "#525252");
-  const binLabel = isReview
-    ? "Needs Verification"
-    : (streamDef?.label ?? "Landfill");
+  // Prefer the site's own stream label (e.g. 確認が必要) — the hardcoded
+  // English strings are only a floor for sites without the stream defined.
+  const binLabel =
+    streamDef?.label ?? (isReview ? "Needs Verification" : "Landfill");
 
   // Config-driven compounds take priority over AI-detected compound detection
   const configCompound = applyCompounds(raw.itemName, siteConfig);

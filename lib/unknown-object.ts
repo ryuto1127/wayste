@@ -10,17 +10,21 @@
  * filters the noise, the card layer answers needs_review, and if YOLO later
  * recognizes the object the class-swap vote upgrades the track.
  *
- * 1. LOW-CONFIDENCE YOLO BOXES (primary — robust to camera/background
- *    motion). Below the keep threshold YOLO's class guess is unreliable,
- *    but the box itself still says "object-shaped thing here". Each frame
- *    is judged independently, so a moving camera or busy background cannot
- *    corrupt this source the way it corrupts background subtraction.
+ * 1. LOW-CONFIDENCE YOLO BOXES, corroborated by foreground. Below the keep
+ *    threshold YOLO's class guess is unreliable, but the box still says
+ *    "object-shaped thing here". Crucially, YOLO sees background furniture
+ *    (mattress straps, window handles) exactly as well as presented items —
+ *    so every candidate must ALSO overlap a background-subtraction blob,
+ *    which proves the region CHANGED after detection started. Things that
+ *    were already in the scene never qualify, however often YOLO boxes them.
  *
- * 2. CV BLOBS (secondary — fixed-camera net for objects YOLO gives ZERO
- *    boxes). Background subtraction sees any "difference from the empty
- *    scene" with no shape prior, but is inherently unreliable while the
- *    camera or the whole scene moves — callers must suppress it during
- *    global motion (`sceneUnstable`).
+ * 2. CV BLOBS ALONE (net for objects YOLO gives ZERO boxes), with strict
+ *    object-quality gates (sharpness/contrast/skin).
+ *
+ * Both sources depend on the background model, which is meaningless while
+ * the camera or the whole scene moves — the caller flags that via
+ * `sceneUnstable` and NO unknown candidates are produced until the model
+ * re-converges (seconds). Novelty simply cannot be judged mid-motion.
  *
  * Pure logic, browser-safe, unit-tested.
  */
@@ -128,15 +132,21 @@ const MIN_LOW_CONF_AREA = 1200;
  *  background baseline regions or detected faces — that kills a candidate. */
 const MAX_ZONE_OVERLAP = 0.35;
 
+/** Minimum overlap with a foreground blob for a low-confidence candidate to
+ *  count as "appeared after detection started" rather than scenery. */
+const MIN_FOREGROUND_OVERLAP = 0.2;
+
 /**
  * Build all unknown_object candidates for one cycle.
  *
  * `lowConfDetections` are YOLO boxes below the keep threshold (class guess
- * unreliable → treated as class-agnostic evidence). `blobs` participate only
- * while `sceneUnstable` is false — background subtraction lies during camera
- * or whole-scene motion. Candidates overlapping a confident detection or a
- * known-class track are suppressed, and blob candidates duplicating a
- * low-confidence box are dropped (the YOLO box is the tighter of the two).
+ * unreliable → treated as class-agnostic evidence) — each must be
+ * corroborated by foreground (overlap with ANY blob, no quality gate: the
+ * YOLO box supplies objectness, the blob supplies novelty). Candidates
+ * overlapping a confident detection or a known-class track are suppressed,
+ * and blob candidates duplicating a low-confidence box are dropped (the
+ * YOLO box is the tighter of the two). While `sceneUnstable`, no candidates
+ * are produced at all.
  */
 export function buildUnknownDetections(params: {
   lowConfDetections: YoloDetection[];
@@ -159,17 +169,26 @@ export function buildUnknownDetections(params: {
     knownTrackBboxes, suppressZones = [], videoAspect, confidence, modelSize = 640,
   } = params;
 
+  // Novelty cannot be judged while the whole scene is changing.
+  if (sceneUnstable) return [];
+
   const coveredByKnown = (bbox: Bbox) =>
     confidentDetections.some((d) => overlapOverMinArea(bbox, d.bbox as Bbox) > MAX_KNOWN_OVERLAP) ||
     knownTrackBboxes.some((tb) => overlapOverMinArea(bbox, tb) > MAX_KNOWN_OVERLAP);
   const inSuppressedZone = (bbox: Bbox) =>
     suppressZones.some((z) => overlapOverMinArea(bbox, z) > MAX_ZONE_OVERLAP);
 
-  // Primary: low-confidence YOLO boxes, strongest first.
+  // Foreground regions (ALL blobs, no quality gate) — the novelty proof.
+  const foreground = blobs.map((b) => blobToModelBbox(b, videoAspect, modelSize));
+  const isForeground = (bbox: Bbox) =>
+    foreground.some((f) => overlapOverMinArea(bbox, f) > MIN_FOREGROUND_OVERLAP);
+
+  // Primary: low-confidence YOLO boxes, strongest first — foreground only.
   const fromYolo: YoloDetection[] = [];
   for (const d of [...lowConfDetections].sort((a, b) => b.confidence - a.confidence)) {
     if (fromYolo.length >= MAX_LOW_CONF_CANDIDATES) break;
     if (d.bbox[2] * d.bbox[3] < MIN_LOW_CONF_AREA) continue;
+    if (!isForeground(d.bbox as Bbox)) continue; // scenery — was already there
     if (coveredByKnown(d.bbox as Bbox)) continue;
     if (inSuppressedZone(d.bbox as Bbox)) continue;
     if (fromYolo.some((u) => overlapOverMinArea(u.bbox as Bbox, d.bbox as Bbox) > MAX_KNOWN_OVERLAP)) continue;
@@ -181,17 +200,15 @@ export function buildUnknownDetections(params: {
     });
   }
 
-  // Secondary: CV blobs — fixed-camera only, and never duplicating a
-  // low-confidence candidate that already covers the same region.
-  const fromBlobs = sceneUnstable
-    ? []
-    : synthesizeUnknownDetections(
-        blobs, confidentDetections, knownTrackBboxes, videoAspect, confidence, modelSize,
-      ).filter(
-        (b) =>
-          !inSuppressedZone(b.bbox as Bbox) &&
-          !fromYolo.some((u) => overlapOverMinArea(u.bbox as Bbox, b.bbox as Bbox) > MAX_KNOWN_OVERLAP),
-      );
+  // Secondary: quality-gated blobs alone (objects YOLO gives zero boxes),
+  // never duplicating a low-confidence candidate covering the same region.
+  const fromBlobs = synthesizeUnknownDetections(
+    blobs, confidentDetections, knownTrackBboxes, videoAspect, confidence, modelSize,
+  ).filter(
+    (b) =>
+      !inSuppressedZone(b.bbox as Bbox) &&
+      !fromYolo.some((u) => overlapOverMinArea(u.bbox as Bbox, b.bbox as Bbox) > MAX_KNOWN_OVERLAP),
+  );
 
   return [...fromYolo, ...fromBlobs];
 }

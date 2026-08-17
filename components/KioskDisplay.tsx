@@ -157,6 +157,13 @@ const UNKNOWN_STATIC_TO_ZONE_MS = 20_000;
  *  "steadily presented". needs_review cards are only created for steady
  *  tracks — patterns riding on moving clothing/hands never surface. */
 const STEADY_MAX_TRAVEL_PX = 8;
+/** Retry delay after a failed/unavailable VLM judgment — the track's
+ *  "judged" mark is lifted so a later, healthier cycle tries again. */
+const VLM_RETRY_DELAY_MS = 5_000;
+/** Minimum spacing between VLM judgments by thermal level (a judgment is
+ *  the heaviest single GPU op — space when warm, stop when hot). */
+const VLM_GAP_NORMAL_MS = 2_000;
+const VLM_GAP_WARM_MS = 10_000;
 /** How often to sweep the frame for faces (veto zones), and how long a
  *  sweep's result stays valid. */
 const FACE_SWEEP_INTERVAL_MS = 1_200;
@@ -315,6 +322,12 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
   const vlmInFlightRef = useRef(false);
   /** Browser-mode VLM download/load progress — drives the gauge. */
   const [vlmProgress, setVlmProgress] = useState<BrowserVlmProgress | null>(null);
+  /** Loaded vlm-browser module — lets the judge loop check readiness
+   *  synchronously (a track must NOT be marked judged while the model is
+   *  still downloading, or it would never be retried). */
+  const vlmBrowserModRef = useRef<typeof import("@/lib/vlm-browser") | null>(null);
+  /** When the last VLM judgment started — thermal-adaptive spacing. */
+  const lastVlmJudgeAtRef = useRef(0);
 
   // ── Voice guidance (site-config driven — end-users cannot toggle) ──
   const [voiceEnabled, setVoiceEnabled] = useState(false);
@@ -390,8 +403,13 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
     baseline: 0,
     /** How many samples have been collected for baseline. */
     baselineSamples: 0,
-    /** Whether throttling is currently detected. */
+    /** Whether throttling is currently detected (legacy binary — level 2). */
     throttling: false,
+    /** Graduated thermal level derived from the CV-time degradation ratio
+     *  (the browser can't read the actual temperature — sustained slowdown
+     *  IS the thermal signal): 0 normal → 1 warm (half the YOLO/CV rate,
+     *  space VLM judgments) → 2 hot (quarter rate, VLM paused). */
+    level: 0 as 0 | 1 | 2,
     /** Frame counter for skip-frame throttling. */
     frameCounter: 0,
   });
@@ -402,8 +420,9 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
     const onVisible = () => {
       if (document.visibilityState === "visible") {
         const thermal = thermalRef.current;
-        if (thermal.throttling) {
+        if (thermal.throttling || thermal.level > 0) {
           thermal.throttling = false;
+          thermal.level = 0;
           thermal.durations = [];
           setThermalWarning(false);
           perfMonitor.recordThermalState(false, 1);
@@ -499,6 +518,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           if (getVlmMode(data.localVlm) === "browser") {
             import("@/lib/vlm-browser")
               .then((m) => {
+                vlmBrowserModRef.current = m;
                 m.subscribeBrowserVlm((p) => setVlmProgress({ ...p }));
                 m.initBrowserVlm(
                   data.localVlm?.model ?? DEFAULT_BROWSER_VLM_MODEL,
@@ -732,6 +752,15 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       if (thermal.throttling && stateRef.current === "idle" && thermal.frameCounter % 2 === 0) {
         return; // effectively ~15fps during idle when throttling
       }
+      // Continuous mode sheds CV load from thermal level 1 (~16fps analysis
+      // — meta/blobs don't need more when the machine is warm).
+      if (
+        detectionModeRef.current === "continuous" &&
+        thermal.level >= 1 &&
+        thermal.frameCounter % 2 === 0
+      ) {
+        return;
+      }
 
       // During classifying, still run FG analysis but skip the heavy parts.
       // YOLO loop runs independently — here we just monitor FG presence and timeout.
@@ -789,17 +818,21 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           if (thermal.durations.length > 30) thermal.durations.shift();
           const avg = thermal.durations.reduce((a, b) => a + b, 0) / thermal.durations.length;
           const ratio = avg / thermal.baseline;
-          const wasThrottling = thermal.throttling;
-          // Trigger at 4× baseline, recover at 1.5× baseline (hysteresis)
-          if (avg > thermal.baseline * 4) {
-            thermal.throttling = true;
-          } else if (avg < thermal.baseline * 1.5) {
-            thermal.throttling = false;
-          }
+          const prevLevel = thermal.level;
+          // Graduated ladder with hysteresis: escalate at 2× / 4× the
+          // baseline, de-escalate at 3× / 1.5× so levels don't flap.
+          if (ratio >= 4) thermal.level = 2;
+          else if (ratio >= 3) thermal.level = Math.max(prevLevel === 2 ? 2 : 1, 1) as 0 | 1 | 2;
+          else if (ratio >= 2) thermal.level = 1;
+          else if (ratio >= 1.5) thermal.level = Math.min(prevLevel, 1) as 0 | 1 | 2;
+          else thermal.level = 0;
+          thermal.throttling = thermal.level === 2;
           perfMonitor.recordThermalState(thermal.throttling, ratio);
-          if (thermal.throttling !== wasThrottling) {
-            console.log(`[thermal] ${thermal.throttling ? "⚠️ Throttling detected" : "✅ Throttling resolved"} (avg=${avg.toFixed(2)}ms, baseline=${thermal.baseline.toFixed(2)}ms)`);
-            setThermalWarning(thermal.throttling);
+          if (thermal.level !== prevLevel) {
+            console.log(
+              `[thermal] level ${prevLevel} → ${thermal.level} (avg=${avg.toFixed(2)}ms, baseline=${thermal.baseline.toFixed(2)}ms, ×${ratio.toFixed(1)})`,
+            );
+            setThermalWarning(thermal.level === 2);
           }
         }
       }
@@ -1205,9 +1238,10 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
                 CONTINUOUS_INTERVAL_CLAMP[1],
               )
             : CONTINUOUS_YOLO_INTERVAL_MS;
-          const targetInterval = thermalRef.current.throttling
-            ? baseInterval * 2
-            : baseInterval;
+          // Thermal ladder: full rate → half → quarter as the machine heats.
+          const thermalLevel = thermalRef.current.level;
+          const targetInterval =
+            baseInterval * (thermalLevel === 2 ? 4 : thermalLevel === 1 ? 2 : 1);
           const sleepMs = Math.max(5, targetInterval - (Date.now() - t0));
           await new Promise((r) => setTimeout(r, sleepMs));
         }
@@ -1468,6 +1502,21 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       const vlmMode = getVlmMode(vlmCfg);
       if (!vlmMode) return;
       if (vlmInFlightRef.current) return;
+      // Browser mode: readiness is checked BEFORE any track is marked as
+      // judged — cards created while the model is still downloading must be
+      // picked up once it becomes ready, not skipped forever.
+      if (
+        vlmMode === "browser" &&
+        vlmBrowserModRef.current?.getBrowserVlmState() !== "ready"
+      ) {
+        return;
+      }
+      // Thermal-adaptive pacing: a VLM judgment is the heaviest single GPU
+      // op — space them out when warm, stop entirely when hot.
+      const thermalLevel = thermalRef.current.level;
+      if (thermalLevel >= 2) return;
+      const minGap = thermalLevel === 1 ? VLM_GAP_WARM_MS : VLM_GAP_NORMAL_MS;
+      if (Date.now() - lastVlmJudgeAtRef.current < minGap) return;
 
       for (const [id, card] of cards) {
         if (card._locked) continue; // only unresolved needs_review cards
@@ -1479,14 +1528,23 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
 
         vlmJudgedRef.current.add(id);
         vlmInFlightRef.current = true;
+        lastVlmJudgeAtRef.current = Date.now();
         const bbox = [...t.bbox] as Bbox;
         const classNameAtJudge = t.className;
+        // A judgment that never happened (crop failed, model glitch,
+        // timeout) must not brand the track as judged forever — lift the
+        // mark after a delay so a later, healthier cycle retries.
+        const scheduleRetry = () =>
+          setTimeout(() => vlmJudgedRef.current.delete(id), VLM_RETRY_DELAY_MS);
 
         (async () => {
           const t0 = Date.now();
           try {
             const siteConfig = siteConfigRef.current;
-            if (!siteConfig) return;
+            if (!siteConfig) {
+              scheduleRetry();
+              return;
+            }
             // "server" mode sends the crop off-device — face-gate it first
             // (the proxy re-checks server-side as the authoritative floor).
             if (vlmMode === "server" && (await cropContainsFace(video, bbox))) {
@@ -1494,13 +1552,17 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
               return;
             }
             const dataUrl = await cropTrackToDataUrl(video, bbox);
-            if (!dataUrl) return;
+            if (!dataUrl) {
+              scheduleRetry();
+              return;
+            }
             const judgment = await judgeCropWithVlm(
               dataUrl, vlmCfg!, siteConfig, localeRef.current,
             );
             const latencyMs = Date.now() - t0;
             if (!judgment) {
-              console.log(`[vlm] no verdict for track ${id} (${latencyMs}ms)`);
+              console.log(`[vlm] no verdict for track ${id} (${latencyMs}ms) — will retry`);
+              scheduleRetry();
               return;
             }
             console.log(
@@ -1542,6 +1604,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
             logVlmVerdict(judgment, latencyMs, applied);
           } catch (err) {
             console.warn("[vlm] judgment error:", err);
+            scheduleRetry();
           } finally {
             vlmInFlightRef.current = false;
           }

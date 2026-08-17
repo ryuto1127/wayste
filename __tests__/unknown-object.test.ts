@@ -113,8 +113,11 @@ describe("synthesizeUnknownDetections", () => {
 
 describe("buildUnknownDetections", () => {
   const APPEAR = 0.5;
+  /** Frame-wide foreground blob for corroboration only — skin-heavy so it
+   *  fails blobIsObject and never becomes a blob-only candidate itself. */
+  const FG = blob({ bboxNorm: [0.5, 0.5, 0.9, 0.9], skinRatio: 0.9 });
   const base = {
-    blobs: [] as BlobInfo[],
+    blobs: [FG] as BlobInfo[],
     sceneUnstable: false,
     confidentDetections: [] as YoloDetection[],
     knownTrackBboxes: [] as Bbox[],
@@ -122,7 +125,7 @@ describe("buildUnknownDetections", () => {
     confidence: APPEAR,
   };
 
-  it("turns a low-confidence YOLO box into unknown evidence", () => {
+  it("turns a foreground-corroborated low-confidence YOLO box into unknown evidence", () => {
     const out = buildUnknownDetections({
       ...base,
       lowConfDetections: [det([100, 200, 80, 120], 0.2)],
@@ -131,6 +134,17 @@ describe("buildUnknownDetections", () => {
     expect(out[0].className).toBe(UNKNOWN_OBJECT_CLASS);
     expect(out[0].confidence).toBe(APPEAR);
     expect(out[0].bbox).toEqual([100, 200, 80, 120]);
+  });
+
+  it("suppresses low-confidence boxes with NO foreground overlap (pre-existing background)", () => {
+    // The mattress-strap case: YOLO boxes scenery that was there at start —
+    // no background-subtraction blob exists, so no candidate may form.
+    const out = buildUnknownDetections({
+      ...base,
+      blobs: [],
+      lowConfDetections: [det([100, 200, 80, 120], 0.3)],
+    });
+    expect(out).toHaveLength(0);
   });
 
   it("suppresses low-confidence boxes covered by a confident detection", () => {

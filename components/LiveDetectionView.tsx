@@ -154,10 +154,35 @@ export default function LiveDetectionView({
         .sort((a, b) => POSITION_ORDER[a.position!] - POSITION_ORDER[b.position!]),
     [streams],
   );
-  const activeStreams = useMemo(
-    () => new Set(results.map((r) => r.wasteStream as string)),
-    [results],
-  );
+  /** Every bin a displayed item involves. A compound item (bottle → body /
+   *  cap / label) sends parts to SEVERAL bins, so lighting only its primary
+   *  stream would tell the user half the answer. */
+  const activeStreams = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of results) {
+      set.add(r.wasteStream as string);
+      if (r.isCompound && r.components) {
+        for (const c of r.components) set.add(c.wasteStream as string);
+      }
+    }
+    return set;
+  }, [results]);
+
+  /** Streams each track routes to — one guide line per destination bin. */
+  const streamsForTrack = useMemo(() => {
+    const map = new Map<number, string[]>();
+    for (const r of results) {
+      const ids = [r.wasteStream as string];
+      if (r.isCompound && r.components) {
+        for (const c of r.components) {
+          const id = c.wasteStream as string;
+          if (!ids.includes(id)) ids.push(id);
+        }
+      }
+      map.set(r._trackId, ids);
+    }
+    return map;
+  }, [results]);
 
   /** Bottom offset for cards / hint — sits above the strip when it's shown. */
   const railBottom = showBinMap && physicalBins.length > 0 ? BIN_STRIP_HEIGHT + 20 : 32;
@@ -208,30 +233,34 @@ export default function LiveDetectionView({
           viewBox={`0 0 ${rootSize.w} ${rootSize.h}`}
           aria-hidden="true"
         >
-          {tracks.map((track) => {
-            if (!track.streamId) return null;
-            const binIdx = physicalBins.findIndex((s) => s.id === track.streamId);
-            if (binIdx < 0) return null;
+          {tracks.flatMap((track) => {
+            // A compound item draws one line per destination bin.
+            const destIds = streamsForTrack.get(track.id)
+              ?? (track.streamId ? [track.streamId] : []);
             const [nx, ny, nw, nh] = normBox(track, mirror, videoAspect);
             const g = coverGeometry(rootSize.w, rootSize.h, videoAspect);
             const x1 = g.offX + (nx + nw / 2) * g.vw;
             const y1 = g.offY + (ny + nh) * g.vh;
-            const x2 = ((binIdx + 0.5) / physicalBins.length) * rootSize.w;
             const y2 = rootSize.h - BIN_STRIP_HEIGHT + 12;
-            const midY = (y1 + y2) / 2;
-            return (
-              <path
-                key={track.id}
-                d={`M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`}
-                fill="none"
-                stroke={physicalBins[binIdx].color}
-                strokeWidth={4}
-                strokeLinecap="round"
-                strokeDasharray="4 14"
-                opacity={0.9}
-                style={{ animation: "dashFlow 0.5s linear infinite" }}
-              />
-            );
+            return destIds.flatMap((id, i) => {
+              const binIdx = physicalBins.findIndex((s) => s.id === id);
+              if (binIdx < 0) return [];
+              const x2 = ((binIdx + 0.5) / physicalBins.length) * rootSize.w;
+              const midY = (y1 + y2) / 2;
+              return [
+                <path
+                  key={`${track.id}-${id}`}
+                  d={`M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`}
+                  fill="none"
+                  stroke={physicalBins[binIdx].color}
+                  strokeWidth={i === 0 ? 4 : 3}
+                  strokeLinecap="round"
+                  strokeDasharray="4 14"
+                  opacity={i === 0 ? 0.9 : 0.65}
+                  style={{ animation: "dashFlow 0.5s linear infinite" }}
+                />,
+              ];
+            });
           })}
         </svg>
       )}
@@ -293,20 +322,30 @@ export default function LiveDetectionView({
                   {/* Compound item: one piece of waste, several destinations —
                       each part with its own stream color and bin name. */}
                   {r.isCompound && r.components && r.components.length > 0 && (
-                    <div className="mt-2 flex flex-col gap-1">
+                    <div className="mt-2 flex flex-col gap-1.5">
                       {r.components.map((c, i) => {
                         const cStream = streams.find((s) => s.id === c.wasteStream);
+                        const cPos = cStream?.position;
+                        const cArrow = cPos ? T(positionArrowKey[cPos]) : null;
                         return (
-                          <div key={i} className="flex items-center gap-2 text-sm leading-snug">
+                          <div key={i} className="flex items-center gap-2 text-base leading-snug">
+                            {/* Each part carries its own direction — a compound
+                                item is several journeys, not one. */}
                             <span
-                              className="inline-block w-2.5 h-2.5 rounded-full shrink-0"
-                              style={{ backgroundColor: cStream?.color ?? "#525252" }}
-                            />
+                              aria-hidden="true"
+                              className="text-2xl font-bold leading-none w-6 text-center shrink-0"
+                              style={{ color: cStream?.color ?? "#a3a3a3" }}
+                            >
+                              {cArrow ?? "•"}
+                            </span>
                             <span className="text-neutral-100 font-semibold whitespace-nowrap">
                               {c.partName}
                             </span>
-                            <span className="text-neutral-400 truncate">
-                              → {cStream?.label ?? c.wasteStream}
+                            <span
+                              className="font-bold truncate"
+                              style={{ color: cStream?.color ?? "#a3a3a3" }}
+                            >
+                              {cStream?.label ?? c.wasteStream}
                             </span>
                           </div>
                         );

@@ -1313,9 +1313,14 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
               )
             : CONTINUOUS_YOLO_INTERVAL_MS;
           // Thermal ladder: full rate → half → quarter as the machine heats.
+          // Also yield to an in-flight VLM judgment: both models share one
+          // GPU, so hammering YOLO at full rate makes the user wait seconds
+          // longer for the verdict. The tracker coasts through the gap.
           const thermalLevel = thermalRef.current.level;
           const targetInterval =
-            baseInterval * (thermalLevel === 2 ? 4 : thermalLevel === 1 ? 2 : 1);
+            baseInterval *
+            (thermalLevel === 2 ? 4 : thermalLevel === 1 ? 2 : 1) *
+            (vlmInFlightRef.current ? 4 : 1);
           const sleepMs = Math.max(5, targetInterval - (Date.now() - t0));
           await new Promise((r) => setTimeout(r, sleepMs));
         }

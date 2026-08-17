@@ -126,7 +126,10 @@ async function handleJudge(msg: Extract<InMessage, { type: "judge" }>) {
     const inputs = await processor(text, image);
     const outputs = await model.generate({
       ...inputs,
-      max_new_tokens: msg.maxNewTokens ?? 200,
+      // The answer is one short JSON object (~40 tokens). Generation is
+      // sequential, so every unused token in this budget is latency the
+      // user waits through when the model rambles before stopping.
+      max_new_tokens: msg.maxNewTokens ?? 96,
       do_sample: false,
     });
     const decoded = processor.batch_decode(

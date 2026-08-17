@@ -142,7 +142,11 @@ const CONTINUOUS_WATCHDOG_MS = 10_000;
  *  down there, but the box still marks an object-shaped thing. Ratio of the
  *  keep threshold, with an absolute floor against pure noise. */
 const UNKNOWN_CANDIDATE_FLOOR_RATIO = 0.45;
-const UNKNOWN_CANDIDATE_MIN_CONF = 0.12;
+/** Absolute floor, NOT derived from the keep threshold. Tying it to a ratio
+ *  meant that lowering the tracker's bars also widened the junk intake —
+ *  boxes down at 12% confidence are the model shrugging, and pairing that
+ *  with any foreground makes bare walls sprout "確認が必要" cards. */
+const UNKNOWN_CANDIDATE_MIN_CONF = 0.25;
 /** Above this ROI foreground ratio the whole scene is changing (camera bump,
  *  pan, lighting shift) — background-subtraction blobs are meaningless and
  *  must not spawn unknown-object candidates. */

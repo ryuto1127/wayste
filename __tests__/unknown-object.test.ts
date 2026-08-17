@@ -130,9 +130,11 @@ describe("synthesizeUnknownDetections", () => {
 
 describe("buildUnknownDetections", () => {
   const APPEAR = 0.5;
-  /** Frame-wide foreground blob for corroboration only — skin-heavy so it
-   *  fails blobIsObject and never becomes a blob-only candidate itself. */
-  const FG = blob({ bboxNorm: [0.5, 0.5, 0.9, 0.9], skinRatio: 0.9 });
+  /** Frame-wide, object-like foreground blob used purely as corroboration.
+   *  Object-like on purpose (a soft blob no longer counts as novelty
+   *  evidence), and `ratio` matches its size — at 81% of the ROI it is the
+   *  scene changing, so it corroborates but is never itself an item. */
+  const FG = blob({ bboxNorm: [0.5, 0.5, 0.9, 0.9], ratio: 0.81 });
   const base = {
     blobs: [FG] as BlobInfo[],
     sceneUnstable: false,
@@ -177,11 +179,11 @@ describe("buildUnknownDetections", () => {
     const out = buildUnknownDetections({
       ...base,
       lowConfDetections: [
-        det([100, 200, 80, 120], 0.30),
-        det([104, 204, 80, 120], 0.28), // duplicate of the first
-        det([300, 200, 80, 120], 0.25),
-        det([450, 200, 80, 120], 0.22),
-        det([560, 200, 60, 120], 0.20), // over the cap
+        det([100, 200, 80, 120], 0.40),
+        det([104, 204, 80, 120], 0.38), // duplicate of the first
+        det([300, 200, 80, 120], 0.35),
+        det([450, 200, 80, 120], 0.32),
+        det([560, 200, 60, 120], 0.30), // over the cap
       ],
     });
     expect(out.length).toBeLessThanOrEqual(3);
@@ -204,6 +206,15 @@ describe("buildUnknownDetections", () => {
       ...base,
       lowConfDetections: [det([100, 200, 80, 120], 0.2)],
       suppressZones: [[90, 190, 110, 140]],
+    });
+    expect(out).toHaveLength(0);
+  });
+
+  it("rejects implausibly elongated boxes (wall seam, table edge)", () => {
+    // 6:1 band across a wall — real presented waste is never this shape.
+    const out = buildUnknownDetections({
+      ...base,
+      lowConfDetections: [det([100, 200, 300, 50], 0.35)],
     });
     expect(out).toHaveLength(0);
   });

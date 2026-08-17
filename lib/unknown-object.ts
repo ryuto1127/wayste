@@ -39,6 +39,11 @@ export const UNKNOWN_OBJECT_CLASS_ID = -1;
 /** Blobs smaller than this fraction of the ROI are treated as noise. */
 const MIN_BLOB_RATIO = 0.008;
 
+/** Blobs larger than this fraction of the ROI are not a presented item —
+ *  they are the scene itself changing (someone walking through, a light
+ *  switching, the camera moving). Tracking one boxes half the room. */
+const MAX_BLOB_RATIO = 0.5;
+
 /** Overlap (intersection / smaller box) above which a blob is considered
  *  the same object as a YOLO detection or known track — containment-aware,
  *  since CV blobs are typically looser than YOLO boxes. */
@@ -100,9 +105,10 @@ export function synthesizeUnknownDetections(
   const out: YoloDetection[] = [];
   for (const blob of blobs) {
     if (!blobIsObject(blob)) continue;
-    if (blob.ratio < MIN_BLOB_RATIO) continue;
+    if (blob.ratio < MIN_BLOB_RATIO || blob.ratio > MAX_BLOB_RATIO) continue;
 
     const bbox = blobToModelBbox(blob, videoAspect, modelSize);
+    if (!plausibleItemShape(bbox)) continue;
     const coveredByKnown =
       realDetections.some((d) => overlapOverMinArea(bbox, d.bbox as Bbox) > MAX_KNOWN_OVERLAP) ||
       knownTrackBboxes.some((tb) => overlapOverMinArea(bbox, tb) > MAX_KNOWN_OVERLAP);
@@ -135,6 +141,19 @@ const MAX_ZONE_OVERLAP = 0.35;
 /** Minimum overlap with a foreground blob for a low-confidence candidate to
  *  count as "appeared after detection started" rather than scenery. */
 const MIN_FOREGROUND_OVERLAP = 0.2;
+
+/** Plausible width:height range for a presented item. A box far outside it
+ *  is tracing a wall seam, a table edge or a shadow band — real waste held
+ *  up to a camera is never 6× wider than it is tall. */
+const MIN_ASPECT = 0.2;
+const MAX_ASPECT = 4.0;
+
+/** Returns true when the box could be an item rather than a strip of scene. */
+function plausibleItemShape(bbox: Bbox): boolean {
+  if (bbox[3] <= 0) return false;
+  const aspect = bbox[2] / bbox[3];
+  return aspect >= MIN_ASPECT && aspect <= MAX_ASPECT;
+}
 
 /**
  * Build all unknown_object candidates for one cycle.
@@ -178,8 +197,13 @@ export function buildUnknownDetections(params: {
   const inSuppressedZone = (bbox: Bbox) =>
     suppressZones.some((z) => overlapOverMinArea(bbox, z) > MAX_ZONE_OVERLAP);
 
-  // Foreground regions (ALL blobs, no quality gate) — the novelty proof.
-  const foreground = blobs.map((b) => blobToModelBbox(b, videoAspect, modelSize));
+  // Novelty proof. The blob must itself look like an object (sharp, high
+  // contrast, not skin): a soft blob is a shadow or a lighting shift, and
+  // pairing one with a weak YOLO box manufactures a detection out of two
+  // pieces of non-evidence — which is exactly how a bare wall grew a box.
+  const foreground = blobs
+    .filter((b) => blobIsObject(b))
+    .map((b) => blobToModelBbox(b, videoAspect, modelSize));
   const isForeground = (bbox: Bbox) =>
     foreground.some((f) => overlapOverMinArea(bbox, f) > MIN_FOREGROUND_OVERLAP);
 
@@ -188,6 +212,7 @@ export function buildUnknownDetections(params: {
   for (const d of [...lowConfDetections].sort((a, b) => b.confidence - a.confidence)) {
     if (fromYolo.length >= MAX_LOW_CONF_CANDIDATES) break;
     if (d.bbox[2] * d.bbox[3] < MIN_LOW_CONF_AREA) continue;
+    if (!plausibleItemShape(d.bbox as Bbox)) continue; // wall seam / edge band
     if (!isForeground(d.bbox as Bbox)) continue; // scenery — was already there
     if (coveredByKnown(d.bbox as Bbox)) continue;
     if (inSuppressedZone(d.bbox as Bbox)) continue;

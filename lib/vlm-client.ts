@@ -23,7 +23,7 @@
  */
 
 import type { StreamDefinition, SiteConfig } from "./types";
-import { computeLetterbox, type Bbox } from "./bbox-utils";
+import { computeLetterbox, MODEL_INPUT_SIZE, type Bbox } from "./bbox-utils";
 
 export interface LocalVlmConfig {
   /** Where judgments run:
@@ -96,7 +96,7 @@ export function modelBboxToVideoRect(
   vw: number,
   vh: number,
   marginRatio = 0.2,
-  modelSize = 640,
+  modelSize = MODEL_INPUT_SIZE,
 ): { x: number; y: number; w: number; h: number } {
   const { dx, dy, dw, dh } = computeLetterbox(vw, vh, modelSize);
   const scaleX = vw / dw;

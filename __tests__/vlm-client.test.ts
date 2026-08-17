@@ -162,12 +162,12 @@ describe("buildVlmPrompt", () => {
 describe("modelBboxToVideoRect", () => {
   it("maps the letterboxed content back to full video pixels", () => {
     // Full 16:9 content area [0, 140, 640, 360] → whole 1280×720 frame
-    const rect = modelBboxToVideoRect([0, 140, 640, 360], 1280, 720, 0);
+    const rect = modelBboxToVideoRect([0, 140, 640, 360], 1280, 720, 0, 640);
     expect(rect).toEqual({ x: 0, y: 0, w: 1280, h: 720 });
   });
 
   it("pads the crop and clamps to the frame", () => {
-    const rect = modelBboxToVideoRect([0, 140, 100, 100], 1280, 720, 0.2);
+    const rect = modelBboxToVideoRect([0, 140, 100, 100], 1280, 720, 0.2, 640);
     expect(rect.x).toBe(0); // padding clamped at the left edge
     expect(rect.y).toBe(0);
     expect(rect.w).toBeGreaterThan(200); // 100 model px ≈ 200 video px + pad
@@ -175,7 +175,7 @@ describe("modelBboxToVideoRect", () => {
   });
 
   it("maps a centered box to centered video coords", () => {
-    const rect = modelBboxToVideoRect([288, 302, 64, 36], 1280, 720, 0);
+    const rect = modelBboxToVideoRect([288, 302, 64, 36], 1280, 720, 0, 640);
     expect(rect.x).toBeCloseTo(576, 0);
     expect(rect.y).toBeCloseTo(324, 0);
     expect(rect.w).toBeCloseTo(128, 0);

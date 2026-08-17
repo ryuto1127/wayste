@@ -11,7 +11,7 @@ import {
   UNKNOWN_OBJECT_CLASS_ID,
 } from "@/lib/unknown-object";
 import type { BlobInfo, YoloDetection } from "@/lib/types";
-import type { Bbox } from "@/lib/bbox-utils";
+import { MODEL_INPUT_SIZE, computeLetterbox, type Bbox } from "@/lib/bbox-utils";
 
 const ASPECT_16_9 = 16 / 9;
 
@@ -29,22 +29,39 @@ function blob(overrides: Partial<BlobInfo> = {}): BlobInfo {
   };
 }
 
+/** A box centered in the letterboxed content, sized to overlap a centered
+ *  blob at any model resolution. */
+function centerBox(): Bbox {
+  const { dh } = computeLetterbox(ASPECT_16_9, 1, MODEL_INPUT_SIZE);
+  const w = 0.3 * 0.8 * MODEL_INPUT_SIZE;
+  const h = 0.3 * 0.8 * dh;
+  return [
+    Math.round(MODEL_INPUT_SIZE / 2 - w / 2),
+    Math.round(MODEL_INPUT_SIZE / 2 - h / 2),
+    Math.round(w),
+    Math.round(h),
+  ];
+}
+
 function det(bbox: Bbox, confidence = 0.8): YoloDetection {
   return { classId: 0, className: "plastic_bottle", confidence, bbox };
 }
 
 describe("blobToModelBbox", () => {
   it("maps a centered blob to the center of the letterboxed content", () => {
-    // 16:9 letterbox: content occupies y 140..500 in 640-space, x 0..640
+    // Expectations derive from MODEL_INPUT_SIZE so the test survives an
+    // export-resolution change (the bug it guards is coordinate drift,
+    // not one specific resolution).
+    const { dh } = computeLetterbox(ASPECT_16_9, 1, MODEL_INPUT_SIZE);
     const b = blobToModelBbox(blob(), ASPECT_16_9);
     const cx = b[0] + b[2] / 2;
     const cy = b[1] + b[3] / 2;
-    expect(cx).toBeCloseTo(320, 0);
-    expect(cy).toBeCloseTo(320, 0);
-    // Width: 0.3 blob in ROI → 0.24 of full frame → 0.24 * 640
-    expect(b[2]).toBeCloseTo(0.3 * 0.8 * 640, 0);
-    // Height uses the letterboxed content height (360 for 16:9)
-    expect(b[3]).toBeCloseTo(0.3 * 0.8 * 360, 0);
+    expect(cx).toBeCloseTo(MODEL_INPUT_SIZE / 2, 0);
+    expect(cy).toBeCloseTo(MODEL_INPUT_SIZE / 2, 0);
+    // Width: 0.3 blob in ROI → 0.24 of the full frame
+    expect(b[2]).toBeCloseTo(0.3 * 0.8 * MODEL_INPUT_SIZE, 0);
+    // Height uses the letterboxed content height
+    expect(b[3]).toBeCloseTo(0.3 * 0.8 * dh, 0);
   });
 
   it("accounts for the ROI inset at the blob's top-left extreme", () => {
@@ -86,7 +103,7 @@ describe("synthesizeUnknownDetections", () => {
 
   it("suppresses blobs already covered by a YOLO detection", () => {
     // Real detection sits exactly where the centered blob lands
-    const covering = det([250, 270, 140, 100]);
+    const covering = det(centerBox());
     const out = synthesizeUnknownDetections(
       [blob()], [covering], [], ASPECT_16_9, APPEAR,
     );
@@ -94,7 +111,7 @@ describe("synthesizeUnknownDetections", () => {
   });
 
   it("suppresses blobs covered by a known-class track", () => {
-    const trackBbox: Bbox = [250, 270, 140, 100];
+    const trackBbox: Bbox = centerBox();
     const out = synthesizeUnknownDetections(
       [blob()], [], [trackBbox], ASPECT_16_9, APPEAR,
     );
@@ -203,10 +220,10 @@ describe("buildUnknownDetections", () => {
     // Centered blob lands around [250, 270, 154, 86] in model space
     const out = buildUnknownDetections({
       ...base,
-      lowConfDetections: [det([250, 270, 150, 90], 0.2)],
+      lowConfDetections: [det(centerBox(), 0.2)],
       blobs: [blob()],
     });
     expect(out).toHaveLength(1);
-    expect(out[0].bbox).toEqual([250, 270, 150, 90]);
+    expect(out[0].bbox).toEqual(centerBox());
   });
 });

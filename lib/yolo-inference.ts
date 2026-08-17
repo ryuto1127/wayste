@@ -15,7 +15,7 @@
  * Falls back gracefully (returns empty array) if the model fails to load.
  */
 import type { YoloDetection } from "./types";
-import { computeLetterbox } from "./bbox-utils";
+import { computeLetterbox, MODEL_INPUT_SIZE, scaleFrom640 } from "./bbox-utils";
 
 // Lazy-loaded ONNX Runtime — only imported when initYolo() is called.
 type InferenceSession = import("onnxruntime-web").InferenceSession;
@@ -31,8 +31,6 @@ let activeProvider: string = "unknown";
  *  Inference calls are sequential (callers await), so sharing is safe. */
 let preprocessCanvas: OffscreenCanvas | null = null;
 
-/** Input size expected by the YOLO model. */
-const MODEL_INPUT_SIZE = 640;
 
 /** Custom 15-class waste detection model. */
 /** Class ids of the DEPLOYED model, in model order. Must stay in lockstep
@@ -147,7 +145,7 @@ export async function warmUpYolo(): Promise<void> {
 export async function runYoloInference(
   video: HTMLVideoElement,
   _roiMargin = 0.15,
-  minBoxArea = 1500,
+  minBoxArea = scaleFrom640(1500),
   confidenceThreshold = 0.40,
   fullFrame = false,
 ): Promise<YoloDetection[]> {

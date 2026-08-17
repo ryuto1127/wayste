@@ -2,10 +2,30 @@
  * Bounding-box utilities for spatial tracking and frame-change detection.
  *
  * Pure functions — no React, no refs, no side effects.
- * All bboxes are in YOLO pixel space: [x, y, width, height] within 640×640.
+ * All bboxes are in YOLO pixel space: [x, y, width, height] within a
+ * MODEL_INPUT_SIZE square (see below).
  */
 
 export type Bbox = [x: number, y: number, w: number, h: number];
+
+/**
+ * Square side of the deployed YOLO model's input, and therefore the pixel
+ * space every bbox in the pipeline lives in. Single source of truth: the
+ * ONNX export size, the letterbox math, the tracker's pixel thresholds and
+ * the crop mappings must all agree, or boxes land in the wrong place.
+ *
+ * 480 (was 640): inference cost scales with area, so 480² cuts it ~44% —
+ * the difference between ~13fps and ~25fps for YOLO26m on the demo
+ * machine. Demo items fill much of the frame, so the resolution loss
+ * costs little; revisit if small/distant items start being missed.
+ */
+export const MODEL_INPUT_SIZE = 480;
+
+/** Scale a pixel threshold that was tuned in 640-space to the current
+ *  model size, preserving its meaning as a fraction of the frame. */
+export function scaleFrom640(px: number): number {
+  return Math.round(px * (MODEL_INPUT_SIZE / 640) ** 2);
+}
 
 // ── IoU ──
 
@@ -125,7 +145,7 @@ export interface LetterboxParams {
  * invariant — passing (aspectRatio, 1) gives the same normalized result
  * as passing real pixel dimensions.
  */
-export function computeLetterbox(vw: number, vh: number, size = 640): LetterboxParams {
+export function computeLetterbox(vw: number, vh: number, size = MODEL_INPUT_SIZE): LetterboxParams {
   if (vw <= 0 || vh <= 0) return { dx: 0, dy: 0, dw: size, dh: size };
   const scale = size / Math.max(vw, vh);
   const dw = Math.round(vw * scale);
@@ -148,7 +168,7 @@ export function letterboxedBboxToVideoNorm(
   bbox: Bbox,
   vw: number,
   vh: number,
-  size = 640,
+  size = MODEL_INPUT_SIZE,
 ): Bbox {
   const { dx, dy, dw, dh } = computeLetterbox(vw, vh, size);
   return [

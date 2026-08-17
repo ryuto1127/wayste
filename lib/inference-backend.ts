@@ -162,16 +162,17 @@ class HttpBackend implements InferenceBackend {
       const vw = video.videoWidth;
       const vh = video.videoHeight;
 
-      const canvas = new OffscreenCanvas(640, 640);
+      const { MODEL_INPUT_SIZE } = await import("./bbox-utils");
+      const canvas = new OffscreenCanvas(MODEL_INPUT_SIZE, MODEL_INPUT_SIZE);
       const ctx = canvas.getContext("2d");
       if (!ctx) return [];
 
       if (fullFrame) {
         // Letterbox the whole frame — matches the ONNX backend's fullFrame path.
         const { computeLetterbox } = await import("./bbox-utils");
-        const { dx, dy, dw, dh } = computeLetterbox(vw, vh, 640);
+        const { dx, dy, dw, dh } = computeLetterbox(vw, vh, MODEL_INPUT_SIZE);
         ctx.fillStyle = "#727272";
-        ctx.fillRect(0, 0, 640, 640);
+        ctx.fillRect(0, 0, MODEL_INPUT_SIZE, MODEL_INPUT_SIZE);
         ctx.drawImage(video, 0, 0, vw, vh, dx, dy, dw, dh);
       } else {
         // Crop the largest centered square (short-side based, e.g. 720×720
@@ -179,7 +180,7 @@ class HttpBackend implements InferenceBackend {
         const side = Math.min(vw, vh);
         const roiX = Math.round((vw - side) / 2);
         const roiY = Math.round((vh - side) / 2);
-        ctx.drawImage(video, roiX, roiY, side, side, 0, 0, 640, 640);
+        ctx.drawImage(video, roiX, roiY, side, side, 0, 0, MODEL_INPUT_SIZE, MODEL_INPUT_SIZE);
       }
       const blob = await canvas.convertToBlob({ type: "image/jpeg", quality: 0.85 });
 

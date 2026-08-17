@@ -34,6 +34,8 @@ import {
   greedyIoUMatch,
   computeIoU,
   computeLetterbox,
+  MODEL_INPUT_SIZE,
+  scaleFrom640,
   type Bbox,
 } from "@/lib/bbox-utils";
 // kioskAuthHeaders replaced by session token (server-generated, HMAC-signed)
@@ -124,7 +126,7 @@ const CONTINUOUS_INTERVAL_CLAMP: [number, number] = [15, 100];
  *  shrinks a 16:9 frame to 640×360 inside the model input — objects are
  *  ~1/4 the area they'd be in the gated center-crop, so the gated default
  *  (1500) would silently drop everything but close-ups. */
-const CONTINUOUS_MIN_BOX_AREA = 400;
+const CONTINUOUS_MIN_BOX_AREA = scaleFrom640(400);
 /** How long a confirmed track may stay below the instant-resolve bar before
  *  it is resolved on-device as needs_review (never show nothing). */
 const CONTINUOUS_NEEDS_REVIEW_MS = 1_500;
@@ -203,7 +205,9 @@ const YOLO_TARGET_INSET = 0.10;
 
 const ROI_BLOB_DIAGONAL_MIN_AREA = 0.01;
 
-const YOLO_MODEL_SIZE = 640;
+/** Model input side — single source of truth in lib/bbox-utils.ts so the
+ *  ONNX export size, letterbox math and bbox thresholds can't drift apart. */
+const YOLO_MODEL_SIZE = MODEL_INPUT_SIZE;
 
 /** Whether the camera feed is mirrored (front-facing / selfie cameras). */
 const IS_CAMERA_MIRRORED = process.env.NEXT_PUBLIC_MIRROR_CAMERA === "true";

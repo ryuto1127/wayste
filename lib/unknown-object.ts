@@ -31,7 +31,7 @@
 
 import type { BlobInfo, YoloDetection } from "./types";
 import { blobIsObject, ROI_INSET } from "./frame-analyzer";
-import { computeLetterbox, type Bbox } from "./bbox-utils";
+import { computeLetterbox, MODEL_INPUT_SIZE, scaleFrom640, type Bbox } from "./bbox-utils";
 
 export const UNKNOWN_OBJECT_CLASS = "unknown_object";
 export const UNKNOWN_OBJECT_CLASS_ID = -1;
@@ -59,7 +59,7 @@ function overlapOverMinArea(a: Bbox, b: Bbox): number {
 export function blobToModelBbox(
   blob: BlobInfo,
   videoAspect: number,
-  modelSize = 640,
+  modelSize = MODEL_INPUT_SIZE,
 ): Bbox {
   const { dx, dy, dw, dh } = computeLetterbox(videoAspect, 1, modelSize);
   const [cx, cy, w, h] = blob.bboxNorm;
@@ -95,7 +95,7 @@ export function synthesizeUnknownDetections(
   knownTrackBboxes: Bbox[],
   videoAspect: number,
   confidence: number,
-  modelSize = 640,
+  modelSize = MODEL_INPUT_SIZE,
 ): YoloDetection[] {
   const out: YoloDetection[] = [];
   for (const blob of blobs) {
@@ -126,7 +126,7 @@ const MAX_LOW_CONF_CANDIDATES = 2;
 /** Minimum bbox area (model-space px²) for a low-confidence candidate.
  *  Weak evidence must at least be item-sized — this excludes rings,
  *  buttons, badges, and other small features riding on a person. */
-const MIN_LOW_CONF_AREA = 1200;
+const MIN_LOW_CONF_AREA = scaleFrom640(1200);
 
 /** Overlap (intersection / smaller box) with a suppression zone —
  *  background baseline regions or detected faces — that kills a candidate. */
@@ -166,7 +166,7 @@ export function buildUnknownDetections(params: {
 }): YoloDetection[] {
   const {
     lowConfDetections, blobs, sceneUnstable, confidentDetections,
-    knownTrackBboxes, suppressZones = [], videoAspect, confidence, modelSize = 640,
+    knownTrackBboxes, suppressZones = [], videoAspect, confidence, modelSize = MODEL_INPUT_SIZE,
   } = params;
 
   // Novelty cannot be judged while the whole scene is changing.

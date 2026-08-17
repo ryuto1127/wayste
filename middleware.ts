@@ -82,8 +82,12 @@ function buildCsp(nonce: string): string {
     "default-src 'self'",
     // Scripts: nonce + strict-dynamic lets Next.js's bootstrap inline script
     // run and transitively trust the chunks it loads. wasm-unsafe-eval is
-    // required by onnxruntime-web.
-    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' 'wasm-unsafe-eval'`,
+    // required by onnxruntime-web. Dev builds additionally allow eval():
+    // React dev tooling reconstructs stacks with it and otherwise floods
+    // the console + error overlay ("1 Issue") — never emitted in production.
+    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' 'wasm-unsafe-eval'${
+      process.env.NODE_ENV === "production" ? "" : " 'unsafe-eval'"
+    }`,
     // Tailwind injects inline <style> tags
     "style-src 'self' 'unsafe-inline'",
     // Pilot images load through the /api/pilot-image proxy ('self'); no

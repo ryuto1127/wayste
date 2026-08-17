@@ -157,6 +157,12 @@ const SCENE_UNSTABLE_FG_RATIO = 0.35;
  *  item someone brought. Short on purpose: the scene at start is already
  *  static, so there is nothing to wait for. */
 const CONTINUOUS_BASELINE_MS = 1_500;
+/** Thermal proxy guards. The 120×120 CV analysis costs ~1–3ms on any
+ *  healthy machine; below this absolute cost the load is trivial no matter
+ *  what the ratio says. Real heat also builds over tens of seconds — an
+ *  elevation must last this long before the ladder escalates. */
+const THERMAL_MIN_AVG_MS = 8;
+const THERMAL_SUSTAIN_MS = 8_000;
 /** An unknown track that has sat still this long is background that slipped
  *  past the baseline — demote its region to a background zone. Held and
  *  presented items are never this still, so waiting longer only means
@@ -442,6 +448,9 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
     level: 0 as 0 | 1 | 2,
     /** Frame counter for skip-frame throttling. */
     frameCounter: 0,
+    /** When the current stretch of elevated readings began (0 = not
+     *  elevated). Escalation requires the stretch to be SUSTAINED. */
+    elevatedSince: 0,
   });
 
   // Reset thermal state when tab returns to foreground — background tab
@@ -454,6 +463,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           thermal.throttling = false;
           thermal.level = 0;
           thermal.durations = [];
+          thermal.elevatedSince = 0;
           setThermalWarning(false);
           perfMonitor.recordThermalState(false, 1);
           console.log("[thermal] ✅ Tab visible — reset thermal state");
@@ -887,7 +897,13 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       // inflates analysis duration and causes false thermal detection.
       const analysisDuration = performance.now() - analysisStart;
       perfMonitor.recordCvFrame(analysisDuration);
-      if (!document.hidden) {
+      // Skip sampling while the browser VLM is still downloading/compiling —
+      // that one-time work congests the main thread and either poisons the
+      // baseline (too slow) or fakes a thermal spike (ratio vs a quiet
+      // baseline), depending on when it lands.
+      const vlmPreparing =
+        vlmBrowserModRef.current?.getBrowserVlmState?.() === "preparing";
+      if (!document.hidden && !vlmPreparing) {
         if (thermal.baselineSamples < 60) {
           // Collecting baseline (first ~2 seconds)
           thermal.durations.push(analysisDuration);
@@ -910,13 +926,32 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           }
           const ratio = avg / thermal.baseline;
           const prevLevel = thermal.level;
-          // Graduated ladder with hysteresis: escalate at 2× / 4× the
-          // baseline, de-escalate at 3× / 1.5× so levels don't flap.
-          if (ratio >= 4) thermal.level = 2;
-          else if (ratio >= 3) thermal.level = Math.max(prevLevel === 2 ? 2 : 1, 1) as 0 | 1 | 2;
-          else if (ratio >= 2) thermal.level = 1;
-          else if (ratio >= 1.5) thermal.level = Math.min(prevLevel, 1) as 0 | 1 | 2;
-          else thermal.level = 0;
+          // Two guards keep this a HEAT signal rather than a busy-main-
+          // thread signal (which locked out the VLM on a cool machine):
+          //  - absolute floor: a big ratio over a tiny denominator is
+          //    scheduler noise. Genuine throttling drives the absolute
+          //    cost past the floor; sub-floor work is trivial regardless.
+          //  - sustain: heat builds over tens of seconds. A busy stretch
+          //    (shader compile, HMR, GC) spikes and clears — hold the
+          //    current level until the elevation has lasted.
+          const elevated = avg >= THERMAL_MIN_AVG_MS && ratio >= 2;
+          if (!elevated) thermal.elevatedSince = 0;
+          else if (!thermal.elevatedSince) thermal.elevatedSince = Date.now();
+          const sustained =
+            thermal.elevatedSince > 0 &&
+            Date.now() - thermal.elevatedSince >= THERMAL_SUSTAIN_MS;
+          if (elevated && sustained) {
+            // Graduated ladder with hysteresis: escalate at 2× / 4× the
+            // baseline; a level-2 machine stays hot down to 3×.
+            if (ratio >= 4) thermal.level = 2;
+            else if (ratio >= 3) thermal.level = Math.max(prevLevel === 2 ? 2 : 1, 1) as 0 | 1 | 2;
+            else thermal.level = 1;
+          } else if (!elevated) {
+            // De-escalate at 1.5× so levels don't flap.
+            if (ratio >= 1.5) thermal.level = Math.min(prevLevel, 1) as 0 | 1 | 2;
+            else thermal.level = 0;
+          }
+          // else: elevated but not yet sustained — hold the current level.
           thermal.throttling = thermal.level === 2;
           perfMonitor.recordThermalState(thermal.throttling, ratio);
           if (thermal.level !== prevLevel) {

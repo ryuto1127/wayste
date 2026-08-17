@@ -105,7 +105,12 @@ export function syncContinuousCards(
 
   const resolveTrack = (t: Track): TrackedResult | null => {
     const r = resolvers.resolveTrack(t);
-    return r ? toCard(r, t, true) : null;
+    // A needsReview-flagged result is by definition NOT final: the rule
+    // matched but confidence sat below the site's review bar. Locking it
+    // would freeze the card at 確認が必要 with no way out — the upgrade
+    // path skips locked cards and so does the VLM judge. Leave it unlocked
+    // so rising confidence re-resolves it and the VLM may name it.
+    return r ? toCard(r, t, !r.needsReview) : null;
   };
   const needsReviewCard = (t: Track): TrackedResult =>
     toCard(resolvers.buildNeedsReview(), t, false);

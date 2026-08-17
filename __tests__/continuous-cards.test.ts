@@ -173,6 +173,32 @@ describe("syncContinuousCards", () => {
       ]);
     });
 
+    it("leaves a rule-resolved but review-flagged card unlocked (can upgrade / be VLM-judged)", () => {
+      // A rule match whose confidence sits below the site review bar comes
+      // back with needsReview: true. Locking it froze the kiosk at
+      // 確認が必要 with no escape: the upgrade path and the VLM judge both
+      // skip locked cards.
+      const flaggedResolvers: CardSyncResolvers = {
+        ...resolvers,
+        resolveTrack: (t) => {
+          const r = resolvers.resolveTrack(t);
+          return r && t.confidence < 0.9 ? { ...r, needsReview: true } : r;
+        },
+      };
+      const t1 = track({ confidence: 0.75 }); // above instant bar, below 0.9
+      const first = syncContinuousCards([t1], [], new Map(), TH, 0, flaggedResolvers);
+      expect(first.cards.get(1)?._locked).toBe(false);
+      expect(first.cards.get(1)?.needsReview).toBe(true);
+
+      // Confidence firms up past the review bar → the card re-resolves
+      // into a final (locked) result instead of staying stuck.
+      const t2 = track({ confidence: 0.95 });
+      const second = syncContinuousCards([t2], [], first.cards, TH, 100, flaggedResolvers);
+      expect(second.cards.get(1)?._locked).toBe(true);
+      expect(second.cards.get(1)?.needsReview).toBe(false);
+      expect(second.actions.map((a) => a.type)).toContain("upgraded");
+    });
+
     it("never re-resolves a locked card", () => {
       const t = track({ confidence: 0.8 });
       const { cards: first } = sync([t]);

@@ -30,12 +30,14 @@ from ultralytics import YOLO
 # Class list — ORDER MATTERS and must match data.yaml `names`.
 CLASSES = [
     "plastic_bottle",  # 資源 + 統合アイテム(キャップ/ラベル分解はsite configのcompoundsが担当)
-    "can",             # 資源 — ペットボトルと円筒形ペア(任意クラス: 撮らないなら外す)
+    "can",             # 資源 — ペットボトルと円筒形ペア(任意クラス: データが無ければ外す)
     "paper_cup",       # 可燃 — プラカップとの見分けが最大の見せ場
     "plastic_cup",     # プラ
-    "metal_spoon",     # 不燃 — 軽くて持ち運びやすい不燃代表
     "battery",         # 特別
 ]
+# 不燃(金属スプーン)は意図的にYOLO未学習 — unknown_object→VLM判定の
+# 実演に使う(docs/demo-model/README.md参照)。公開スプーンデータは
+# 目視QA不合格(COCO=食事脇役/遮蔽、Universe=小規模のみ)だった。
 
 # Same backbone size as the current production model (26m). If the kiosk's
 # YOLO ms readout shows m is too slow for 30fps on the demo machine, retrain

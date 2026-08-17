@@ -35,22 +35,25 @@ let preprocessCanvas: OffscreenCanvas | null = null;
 const MODEL_INPUT_SIZE = 640;
 
 /** Custom 15-class waste detection model. */
-const WASTE_CLASSES = [
+/** Class ids of the DEPLOYED model, in model order. Must stay in lockstep
+ *  with `public/models/yolo-rules.json` — a mismatch silently mislabels
+ *  every detection (id 4 meaning "battery" in one place and "glass_bottle"
+ *  in the other). `__tests__/yolo-rules.test.ts` enforces the pairing. */
+export const WASTE_CLASSES = [
   "plastic_bottle",       // 0
   "can",                  // 1
   "paper_cup",            // 2
   "plastic_cup",          // 3
-  "glass_bottle",         // 4
-  "cardboard",            // 5
-  "paper",                // 6
-  "plastic_bag",          // 7
-  "paper_bag",            // 8
-  "battery",              // 9
-  "styrofoam",            // 10
-  "tetra_pak",            // 11
-  "plastic_bottle_cap",   // 12
-  "plastic_bottle_label", // 13
-  "food_waste",           // 14
+  "battery",              // 4
+];
+
+/** Class list of the previous 15-class model, kept so `15class_v1.onnx`
+ *  still decodes correctly if `initYolo` is pointed back at it. */
+export const WASTE_CLASSES_15 = [
+  "plastic_bottle", "can", "paper_cup", "plastic_cup", "glass_bottle",
+  "cardboard", "paper", "plastic_bag", "paper_bag", "battery",
+  "styrofoam", "tetra_pak", "plastic_bottle_cap", "plastic_bottle_label",
+  "food_waste",
 ];
 
 /**
@@ -58,7 +61,7 @@ const WASTE_CLASSES = [
  * return the same promise. If the model file is missing or ONNX fails to load,
  * resolves to `false` and all subsequent `runYoloInference()` calls return [].
  */
-export function initYolo(modelUrl = "/models/15class_v1.onnx"): Promise<boolean> {
+export function initYolo(modelUrl = "/models/demo5_v1.onnx"): Promise<boolean> {
   if (loading) return loading;
 
   loading = (async () => {

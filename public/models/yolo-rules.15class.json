@@ -1,0 +1,127 @@
+{
+  "confidence_threshold": 0.55,
+  "min_box_area": 3000,
+  "rules": {
+    "plastic_bottle": {
+      "itemName": "Plastic Bottle",
+      "itemName_ja": "ペットボトル",
+      "wasteStream": "recyclable",
+      "reasoning": "PET bottles are recyclable. Empty, rinse, and remove cap and label.",
+      "reasoning_ja": "ペットボトルは資源ゴミです。中を空にして洗い、キャップとラベルを外してください。",
+      "preAction": "Empty, rinse, remove cap and label",
+      "preAction_ja": "中を空にして洗い、キャップとラベルを外してください"
+    },
+    "can": {
+      "itemName": "Aluminum Can",
+      "itemName_ja": "アルミ缶",
+      "wasteStream": "recyclable",
+      "reasoning": "Aluminum and steel cans are recyclable. Rinse before recycling.",
+      "reasoning_ja": "アルミ缶・スチール缶は資源ゴミです。中を洗ってから出してください。",
+      "preAction": "Rinse before recycling",
+      "preAction_ja": "洗ってから資源ゴミへ"
+    },
+    "paper_cup": {
+      "itemName": "Paper Cup",
+      "itemName_ja": "紙コップ",
+      "wasteStream": "burnable",
+      "reasoning": "Paper cups have a plastic lining and go in burnable waste.",
+      "reasoning_ja": "紙コップは内側にプラスチックコーティングがあるため可燃ゴミです。"
+    },
+    "plastic_cup": {
+      "itemName": "Plastic Cup",
+      "itemName_ja": "プラスチックカップ",
+      "wasteStream": "plastic",
+      "reasoning": "Disposable plastic cups go in the plastic waste stream.",
+      "reasoning_ja": "使い捨てプラスチックカップはプラスチックへ。"
+    },
+    "glass_bottle": {
+      "itemName": "Glass Bottle",
+      "itemName_ja": "ガラス瓶",
+      "wasteStream": "recyclable",
+      "reasoning": "Glass bottles are recyclable. Rinse and remove cap.",
+      "reasoning_ja": "ガラス瓶は資源ゴミです。洗ってからキャップを外してください。",
+      "preAction": "Rinse and remove cap if different material",
+      "preAction_ja": "洗ってキャップを外してください"
+    },
+    "cardboard": {
+      "itemName": "Cardboard",
+      "itemName_ja": "段ボール",
+      "wasteStream": "recyclable",
+      "reasoning": "Cardboard is recyclable. Flatten before recycling.",
+      "reasoning_ja": "段ボールは資源ゴミです。潰してから出してください。",
+      "preAction": "Flatten and remove tape if possible",
+      "preAction_ja": "潰してテープはできるだけ剥がしてください"
+    },
+    "paper": {
+      "itemName": "Paper",
+      "itemName_ja": "紙",
+      "wasteStream": "recyclable",
+      "reasoning": "Clean paper is recyclable.",
+      "reasoning_ja": "きれいな紙は資源ゴミです。"
+    },
+    "plastic_bag": {
+      "itemName": "Plastic Bag",
+      "itemName_ja": "ビニール袋",
+      "wasteStream": "plastic",
+      "reasoning": "Plastic bags with the plastic recycling mark go in the plastic stream.",
+      "reasoning_ja": "プラマーク付きのビニール袋はプラスチックへ。"
+    },
+    "paper_bag": {
+      "itemName": "Paper Bag",
+      "itemName_ja": "紙袋",
+      "wasteStream": "recyclable",
+      "reasoning": "Paper bags are recyclable.",
+      "reasoning_ja": "紙袋は資源ゴミです。"
+    },
+    "battery": {
+      "itemName": "Battery",
+      "itemName_ja": "電池",
+      "wasteStream": "special",
+      "reasoning": "Batteries contain hazardous materials and require special disposal.",
+      "reasoning_ja": "電池は有害物質を含むため特別収集です。",
+      "preAction": "Take to a battery collection point",
+      "preAction_ja": "電池回収ボックスへお持ちください"
+    },
+    "styrofoam": {
+      "itemName": "Styrofoam",
+      "itemName_ja": "発泡スチロール",
+      "wasteStream": "plastic",
+      "reasoning": "Expanded polystyrene goes in the plastic stream.",
+      "reasoning_ja": "発泡スチロールはプラスチックへ。"
+    },
+    "tetra_pak": {
+      "itemName": "Tetra Pak Carton",
+      "itemName_ja": "テトラパック",
+      "wasteStream": "recyclable",
+      "reasoning": "Tetra Pak cartons are recyclable. Empty and rinse before recycling.",
+      "reasoning_ja": "テトラパックは資源ゴミです。中を空にして洗ってから出してください。",
+      "preAction": "Empty and rinse before recycling",
+      "preAction_ja": "中を空にして洗ってから資源ゴミへ"
+    },
+    "plastic_bottle_cap": {
+      "itemName": "Plastic Bottle Cap",
+      "itemName_ja": "ペットボトルキャップ",
+      "wasteStream": "plastic",
+      "reasoning": "Plastic bottle caps are separate from the bottle and go in the plastic stream.",
+      "reasoning_ja": "ペットボトルのキャップはボトルと分けてプラスチックへ。",
+      "preAction": "Remove from bottle and put in plastic",
+      "preAction_ja": "ボトルから外してプラスチックへ"
+    },
+    "plastic_bottle_label": {
+      "itemName": "Plastic Bottle Label",
+      "itemName_ja": "ペットボトルラベル",
+      "wasteStream": "plastic",
+      "reasoning": "Plastic shrink-wrap labels go in the plastic stream.",
+      "reasoning_ja": "ペットボトルのラベルはプラスチックへ。",
+      "preAction": "Peel off the bottle and put in plastic",
+      "preAction_ja": "ボトルから剥がしてプラスチックへ"
+    },
+    "food_waste": {
+      "itemName": "Food Waste",
+      "itemName_ja": "生ゴミ",
+      "wasteStream": "burnable",
+      "reasoning": "Food scraps and leftovers go in burnable waste.",
+      "reasoning_ja": "残飯・食べ残しは可燃ゴミです。"
+    }
+  }
+}

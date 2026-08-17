@@ -59,21 +59,18 @@ afterAll(() => {
 });
 
 // ═══════════════════════════════════════════════════════════════════
-// Tier 1: YOLO 15-class custom model → waste stream
+// Tier 1: YOLO demo model (5 classes) → waste stream
+// The deployed model is the few-class demo build; the 15-class rules are
+// preserved at public/models/yolo-rules.15class.json for the older model.
 // ═══════════════════════════════════════════════════════════════════
 
-describe("Tier 1: YOLO 15-class detection → waste stream", () => {
+describe("Tier 1: YOLO demo detection → waste stream", () => {
   const config = makeSiteConfig();
 
   describe("recyclable items", () => {
     it.each([
       ["plastic_bottle", "recyclable"],
       ["can", "recyclable"],
-      ["glass_bottle", "recyclable"],
-      ["cardboard", "recyclable"],
-      ["paper", "recyclable"],
-      ["paper_bag", "recyclable"],
-      ["tetra_pak", "recyclable"],
     ])("%s → %s", (className, expectedStream) => {
       const result = resolveYoloDetection(makeDetection(className), config);
       expect(result).not.toBeNull();
@@ -84,11 +81,7 @@ describe("Tier 1: YOLO 15-class detection → waste stream", () => {
 
   describe("plastic items", () => {
     it.each([
-      ["plastic_bottle_cap", "plastic"],
-      ["plastic_bottle_label", "plastic"],
       ["plastic_cup", "plastic"],
-      ["plastic_bag", "plastic"],
-      ["styrofoam", "plastic"],
     ])("%s → %s", (className, expectedStream) => {
       const result = resolveYoloDetection(makeDetection(className), config);
       expect(result).not.toBeNull();
@@ -99,7 +92,6 @@ describe("Tier 1: YOLO 15-class detection → waste stream", () => {
   describe("burnable items", () => {
     it.each([
       ["paper_cup", "burnable"],
-      ["food_waste", "burnable"],
     ])("%s → %s", (className, expectedStream) => {
       const result = resolveYoloDetection(makeDetection(className), config);
       expect(result).not.toBeNull();
@@ -122,7 +114,7 @@ describe("Tier 1: YOLO 15-class detection → waste stream", () => {
   });
 
   it("preserves detection confidence in result", () => {
-    const result = resolveYoloDetection(makeDetection("cardboard", 0.75), config);
+    const result = resolveYoloDetection(makeDetection("can", 0.75), config);
     expect(result).not.toBeNull();
     expect(result!.confidence).toBe(0.75);
   });
@@ -138,12 +130,12 @@ describe("Tier 1: YOLO 15-class detection → waste stream", () => {
 // ═══════════════════════════════════════════════════════════════════
 
 describe("Site overrides applied to YOLO results", () => {
-  it("site override changes food_waste from burnable to non-burnable", () => {
+  it("site override changes paper_cup from burnable to non-burnable", () => {
     const config = makeSiteConfig({
-      overrides: [{ pattern: "Food Waste", stream: "non-burnable", note: "Food waste override test" }],
+      overrides: [{ pattern: "Paper Cup", stream: "non-burnable", note: "Paper cup override test" }],
     });
 
-    const result = resolveYoloDetection(makeDetection("food_waste"), config);
+    const result = resolveYoloDetection(makeDetection("paper_cup"), config);
     expect(result).not.toBeNull();
     expect(result!.wasteStream).toBe("non-burnable");
   });
@@ -154,8 +146,14 @@ describe("Site overrides applied to YOLO results", () => {
 // ═══════════════════════════════════════════════════════════════════
 
 describe("Rules JSON integrity", () => {
-  it("YOLO rules covers all 15 custom classes", () => {
-    expect(Object.keys(yoloRules.rules)).toHaveLength(15);
+  it("rules cover exactly the deployed model's classes", () => {
+    // The real invariant: a class the model emits with no rule silently
+    // degrades to needs_review, and a rule for a class the model never
+    // emits is dead config. Both directions must match.
+    /* eslint-disable @typescript-eslint/no-require-imports */
+    const { WASTE_CLASSES } = require("@/lib/yolo-inference");
+    /* eslint-enable @typescript-eslint/no-require-imports */
+    expect(Object.keys(yoloRules.rules).sort()).toEqual([...WASTE_CLASSES].sort());
   });
 
   it("every YOLO rule has required fields", () => {

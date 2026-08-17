@@ -18,15 +18,15 @@
 
 ## Tech Stack
 - TypeScript / Next.js 16 (App Router) / React 19 / Tailwind CSS v4
-- YOLO26m FP16 (ONNX Runtime Web) — browser object detection, 15 custom waste classes (`15class_v1.onnx`, 39 MB)
+- YOLO26m FP16 (ONNX Runtime Web) — browser object detection. Deployed: 5-class demo model (`demo5_v1.onnx`, 39 MB, mAP50 0.92) — plastic_bottle/can/paper_cup/plastic_cup/battery. The prior 15-class model stays as `15class_v1.onnx` + `yolo-rules.15class.json`
 - OpenAI `gpt-5.4-mini` — legacy cloud fallback, OFF by default; only used when `NEXT_PUBLIC_CLOUD_FALLBACK=1` (pilot experiments). Default kiosk path resolves low-confidence items as `needs_review` on-device
 - Upstash Redis (REST) / Vercel Blob / Vercel Serverless + Cron
-- Zod v4 / Jest v30 (585 tests, 30 suites) / EN+JA i18n (181 keys/locale)
+- Zod v4 / Jest v30 (575 tests, 30 suites) / EN+JA i18n (181 keys/locale)
 
 ## Commands
     npm run dev      # Dev server (Turbopack)
     npm run build    # Production build
-    npm test         # 585 Jest tests, 30 suites
+    npm test         # 575 Jest tests, 30 suites
     npm run lint     # ESLint
 
 ## Routes

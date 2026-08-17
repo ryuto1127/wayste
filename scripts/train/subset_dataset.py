@@ -66,7 +66,7 @@ def main() -> None:
     print(f"source classes: {len(src_names)} → keeping {keep}")
 
     totals: dict[str, list[int]] = {}
-    for split in ("train", "valid", "test"):
+    for split in ("train", "valid", "val", "test"):
         labels_dir = src / split / "labels"
         if not labels_dir.is_dir():
             continue
@@ -104,9 +104,10 @@ def main() -> None:
         totals[split] = [kept, negatives, dropped]
         print(f"{split}: {kept} kept, {negatives} negatives, {dropped} dropped")
 
+    val_dir = next((s for s in ("valid", "val") if (dst / s).is_dir()), "valid")
     (dst / "data.yaml").write_text(
-        "train: train/images\nval: valid/images\n"
-        + (f"test: test/images\n" if (dst / "test").is_dir() else "")
+        f"train: train/images\nval: {val_dir}/images\n"
+        + ("test: test/images\n" if (dst / "test").is_dir() else "")
         + f"nc: {len(keep)}\nnames: {keep}\n",
         encoding="utf-8",
     )

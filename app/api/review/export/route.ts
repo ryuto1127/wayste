@@ -154,6 +154,7 @@ export async function GET(request: Request) {
         imageFile: filename,
         imageUrl: entry.imageUrl,
         yoloDetections: entry.yoloDetections ?? null,
+        captureSpace: entry.captureSpace ?? null,
         correctStream: (entry as unknown as Record<string, unknown>).correctStream ?? null,
       }),
     );

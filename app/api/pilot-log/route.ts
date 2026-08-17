@@ -45,6 +45,8 @@ const PilotLogPostSchema = z.object({
     latencyMs: z.number().min(0).max(60_000).optional(),
     meta: z.unknown().optional(),
     yoloDetections: z.unknown().optional(),
+    /** Which square the image/bboxNorm are in — see PilotLogEntry.captureSpace. */
+    captureSpace: z.enum(["center_square", "letterbox"]).optional(),
     rgbAnalysis: z.unknown().optional(),
     tierResults: z.unknown().optional(),
     /** All classified items in this frame — /review renders multi-item
@@ -178,6 +180,7 @@ export async function POST(request: Request) {
         requestId,
         meta: entry.meta as PilotLogEntry["meta"],
         yoloDetections: entry.yoloDetections as PilotLogEntry["yoloDetections"],
+        captureSpace: entry.captureSpace,
         rgbAnalysis: entry.rgbAnalysis as PilotLogEntry["rgbAnalysis"],
         tierResults: entry.tierResults as PilotLogEntry["tierResults"],
         allItems: entry.allItems,

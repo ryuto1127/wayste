@@ -99,6 +99,17 @@ export interface PilotLogEntry {
   meta?: ClassifyMeta;
   /** YOLO detections for this frame (if YOLO ran). Used for fine-tuning dataset export. */
   yoloDetections?: YoloDetectionLog[];
+  /**
+   * Which square the stored image (and thus `yoloDetections[].bboxNorm`) is in:
+   *   "center_square" — gated mode: center short-side crop of the video
+   *   "letterbox"     — continuous mode: full frame letterboxed into a square,
+   *                     matching the YOLO fullFrame model input
+   * Absent on entries written before this field existed. For those, gated
+   * entries are center_square; continuous-mode entries logged before the
+   * letterbox capture fix have bboxNorm values that do NOT align with the
+   * stored image — treat them as unusable for bbox-on-image work.
+   */
+  captureSpace?: "center_square" | "letterbox";
   /** Whether an override was applied to change the model's original prediction. */
   overrideApplied?: boolean;
   /** RGB material analysis results (when YOLO ran). */

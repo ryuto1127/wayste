@@ -40,6 +40,7 @@ interface AnalysisEntry {
   sharpnessScore: number | null;
   imageQuality: string | null;
   yoloDetections: PilotLogEntry["yoloDetections"] | null;
+  captureSpace: PilotLogEntry["captureSpace"] | null;
 }
 
 export async function GET(request: Request) {
@@ -114,6 +115,7 @@ export async function GET(request: Request) {
         sharpnessScore: entry.meta?.sharpnessScore ?? null,
         imageQuality: entry.meta?.imageQuality ?? null,
         yoloDetections: entry.yoloDetections ?? null,
+        captureSpace: entry.captureSpace ?? null,
       });
     }
 

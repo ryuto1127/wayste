@@ -576,7 +576,7 @@ function EntryCard({
 // ── Analysis Export Panel ──
 
 type AnalysisVerdict = "correct" | "wrong" | "false_detection" | "unreviewed";
-type AnalysisModel = "T1" | "t2";
+type AnalysisModel = "T1" | "t2" | "vlm";
 
 function AnalysisExportPanel({
   locale,
@@ -665,6 +665,7 @@ function AnalysisExportPanel({
 
   const modelOptions: { value: AnalysisModel; label: string }[] = [
     { value: "T1", label: "YOLO" },
+    { value: "vlm", label: "VLM" },
     { value: "t2", label: "GPT mini" },
   ];
 

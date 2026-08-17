@@ -63,7 +63,7 @@ const MetaSchema = z.record(z.string(), z.unknown());
 
 export const PilotLogEntrySchema = z.object({
   timestamp: z.string().max(64),
-  modelUsed: z.enum(["t2", "T1"]),
+  modelUsed: z.enum(["t2", "T1", "vlm"]),
   escalated: z.boolean(),
   itemName: z.string().max(256),
   wasteStream: z.string().max(64),

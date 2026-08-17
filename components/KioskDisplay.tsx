@@ -41,6 +41,13 @@ import { recordSort } from "@/lib/kiosk-counter";
 import { DetectionTracker, type Track } from "@/lib/detection-tracker";
 import { syncContinuousCards } from "@/lib/continuous-cards";
 import { buildUnknownDetections, UNKNOWN_OBJECT_CLASS_ID } from "@/lib/unknown-object";
+import {
+  judgeCropWithVlm,
+  cropTrackToDataUrl,
+  isLocalVlmEndpointAllowed,
+  type VlmJudgment,
+} from "@/lib/vlm-client";
+import { buildClassificationResult } from "@/lib/waste-rules-core";
 import CameraFeed, { type CameraFeedHandle } from "./CameraFeed";
 import IdleScreen from "./IdleScreen";
 import CameraScreen from "./CameraScreen";
@@ -292,6 +299,11 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
   const faceZonesRef = useRef<{ boxes: Bbox[]; at: number }>({ boxes: [], at: 0 });
   /** Reusable small canvas for the face sweep (HTMLCanvas — MediaPipe input). */
   const faceSweepCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  /** Track ids already sent to the local VLM (Tier 1.5) this lifetime —
+   *  one judgment per track; class swaps and losses clear the mark. */
+  const vlmJudgedRef = useRef<Set<number>>(new Set());
+  /** Single-concurrency latch for local VLM judgments. */
+  const vlmInFlightRef = useRef(false);
 
   // ── Voice guidance (site-config driven — end-users cannot toggle) ──
   const [voiceEnabled, setVoiceEnabled] = useState(false);
@@ -1359,6 +1371,13 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
         setResultRequestIds(arr.map(() => undefined));
       }
 
+      // ── Tier 1.5: unresolved cards go to the local VLM (when configured) ──
+      for (const ev of events) {
+        if (ev.type === "lost") vlmJudgedRef.current.delete(ev.trackId);
+        else if (ev.type === "classChanged") vlmJudgedRef.current.delete(ev.track.id);
+      }
+      maybeJudgeUnresolvedWithVlm(tracks, cards, video);
+
       // ── Overlay state — every cycle (~10fps) so boxes follow items live ──
       setLiveTracks(
         tracks
@@ -1376,6 +1395,116 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
             };
           }),
       );
+    }
+
+    /** Tier 1.5: pick ONE unresolved (needs_review) card whose track is
+     *  steady and not yet judged, crop it from the live video, and ask the
+     *  local VLM. A verdict above the site's review bar upgrades the card
+     *  through the same path YOLO upgrades use; anything else keeps the
+     *  honest needs_review answer. Never blocks the pipeline. */
+    function maybeJudgeUnresolvedWithVlm(
+      tracks: Track[],
+      cards: Map<number, TrackedResult>,
+      video: HTMLVideoElement,
+    ) {
+      const vlmCfg = siteConfigRef.current?.localVlm;
+      if (!vlmCfg?.endpoint || !vlmCfg.model) return;
+      if (!isLocalVlmEndpointAllowed(vlmCfg.endpoint)) return;
+      if (vlmInFlightRef.current) return;
+
+      for (const [id, card] of cards) {
+        if (card._locked) continue; // only unresolved needs_review cards
+        if (vlmJudgedRef.current.has(id)) continue;
+        const t = tracks.find((tr) => tr.id === id);
+        if (!t || !DetectionTracker.isDisplayable(t)) continue;
+        // Judge a steady crop — a motion-blurred crop wastes the call.
+        if (t.travelEma > STEADY_MAX_TRAVEL_PX) continue;
+
+        vlmJudgedRef.current.add(id);
+        vlmInFlightRef.current = true;
+        const bbox = [...t.bbox] as Bbox;
+        const classNameAtJudge = t.className;
+
+        (async () => {
+          const t0 = Date.now();
+          try {
+            const siteConfig = siteConfigRef.current;
+            if (!siteConfig) return;
+            const dataUrl = await cropTrackToDataUrl(video, bbox);
+            if (!dataUrl) return;
+            const judgment = await judgeCropWithVlm(
+              dataUrl, vlmCfg, siteConfig, localeRef.current,
+            );
+            const latencyMs = Date.now() - t0;
+            if (!judgment) {
+              console.log(`[vlm] no verdict for track ${id} (${latencyMs}ms)`);
+              return;
+            }
+            console.log(
+              `[vlm] track ${id}: ${judgment.itemName} → ${judgment.wasteStream} ` +
+              `(${(judgment.confidence * 100).toFixed(0)}%, ${latencyMs}ms)`,
+            );
+            const applied =
+              judgment.wasteStream !== "needs_review" &&
+              judgment.confidence >= (siteConfig.reviewThreshold ?? 0.55);
+            if (applied) {
+              // The scene may have moved on mid-judgment: card resolved by a
+              // YOLO upgrade, track lost, or the object swapped (class vote).
+              const current = continuousCardsRef.current.get(id);
+              const trackNow = trackerRef.current?.getTracks().find((tr) => tr.id === id);
+              if (current && !current._locked && trackNow?.className === classNameAtJudge) {
+                const result = buildClassificationResult(
+                  {
+                    itemName: judgment.itemName,
+                    wasteStream: judgment.wasteStream,
+                    confidence: judgment.confidence,
+                    reasoning: judgment.reasoning ?? "",
+                  },
+                  siteConfig,
+                  localeRef.current,
+                );
+                result.modelUsed = "vlm";
+                continuousCardsRef.current.set(id, {
+                  ...result,
+                  _trackBbox: current._trackBbox,
+                  _trackId: id,
+                  _locked: true,
+                });
+                const arr = [...continuousCardsRef.current.values()].slice(0, 4);
+                sortByPhysicalPosition(arr);
+                setStableResults(arr);
+                setResultRequestIds(arr.map(() => undefined));
+              }
+            }
+            logVlmVerdict(judgment, latencyMs, applied);
+          } catch (err) {
+            console.warn("[vlm] judgment error:", err);
+          } finally {
+            vlmInFlightRef.current = false;
+          }
+        })();
+        break; // one judgment at a time
+      }
+    }
+
+    /** Fire-and-forget pilot-log for a VLM verdict (metadata only — the
+     *  crop never leaves the machine). */
+    function logVlmVerdict(judgment: VlmJudgment, latencyMs: number, applied: boolean) {
+      fetch("/api/pilot-log", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          entry: {
+            modelUsed: "vlm",
+            escalated: true,
+            itemName: judgment.itemName,
+            wasteStream: applied ? judgment.wasteStream : "needs_review",
+            confidence: judgment.confidence,
+            requiresVerification: !applied,
+            latencyMs,
+          },
+        }),
+      }).catch(() => {});
     }
 
     /** Throttled pilot-log for continuous mode — reuses the gated path's

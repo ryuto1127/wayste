@@ -80,7 +80,8 @@ export interface YoloDetectionLog {
 // ── Pilot log entry (server-side) ──
 export interface PilotLogEntry {
   timestamp: string;
-  modelUsed: "t2" | "T1";
+  /** "T1" = YOLO instant, "vlm" = local VLM (Tier 1.5), "t2" = cloud GPT. */
+  modelUsed: "t2" | "T1" | "vlm";
   escalated: boolean;
   itemName: string;
   wasteStream: string;
@@ -215,7 +216,9 @@ export interface ClassificationResponse {
   needsReview: boolean;
   isCompound: boolean;
   components?: ComponentPart[];
-  modelUsed?: "t2" | "T1";
+  /** "T1" = on-device YOLO, "vlm" = on-device local VLM (Tier 1.5),
+   *  "t2" = legacy cloud GPT (pilot flag only). */
+  modelUsed?: "t2" | "T1" | "vlm";
   imageUrl?: string;  // Vercel Blob URL of the captured frame
 }
 
@@ -341,6 +344,18 @@ export interface SiteConfig {
    * parkedAfterMs without a code change.
    */
   trackerTuning?: TrackerTuning;
+  /**
+   * Tier 1.5 — local VLM for items YOLO can't resolve (continuous mode).
+   * The endpoint MUST be loopback (localhost/127.0.0.1); the client refuses
+   * anything else so a planted config cannot exfiltrate frames. Any
+   * OpenAI-compatible local runtime works (Ollama `/v1`, LM Studio,
+   * llama.cpp server). Omit to disable — needs_review stays the answer.
+   */
+  localVlm?: {
+    endpoint: string;
+    model: string;
+    timeoutMs?: number;
+  };
 }
 
 /** Optional per-site tracker overrides — mirrors lib/detection-tracker.ts

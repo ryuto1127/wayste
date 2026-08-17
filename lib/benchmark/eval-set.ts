@@ -27,7 +27,7 @@ export interface EvalSample {
   predictedStream: string;
   predictedItemName: string;
   confidence: number;
-  modelUsed: "t2" | "T1";
+  modelUsed: "t2" | "T1" | "vlm";
   verdict: ReviewVerdict;
   /** Human-confirmed stream when verdict==="correct"; null when "wrong". */
   groundTruthStream: string | null;

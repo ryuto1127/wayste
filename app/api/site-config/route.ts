@@ -31,6 +31,7 @@ export async function GET() {
       showBinMap: config.showBinMap,
     }),
     ...(config.trackerTuning && { trackerTuning: config.trackerTuning }),
+    ...(config.localVlm && { localVlm: config.localVlm }),
     sensitivity: config.sensitivity,
     reviewThreshold: config.reviewThreshold,
     defaultStream: config.defaultStream,

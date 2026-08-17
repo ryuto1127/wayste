@@ -38,6 +38,7 @@ import {
 // kioskAuthHeaders replaced by session token (server-generated, HMAC-signed)
 import { recordSort } from "@/lib/kiosk-counter";
 import { DetectionTracker, type Track } from "@/lib/detection-tracker";
+import { syncContinuousCards } from "@/lib/continuous-cards";
 import CameraFeed, { type CameraFeedHandle } from "./CameraFeed";
 import IdleScreen from "./IdleScreen";
 import CameraScreen from "./CameraScreen";
@@ -1083,90 +1084,50 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
         keepConfidence: th.TRACK_KEEP_THRESHOLD,
       });
 
-      const cards = continuousCardsRef.current;
-      let changed = false;
-      const displayable = tracks.filter((t) => DetectionTracker.isDisplayable(t));
-      const displayableIds = new Set(displayable.map((t) => t.id));
+      const { cards, changed, actions, sessionEnded } = syncContinuousCards(
+        tracks,
+        events,
+        continuousCardsRef.current,
+        {
+          instantConfidence: th.YOLO_FALLBACK_THRESHOLD,
+          needsReviewMs: CONTINUOUS_NEEDS_REVIEW_MS,
+        },
+        now,
+        {
+          resolveTrack: (t: Track) =>
+            resolveYoloDetection(
+              { classId: t.classId, className: t.className, confidence: t.confidence, bbox: [...t.bbox] },
+              siteConfig,
+              localeRef.current,
+            ),
+          buildNeedsReview: () => buildLocalNeedsReviewResult(localeRef.current, siteConfig),
+        },
+      );
+      continuousCardsRef.current = cards;
 
-      // ── Drop cards whose track vanished or was parked-suppressed ──
-      for (const id of [...cards.keys()]) {
-        if (!displayableIds.has(id)) {
-          cards.delete(id);
-          changed = true;
+      for (const a of actions) {
+        switch (a.type) {
+          case "instantHit":
+            console.log(`[continuous] HIT: ${a.card.itemName} (${(a.track.confidence * 100).toFixed(0)}%)`);
+            maybeLogContinuous(video, a.card, detections, cycleMs);
+            break;
+          case "needsReview":
+            console.log(`[continuous] unresolved ${a.track.className} → needs_review`);
+            maybeLogContinuous(video, a.card, detections, cycleMs);
+            break;
+          case "upgraded":
+            console.log(`[continuous] upgraded needs_review → ${a.card.itemName}`);
+            break;
+          case "classSwapped":
+            console.log(`[continuous] class swap ${a.previousClassName} → ${a.track.className}`);
+            break;
         }
-      }
-
-      const resolveTrack = (t: Track): TrackedResult | null => {
-        const r = resolveYoloDetection(
-          { classId: t.classId, className: t.className, confidence: t.confidence, bbox: [...t.bbox] },
-          siteConfig,
-          localeRef.current,
-        );
-        if (!r) return null;
-        return { ...r, _trackBbox: [...t.bbox], _trackId: t.id, _locked: true };
-      };
-
-      for (const t of displayable) {
-        const existing = cards.get(t.id);
-        if (!existing) {
-          // Confident → instant on-device resolution via YOLO rules.
-          if (t.confidence >= th.YOLO_FALLBACK_THRESHOLD) {
-            const card = resolveTrack(t);
-            if (card) {
-              cards.set(t.id, card);
-              changed = true;
-              console.log(`[continuous] HIT: ${card.itemName} (${(t.confidence * 100).toFixed(0)}%)`);
-              maybeLogContinuous(video, card, detections, cycleMs);
-              continue;
-            }
-          }
-          // Below the instant bar (or no rule): give confidence a moment to
-          // firm up, then resolve on-device as needs_review — the kiosk must
-          // always answer, never scan silently.
-          if (now - (t.confirmedAt ?? now) >= CONTINUOUS_NEEDS_REVIEW_MS) {
-            const base = buildLocalNeedsReviewResult(localeRef.current, siteConfig);
-            const card: TrackedResult = {
-              ...base, _trackBbox: [...t.bbox], _trackId: t.id, _locked: false,
-            };
-            cards.set(t.id, card);
-            changed = true;
-            console.log(`[continuous] unresolved ${t.className} → needs_review`);
-            maybeLogContinuous(video, card, detections, cycleMs);
-          }
-        } else {
-          existing._trackBbox = [...t.bbox];
-          // needs_review cards upgrade once confidence clears the instant bar.
-          if (!existing._locked && t.confidence >= th.YOLO_FALLBACK_THRESHOLD) {
-            const card = resolveTrack(t);
-            if (card) {
-              cards.set(t.id, card);
-              changed = true;
-              console.log(`[continuous] upgraded needs_review → ${card.itemName}`);
-            }
-          }
-        }
-      }
-
-      // ── Item swapped at the same location → replace the card ──
-      for (const ev of events) {
-        if (ev.type !== "classChanged") continue;
-        const t = ev.track;
-        if (!cards.has(t.id) || !displayableIds.has(t.id)) continue;
-        const card = t.confidence >= th.YOLO_FALLBACK_THRESHOLD ? resolveTrack(t) : null;
-        if (card) {
-          cards.set(t.id, card);
-        } else {
-          const base = buildLocalNeedsReviewResult(localeRef.current, siteConfig);
-          cards.set(t.id, { ...base, _trackBbox: [...t.bbox], _trackId: t.id, _locked: false });
-        }
-        changed = true;
-        console.log(`[continuous] class swap ${ev.previousClassName} → ${t.className}`);
       }
 
       if (changed) {
         const arr = [...cards.values()].slice(0, 4);
         sortByPhysicalPosition(arr);
-        if (arr.length === 0 && stableResultsRef.current.length > 0) {
+        if (sessionEnded) {
           // Session over — items left the scene after results were shown.
           recordSort();
           setStatsVersion((v) => v + 1);

@@ -24,6 +24,8 @@ same contract as public/models/15class_v1.onnx). After training:
   3. Point initYolo at the new file (lib/yolo-inference.ts default model URL)
 """
 
+import os
+
 from ultralytics import YOLO
 
 # ── Config ──────────────────────────────────────────────────────────────
@@ -46,25 +48,43 @@ CLASSES = [
 # not a 6-class specialist fine-tune).
 BASE_MODEL = "yolo26m.pt"
 DATA_YAML = "dataset/data.yaml"
-EPOCHS = 150
+# 100 is an upper bound, not a target: patience below stops training once
+# val mAP plateaus, which on a 5-class fine-tune happens well before 100.
+EPOCHS = 100
 IMGSZ = 640
+# Write checkpoints to Google Drive when running in Colab. The VM's own disk
+# is wiped when the runtime disconnects or expires — a multi-hour run then
+# leaves NOTHING. On Drive, `resume=True` below picks up where it stopped.
+DRIVE_PROJECT = "/content/drive/MyDrive/wayste_training"
+PROJECT = DRIVE_PROJECT if os.path.isdir("/content/drive/MyDrive") else "runs"
+RUN_NAME = "demo5"
 
-# ── Train ───────────────────────────────────────────────────────────────
-model = YOLO(BASE_MODEL)
-model.train(
-    data=DATA_YAML,
-    epochs=EPOCHS,
-    imgsz=IMGSZ,
-    batch=-1,          # auto batch size for the available GPU/MPS memory
-    patience=40,       # early stop when val mAP plateaus
-    degrees=15,        # rotation — hands present items at odd angles
-    scale=0.5,         # distance variation
-    fliplr=0.5,
-    hsv_v=0.5,         # strong brightness variation — venue lighting unknown
-    hsv_s=0.5,
-    mosaic=1.0,
-    close_mosaic=20,
-)
+# ── Train (auto-resumes an interrupted run) ─────────────────────────────
+last_ckpt = os.path.join(PROJECT, RUN_NAME, "weights", "last.pt")
+if os.path.exists(last_ckpt):
+    print(f"resuming from {last_ckpt}")
+    model = YOLO(last_ckpt)
+    model.train(resume=True)
+else:
+    model = YOLO(BASE_MODEL)
+    model.train(
+        data=DATA_YAML,
+        epochs=EPOCHS,
+        imgsz=IMGSZ,
+        batch=-1,          # auto batch size for the available GPU/MPS memory
+        patience=30,       # early stop when val mAP plateaus
+        degrees=15,        # rotation — hands present items at odd angles
+        scale=0.5,         # distance variation
+        fliplr=0.5,
+        hsv_v=0.5,         # strong brightness variation — venue lighting unknown
+        hsv_s=0.5,
+        mosaic=1.0,
+        close_mosaic=20,
+        project=PROJECT,
+        name=RUN_NAME,
+        exist_ok=True,
+        save_period=5,     # extra checkpoint every 5 epochs
+    )
 
 # ── Validate ────────────────────────────────────────────────────────────
 metrics = model.val()

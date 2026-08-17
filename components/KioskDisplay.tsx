@@ -490,6 +490,16 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
     setLiveTracks([]);
   }, []);
 
+  /** Re-learn what counts as background WITHOUT leaving the live view.
+   *  Same wipe as start (pixel background model, learned scenery zones,
+   *  tracks, cards), then the startup baseline re-runs against the scene as
+   *  it stands now. Use after nudging the camera, after a lighting change,
+   *  or when the room itself has picked up a false detection. */
+  const handleBackgroundReset = useCallback(() => {
+    console.log("[continuous] background reset — re-learning the scene");
+    resetContinuousPipeline();
+  }, [resetContinuousPipeline]);
+
   /** Operator pressed start: the camera angle is final. Reset everything
    *  that observed the aiming phase, then begin detection + baseline. */
   const handleStartContinuous = useCallback(() => {
@@ -509,6 +519,11 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
   useEffect(() => {
     if (!continuousMode) return;
     const onKeyDown = (e: KeyboardEvent) => {
+      // R re-learns the background in place; Esc goes back to aiming.
+      if (e.key === "r" || e.key === "R") {
+        handleBackgroundReset();
+        return;
+      }
       if (e.key !== "Escape") return;
       console.log("[continuous] Esc — back to camera setup");
       yoloRunningRef.current = false;
@@ -523,7 +538,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [continuousMode, resetContinuousPipeline]);
+  }, [continuousMode, resetContinuousPipeline, handleBackgroundReset]);
 
   // ── Subscribe to model loading status ──
   useEffect(() => {
@@ -2703,6 +2718,17 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           <span>{Math.round(sysStats.fps)} fps</span>
           <span className="text-neutral-600">|</span>
           <span>YOLO {Math.round(sysStats.yoloMs)}ms</span>
+          <span className="text-neutral-600">|</span>
+          {/* Operator control — annotation mode only, so the production
+              kiosk face still carries no settings for end users. */}
+          <button
+            type="button"
+            onClick={handleBackgroundReset}
+            className="pointer-events-auto rounded-md bg-neutral-700 hover:bg-neutral-600 active:scale-95 transition px-2.5 py-1 text-neutral-100 font-sans focus-visible:outline-2 focus-visible:outline-emerald-400"
+            title="R"
+          >
+            {T("resetBackground")}
+          </button>
           <span className="text-neutral-600">|</span>
           <span>
             VLM{" "}

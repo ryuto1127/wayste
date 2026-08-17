@@ -32,6 +32,7 @@ export async function GET() {
     }),
     ...(config.trackerTuning && { trackerTuning: config.trackerTuning }),
     ...(config.localVlm && { localVlm: config.localVlm }),
+    ...(config.yoloModel && { yoloModel: config.yoloModel }),
     sensitivity: config.sensitivity,
     reviewThreshold: config.reviewThreshold,
     defaultStream: config.defaultStream,

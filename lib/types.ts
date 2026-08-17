@@ -365,6 +365,14 @@ export interface SiteConfig {
     dtype?: string;
     timeoutMs?: number;
   };
+  /**
+   * Which deployed YOLO model the kiosk loads (`lib/yolo-inference.ts`
+   * YOLO_MODELS registry). "demo5" = custom-trained waste classes;
+   * "coco80" = COCO-pretrained general-object detector — broader, faster
+   * boxes, with waste routing left to yolo-rules mappings + the VLM tier.
+   * Default: "demo5".
+   */
+  yoloModel?: "demo5" | "coco80";
 }
 
 /** Optional per-site tracker overrides — mirrors lib/detection-tracker.ts

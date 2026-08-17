@@ -46,6 +46,312 @@
       "reasoning_ja": "乾電池は特別収集です。通常のゴミ箱には入れず、専用の回収ボックスへ。",
       "preAction": "Use the dedicated collection box",
       "preAction_ja": "専用の回収ボックスに入れてください"
+    },
+    "bottle": {
+      "itemName": "Bottle",
+      "itemName_ja": "ボトル",
+      "wasteStream": "recyclable",
+      "reasoning": "Drink bottles (PET or glass) are recyclable. Empty and rinse first.",
+      "reasoning_ja": "飲料ボトル（ペットボトル・びん）は資源ゴミです。中を空にして洗ってください。",
+      "preAction": "Empty and rinse",
+      "preAction_ja": "中を空にして洗ってください"
+    },
+    "book": {
+      "itemName": "Book / Paper",
+      "itemName_ja": "本・紙類",
+      "wasteStream": "recyclable",
+      "reasoning": "Books and clean paper are recyclable paper.",
+      "reasoning_ja": "本やきれいな紙は古紙として資源ゴミです。"
+    },
+    "banana": {
+      "itemName": "Banana",
+      "itemName_ja": "バナナ",
+      "wasteStream": "burnable",
+      "reasoning": "Food waste is burnable.",
+      "reasoning_ja": "食べ物・生ゴミは可燃ゴミです。"
+    },
+    "apple": {
+      "itemName": "Apple",
+      "itemName_ja": "りんご",
+      "wasteStream": "burnable",
+      "reasoning": "Food waste is burnable.",
+      "reasoning_ja": "食べ物・生ゴミは可燃ゴミです。"
+    },
+    "sandwich": {
+      "itemName": "Sandwich",
+      "itemName_ja": "サンドイッチ",
+      "wasteStream": "burnable",
+      "reasoning": "Food waste is burnable.",
+      "reasoning_ja": "食べ物・生ゴミは可燃ゴミです。"
+    },
+    "orange": {
+      "itemName": "Orange",
+      "itemName_ja": "オレンジ",
+      "wasteStream": "burnable",
+      "reasoning": "Food waste is burnable.",
+      "reasoning_ja": "食べ物・生ゴミは可燃ゴミです。"
+    },
+    "broccoli": {
+      "itemName": "Broccoli",
+      "itemName_ja": "ブロッコリー",
+      "wasteStream": "burnable",
+      "reasoning": "Food waste is burnable.",
+      "reasoning_ja": "食べ物・生ゴミは可燃ゴミです。"
+    },
+    "carrot": {
+      "itemName": "Carrot",
+      "itemName_ja": "にんじん",
+      "wasteStream": "burnable",
+      "reasoning": "Food waste is burnable.",
+      "reasoning_ja": "食べ物・生ゴミは可燃ゴミです。"
+    },
+    "hot dog": {
+      "itemName": "Hot Dog",
+      "itemName_ja": "ホットドッグ",
+      "wasteStream": "burnable",
+      "reasoning": "Food waste is burnable.",
+      "reasoning_ja": "食べ物・生ゴミは可燃ゴミです。"
+    },
+    "pizza": {
+      "itemName": "Pizza",
+      "itemName_ja": "ピザ",
+      "wasteStream": "burnable",
+      "reasoning": "Food waste is burnable.",
+      "reasoning_ja": "食べ物・生ゴミは可燃ゴミです。"
+    },
+    "donut": {
+      "itemName": "Donut",
+      "itemName_ja": "ドーナツ",
+      "wasteStream": "burnable",
+      "reasoning": "Food waste is burnable.",
+      "reasoning_ja": "食べ物・生ゴミは可燃ゴミです。"
+    },
+    "cake": {
+      "itemName": "Cake",
+      "itemName_ja": "ケーキ",
+      "wasteStream": "burnable",
+      "reasoning": "Food waste is burnable.",
+      "reasoning_ja": "食べ物・生ゴミは可燃ゴミです。"
+    },
+    "person": {
+      "itemName": "Person",
+      "wasteStream": "not_waste",
+      "reasoning": "Not a waste item (person, furniture, vehicle, or a belonging in use)."
+    },
+    "bicycle": {
+      "itemName": "Bicycle",
+      "wasteStream": "not_waste",
+      "reasoning": "Not a waste item (person, furniture, vehicle, or a belonging in use)."
+    },
+    "car": {
+      "itemName": "Car",
+      "wasteStream": "not_waste",
+      "reasoning": "Not a waste item (person, furniture, vehicle, or a belonging in use)."
+    },
+    "motorcycle": {
+      "itemName": "Motorcycle",
+      "wasteStream": "not_waste",
+      "reasoning": "Not a waste item (person, furniture, vehicle, or a belonging in use)."
+    },
+    "airplane": {
+      "itemName": "Airplane",
+      "wasteStream": "not_waste",
+      "reasoning": "Not a waste item (person, furniture, vehicle, or a belonging in use)."
+    },
+    "bus": {
+      "itemName": "Bus",
+      "wasteStream": "not_waste",
+      "reasoning": "Not a waste item (person, furniture, vehicle, or a belonging in use)."
+    },
+    "train": {
+      "itemName": "Train",
+      "wasteStream": "not_waste",
+      "reasoning": "Not a waste item (person, furniture, vehicle, or a belonging in use)."
+    },
+    "truck": {
+      "itemName": "Truck",
+      "wasteStream": "not_waste",
+      "reasoning": "Not a waste item (person, furniture, vehicle, or a belonging in use)."
+    },
+    "boat": {
+      "itemName": "Boat",
+      "wasteStream": "not_waste",
+      "reasoning": "Not a waste item (person, furniture, vehicle, or a belonging in use)."
+    },
+    "traffic light": {
+      "itemName": "Traffic Light",
+      "wasteStream": "not_waste",
+      "reasoning": "Not a waste item (person, furniture, vehicle, or a belonging in use)."
+    },
+    "fire hydrant": {
+      "itemName": "Fire Hydrant",
+      "wasteStream": "not_waste",
+      "reasoning": "Not a waste item (person, furniture, vehicle, or a belonging in use)."
+    },
+    "stop sign": {
+      "itemName": "Stop Sign",
+      "wasteStream": "not_waste",
+      "reasoning": "Not a waste item (person, furniture, vehicle, or a belonging in use)."
+    },
+    "parking meter": {
+      "itemName": "Parking Meter",
+      "wasteStream": "not_waste",
+      "reasoning": "Not a waste item (person, furniture, vehicle, or a belonging in use)."
+    },
+    "bench": {
+      "itemName": "Bench",
+      "wasteStream": "not_waste",
+      "reasoning": "Not a waste item (person, furniture, vehicle, or a belonging in use)."
+    },
+    "bird": {
+      "itemName": "Bird",
+      "wasteStream": "not_waste",
+      "reasoning": "Not a waste item (person, furniture, vehicle, or a belonging in use)."
+    },
+    "cat": {
+      "itemName": "Cat",
+      "wasteStream": "not_waste",
+      "reasoning": "Not a waste item (person, furniture, vehicle, or a belonging in use)."
+    },
+    "dog": {
+      "itemName": "Dog",
+      "wasteStream": "not_waste",
+      "reasoning": "Not a waste item (person, furniture, vehicle, or a belonging in use)."
+    },
+    "horse": {
+      "itemName": "Horse",
+      "wasteStream": "not_waste",
+      "reasoning": "Not a waste item (person, furniture, vehicle, or a belonging in use)."
+    },
+    "sheep": {
+      "itemName": "Sheep",
+      "wasteStream": "not_waste",
+      "reasoning": "Not a waste item (person, furniture, vehicle, or a belonging in use)."
+    },
+    "cow": {
+      "itemName": "Cow",
+      "wasteStream": "not_waste",
+      "reasoning": "Not a waste item (person, furniture, vehicle, or a belonging in use)."
+    },
+    "elephant": {
+      "itemName": "Elephant",
+      "wasteStream": "not_waste",
+      "reasoning": "Not a waste item (person, furniture, vehicle, or a belonging in use)."
+    },
+    "bear": {
+      "itemName": "Bear",
+      "wasteStream": "not_waste",
+      "reasoning": "Not a waste item (person, furniture, vehicle, or a belonging in use)."
+    },
+    "zebra": {
+      "itemName": "Zebra",
+      "wasteStream": "not_waste",
+      "reasoning": "Not a waste item (person, furniture, vehicle, or a belonging in use)."
+    },
+    "giraffe": {
+      "itemName": "Giraffe",
+      "wasteStream": "not_waste",
+      "reasoning": "Not a waste item (person, furniture, vehicle, or a belonging in use)."
+    },
+    "backpack": {
+      "itemName": "Backpack",
+      "wasteStream": "not_waste",
+      "reasoning": "Not a waste item (person, furniture, vehicle, or a belonging in use)."
+    },
+    "handbag": {
+      "itemName": "Handbag",
+      "wasteStream": "not_waste",
+      "reasoning": "Not a waste item (person, furniture, vehicle, or a belonging in use)."
+    },
+    "tie": {
+      "itemName": "Tie",
+      "wasteStream": "not_waste",
+      "reasoning": "Not a waste item (person, furniture, vehicle, or a belonging in use)."
+    },
+    "suitcase": {
+      "itemName": "Suitcase",
+      "wasteStream": "not_waste",
+      "reasoning": "Not a waste item (person, furniture, vehicle, or a belonging in use)."
+    },
+    "chair": {
+      "itemName": "Chair",
+      "wasteStream": "not_waste",
+      "reasoning": "Not a waste item (person, furniture, vehicle, or a belonging in use)."
+    },
+    "couch": {
+      "itemName": "Couch",
+      "wasteStream": "not_waste",
+      "reasoning": "Not a waste item (person, furniture, vehicle, or a belonging in use)."
+    },
+    "potted plant": {
+      "itemName": "Potted Plant",
+      "wasteStream": "not_waste",
+      "reasoning": "Not a waste item (person, furniture, vehicle, or a belonging in use)."
+    },
+    "bed": {
+      "itemName": "Bed",
+      "wasteStream": "not_waste",
+      "reasoning": "Not a waste item (person, furniture, vehicle, or a belonging in use)."
+    },
+    "dining table": {
+      "itemName": "Dining Table",
+      "wasteStream": "not_waste",
+      "reasoning": "Not a waste item (person, furniture, vehicle, or a belonging in use)."
+    },
+    "toilet": {
+      "itemName": "Toilet",
+      "wasteStream": "not_waste",
+      "reasoning": "Not a waste item (person, furniture, vehicle, or a belonging in use)."
+    },
+    "tv": {
+      "itemName": "Tv",
+      "wasteStream": "not_waste",
+      "reasoning": "Not a waste item (person, furniture, vehicle, or a belonging in use)."
+    },
+    "laptop": {
+      "itemName": "Laptop",
+      "wasteStream": "not_waste",
+      "reasoning": "Not a waste item (person, furniture, vehicle, or a belonging in use)."
+    },
+    "keyboard": {
+      "itemName": "Keyboard",
+      "wasteStream": "not_waste",
+      "reasoning": "Not a waste item (person, furniture, vehicle, or a belonging in use)."
+    },
+    "cell phone": {
+      "itemName": "Cell Phone",
+      "wasteStream": "not_waste",
+      "reasoning": "Not a waste item (person, furniture, vehicle, or a belonging in use)."
+    },
+    "microwave": {
+      "itemName": "Microwave",
+      "wasteStream": "not_waste",
+      "reasoning": "Not a waste item (person, furniture, vehicle, or a belonging in use)."
+    },
+    "oven": {
+      "itemName": "Oven",
+      "wasteStream": "not_waste",
+      "reasoning": "Not a waste item (person, furniture, vehicle, or a belonging in use)."
+    },
+    "toaster": {
+      "itemName": "Toaster",
+      "wasteStream": "not_waste",
+      "reasoning": "Not a waste item (person, furniture, vehicle, or a belonging in use)."
+    },
+    "sink": {
+      "itemName": "Sink",
+      "wasteStream": "not_waste",
+      "reasoning": "Not a waste item (person, furniture, vehicle, or a belonging in use)."
+    },
+    "refrigerator": {
+      "itemName": "Refrigerator",
+      "wasteStream": "not_waste",
+      "reasoning": "Not a waste item (person, furniture, vehicle, or a belonging in use)."
+    },
+    "clock": {
+      "itemName": "Clock",
+      "wasteStream": "not_waste",
+      "reasoning": "Not a waste item (person, furniture, vehicle, or a belonging in use)."
     }
   }
 }

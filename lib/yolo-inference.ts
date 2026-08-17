@@ -54,12 +54,73 @@ export const WASTE_CLASSES_15 = [
   "food_waste",
 ];
 
+/** COCO-80 class list, in the official Ultralytics order — the vocabulary of
+ *  `coco80_v1.onnx` (pretrained `yolo26s.pt` re-exported at 480px). COCO's
+ *  annotations are professionally produced and QA'd, which makes this the
+ *  highest-quality "is something there, and where" detector we can ship
+ *  without collecting data ourselves. Waste-stream precision comes from
+ *  yolo-rules.json mappings + the VLM tier, not from the class list. */
+export const COCO_CLASSES = [
+  "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train",
+  "truck", "boat", "traffic light", "fire hydrant", "stop sign",
+  "parking meter", "bench", "bird", "cat", "dog", "horse", "sheep", "cow",
+  "elephant", "bear", "zebra", "giraffe", "backpack", "umbrella", "handbag",
+  "tie", "suitcase", "frisbee", "skis", "snowboard", "sports ball", "kite",
+  "baseball bat", "baseball glove", "skateboard", "surfboard",
+  "tennis racket", "bottle", "wine glass", "cup", "fork", "knife", "spoon",
+  "bowl", "banana", "apple", "sandwich", "orange", "broccoli", "carrot",
+  "hot dog", "pizza", "donut", "cake", "chair", "couch", "potted plant",
+  "bed", "dining table", "toilet", "tv", "laptop", "mouse", "remote",
+  "keyboard", "cell phone", "microwave", "oven", "toaster", "sink",
+  "refrigerator", "book", "clock", "vase", "scissors", "teddy bear",
+  "hair drier", "toothbrush",
+];
+
+export interface YoloModelSpec {
+  url: string;
+  classes: readonly string[];
+}
+
+/** Deployable models. `demo5` is the custom-trained waste detector; `coco80`
+ *  is the COCO-pretrained general-object detector (smaller + faster, and its
+ *  boxes are backed by professional annotation quality). */
+export const YOLO_MODELS: Record<string, YoloModelSpec> = {
+  demo5: { url: "/models/demo5_v1.onnx", classes: WASTE_CLASSES },
+  coco80: { url: "/models/coco80_v1.onnx", classes: COCO_CLASSES },
+};
+
+let activeSpec: YoloModelSpec = YOLO_MODELS.demo5;
+
+/** Select which deployed model `initYolo` loads and decodes against.
+ *  Site-config driven; must run BEFORE the first initYolo() — the ONNX
+ *  session loads once per page, so a later switch is ignored with a warning
+ *  (decoding with the wrong class table would mislabel every detection). */
+export function setActiveYoloModel(id: string): void {
+  const spec = YOLO_MODELS[id];
+  if (!spec) {
+    console.warn(`[yolo] Unknown model id "${id}" — keeping ${activeSpec.url}`);
+    return;
+  }
+  if (loading) {
+    if (spec !== activeSpec) {
+      console.warn(`[yolo] Model already loading — switch to "${id}" ignored`);
+    }
+    return;
+  }
+  activeSpec = spec;
+}
+
+/** The class table of the currently selected model. */
+export function getActiveYoloClasses(): readonly string[] {
+  return activeSpec.classes;
+}
+
 /**
  * Initialize the YOLO model. Safe to call multiple times — subsequent calls
  * return the same promise. If the model file is missing or ONNX fails to load,
  * resolves to `false` and all subsequent `runYoloInference()` calls return [].
  */
-export function initYolo(modelUrl = "/models/demo5_v1.onnx"): Promise<boolean> {
+export function initYolo(modelUrl = activeSpec.url): Promise<boolean> {
   if (loading) return loading;
 
   loading = (async () => {
@@ -219,7 +280,7 @@ export async function runYoloInference(
       const classId = Math.round(outputData[offset + 5]);
 
       if (confidence < confidenceThreshold) continue;
-      if (classId < 0 || classId >= WASTE_CLASSES.length) continue;
+      if (classId < 0 || classId >= activeSpec.classes.length) continue;
 
       const bw = x2 - x1;
       const bh = y2 - y1;
@@ -227,7 +288,7 @@ export async function runYoloInference(
 
       if (area < minBoxArea) continue;
 
-      const className = WASTE_CLASSES[classId];
+      const className = activeSpec.classes[classId];
 
       detections.push({
         classId,

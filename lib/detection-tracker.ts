@@ -116,7 +116,9 @@ export interface TrackerConfig {
   classSwapMinMs: number;
   /** Hard cap on simultaneously alive tracks. */
   maxTracks: number;
-  /** Stationary time before a confirmed track is suppressed as "parked" (ms). */
+  /** Stationary time before a confirmed track is suppressed as "parked" (ms).
+   *  Presented items are held or set down and taken away; something that
+   *  has not moved for this long is furniture or forgotten litter. */
   parkedAfterMs: number;
   /** Center movement (640-space px) that counts as "the object moved". */
   parkedMoveTolerance: number;
@@ -138,7 +140,7 @@ export const DEFAULT_TRACKER_CONFIG: TrackerConfig = {
   classSwapCycles: 3,
   classSwapMinMs: 200,
   maxTracks: 8,
-  parkedAfterMs: 150_000,
+  parkedAfterMs: 30_000,
   parkedMoveTolerance: 48,
   emaAlpha: 0.35,
   bboxAlpha: 0.5,

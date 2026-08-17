@@ -146,14 +146,38 @@ describe("Site overrides applied to YOLO results", () => {
 // ═══════════════════════════════════════════════════════════════════
 
 describe("Rules JSON integrity", () => {
-  it("rules cover exactly the deployed model's classes", () => {
-    // The real invariant: a class the model emits with no rule silently
-    // degrades to needs_review, and a rule for a class the model never
-    // emits is dead config. Both directions must match.
+  it("every rule key belongs to a deployed model's vocabulary", () => {
+    // A rule for a class no model emits is dead config.
+    /* eslint-disable @typescript-eslint/no-require-imports */
+    const { WASTE_CLASSES, COCO_CLASSES } = require("@/lib/yolo-inference");
+    /* eslint-enable @typescript-eslint/no-require-imports */
+    const known = new Set([...WASTE_CLASSES, ...COCO_CLASSES]);
+    for (const key of Object.keys(yoloRules.rules)) {
+      expect(known.has(key)).toBe(true);
+    }
+  });
+
+  it("demo5 classes are fully covered — they are all waste items", () => {
+    // A demo5 class with no rule silently degrades to needs_review.
     /* eslint-disable @typescript-eslint/no-require-imports */
     const { WASTE_CLASSES } = require("@/lib/yolo-inference");
     /* eslint-enable @typescript-eslint/no-require-imports */
-    expect(Object.keys(yoloRules.rules).sort()).toEqual([...WASTE_CLASSES].sort());
+    for (const c of WASTE_CLASSES) {
+      expect(yoloRules.rules[c]).toBeTruthy();
+    }
+  });
+
+  it("coco80 routes people/scenery to not_waste and bottles to recyclable", () => {
+    // COCO emits person/furniture — without not_waste rules every passer-by
+    // would become a needs_review card. Unmapped handheld classes (cup,
+    // spoon, scissors…) degrading to needs_review → VLM is by design.
+    expect(yoloRules.rules["person"]?.wasteStream).toBe("not_waste");
+    expect(yoloRules.rules["chair"]?.wasteStream).toBe("not_waste");
+    expect(yoloRules.rules["cell phone"]?.wasteStream).toBe("not_waste");
+    expect(yoloRules.rules["bottle"]?.wasteStream).toBe("recyclable");
+    expect(yoloRules.rules["banana"]?.wasteStream).toBe("burnable");
+    expect(yoloRules.rules["cup"]).toBeUndefined(); // paper vs plastic vs mug → VLM
+    expect(yoloRules.rules["spoon"]).toBeUndefined(); // VLM showcase item
   });
 
   it("every YOLO rule has required fields", () => {

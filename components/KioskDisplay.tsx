@@ -154,11 +154,14 @@ const SCENE_UNSTABLE_FG_RATIO = 0.35;
 /** For this long after the continuous loop's first cycle, unknown candidates
  *  are LEARNED as background zones instead of tracked — whatever is visible
  *  at startup (window handles, furniture, wall fixtures) is scenery, not an
- *  item someone brought. */
-const CONTINUOUS_BASELINE_MS = 4_000;
+ *  item someone brought. Short on purpose: the scene at start is already
+ *  static, so there is nothing to wait for. */
+const CONTINUOUS_BASELINE_MS = 1_500;
 /** An unknown track that has sat still this long is background that slipped
- *  past the baseline — demote its region to a background zone. */
-const UNKNOWN_STATIC_TO_ZONE_MS = 20_000;
+ *  past the baseline — demote its region to a background zone. Held and
+ *  presented items are never this still, so waiting longer only means
+ *  living with a false detection for longer. */
+const UNKNOWN_STATIC_TO_ZONE_MS = 6_000;
 /** Max per-cycle raw-center travel (model-space px) for a track to count as
  *  "steadily presented". needs_review cards are only created for steady
  *  tracks — patterns riding on moving clothing/hands never surface. */
@@ -180,8 +183,10 @@ const FACE_SWEEP_CANVAS_SIZE = 256;
 const BACKGROUND_ZONE_CAP = 16;
 /** Sustained whole-scene instability longer than this means the CAMERA
  *  MOVED (not a passer-by): learned scenery zones are now wrong coordinates
- *  and are discarded; once the scene settles, the baseline re-learns. */
-const VIEW_CHANGE_UNSTABLE_MS = 2_000;
+ *  and are discarded; once the scene settles, the baseline re-learns.
+ *  A person crossing the frame clears in a few hundred ms, so this only
+ *  needs to outlast that — not to be cautious. */
+const VIEW_CHANGE_UNSTABLE_MS = 700;
 
 // ── Cloud fallback (pilot experiments only) ──
 /** OFF by default: items YOLO can't confidently resolve become `needs_review`
@@ -583,6 +588,17 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           setContinuousMode(detectionModeRef.current === "continuous");
           setShowOverlay(data.showDetectionOverlay ?? false);
           setShowBinMap(data.showBinMap ?? false);
+          // Model choice is site-config driven and the ONNX session loads
+          // once per page — select BEFORE the backend's first init. The
+          // backend deliberately waits for site config (config is already a
+          // hard prerequisite for the YOLO loop, so this defers nothing).
+          import("@/lib/yolo-inference")
+            .then((y) => y.setActiveYoloModel(data.yoloModel ?? "demo5"))
+            .catch(() => {})
+            .then(() => getInferenceBackend())
+            .then((backend) => {
+              inferenceRef.current = backend;
+            });
           // Browser-mode VLM: start the model download IMMEDIATELY — it
           // overlaps camera aiming and YOLO warmup, so the wait is mostly
           // invisible, and the browser cache makes later launches instant.
@@ -607,12 +623,9 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
         });
     };
 
-    Promise.all([
-      getInferenceBackend().then((backend) => {
-        inferenceRef.current = backend;
-      }),
-      loadYoloRules(),
-    ]);
+    // Backend init moved inside the site-config .then — the model choice
+    // (yoloModel) must be applied before the ONNX session first loads.
+    loadYoloRules();
     loadSiteConfigWithRetry();
 
     // Preload the BlazeFace face detector so the first real classification

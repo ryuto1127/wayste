@@ -42,15 +42,22 @@ export interface LocalVlmConfig {
   timeoutMs?: number;
 }
 
-export type VlmMode = "local" | "server";
+export type VlmMode = "local" | "server" | "browser";
 
 /** Literal endpoint value selecting the same-origin server proxy. */
 export const SERVER_VLM_ENDPOINT = "server";
+/** Literal endpoint value selecting the fully in-browser WebGPU model. */
+export const BROWSER_VLM_ENDPOINT = "browser";
+/** Default in-browser model: newest small multimodal Qwen with official
+ *  ONNX export — strong Japanese, ~0.8B params, proven on WebGPU via
+ *  transformers.js. Swappable via site config `localVlm.model`. */
+export const DEFAULT_BROWSER_VLM_MODEL = "onnx-community/Qwen3.5-0.8B-ONNX";
 
 /** Resolve the configured mode, or null when the config can't be used. */
 export function getVlmMode(config: LocalVlmConfig | undefined): VlmMode | null {
   if (!config?.endpoint) return null;
   if (config.endpoint === SERVER_VLM_ENDPOINT) return "server";
+  if (config.endpoint === BROWSER_VLM_ENDPOINT) return "browser";
   if (isLocalVlmEndpointAllowed(config.endpoint) && config.model) return "local";
   return null;
 }
@@ -63,6 +70,8 @@ export interface VlmJudgment {
 }
 
 const DEFAULT_TIMEOUT_MS = 6_000;
+/** In-browser judgments can include first-call shader compilation. */
+const BROWSER_JUDGE_TIMEOUT_MS = 30_000;
 
 /** Loopback-only endpoint guard — frames must never leave this machine. */
 export function isLocalVlmEndpointAllowed(endpoint: string): boolean {
@@ -181,8 +190,23 @@ export async function judgeCropWithVlm(
   if (mode === "server") {
     return judgeViaServerProxy(imageDataUrl, config, locale, signal);
   }
+  if (mode === "browser") {
+    // Fully in-page WebGPU model (worker) — nothing installed, nothing sent.
+    const { judgeWithBrowserVlm, getBrowserVlmState } = await import("./vlm-browser");
+    if (getBrowserVlmState() !== "ready") return null;
+    const prompt = buildVlmPrompt(
+      siteConfig.streams, siteConfig.canonicalNames ?? [], locale,
+    );
+    const text = await judgeWithBrowserVlm(
+      imageDataUrl, prompt, config.timeoutMs ?? BROWSER_JUDGE_TIMEOUT_MS,
+    );
+    if (!text) return null;
+    return parseVlmResponse(
+      text, new Set(siteConfig.streams.map((s) => s.id as string)),
+    );
+  }
   if (mode !== "local") {
-    console.warn("[vlm] endpoint rejected (loopback or \"server\" only):", config.endpoint);
+    console.warn("[vlm] endpoint rejected (loopback, \"server\", or \"browser\" only):", config.endpoint);
     return null;
   }
 
@@ -241,6 +265,58 @@ export async function judgeCropWithVlm(
     clearTimeout(timeout);
     signal?.removeEventListener("abort", onOuterAbort);
   }
+}
+
+// ── Browser-mode pure helpers (used by lib/vlm-browser.ts + its worker;
+//    kept here so they are unit-testable without import.meta syntax) ──
+
+/** Aggregate transformers.js per-file download progress into one gauge. */
+export function aggregateProgress(
+  files: Iterable<{ loaded: number; total: number }>,
+): { fraction: number; loadedBytes: number; totalBytes: number } {
+  let loadedBytes = 0;
+  let totalBytes = 0;
+  for (const f of files) {
+    loadedBytes += f.loaded;
+    totalBytes += f.total;
+  }
+  return {
+    fraction: totalBytes > 0 ? Math.min(1, loadedBytes / totalBytes) : 0,
+    loadedBytes,
+    totalBytes,
+  };
+}
+
+/** Extract the assistant's text from an image-text-to-text pipeline output.
+ *  Tolerant across transformers.js output shapes: plain string, message
+ *  arrays, and content-part arrays. Returns null when nothing usable. */
+export function extractGeneratedText(output: unknown): string | null {
+  const first = Array.isArray(output) ? output[0] : output;
+  if (!first || typeof first !== "object") {
+    return typeof first === "string" ? first : null;
+  }
+  const generated = (first as { generated_text?: unknown }).generated_text;
+  if (typeof generated === "string") return generated;
+  if (Array.isArray(generated)) {
+    // Conversation form — the last message is the assistant's reply.
+    const last = generated[generated.length - 1];
+    const content =
+      last && typeof last === "object"
+        ? (last as { content?: unknown }).content
+        : last;
+    if (typeof content === "string") return content;
+    if (Array.isArray(content)) {
+      const text = content
+        .map((part) =>
+          part && typeof part === "object" && typeof (part as { text?: unknown }).text === "string"
+            ? (part as { text: string }).text
+            : "",
+        )
+        .join("");
+      return text || null;
+    }
+  }
+  return null;
 }
 
 /** "server" mode: same-origin proxy call. The server holds the real VLM

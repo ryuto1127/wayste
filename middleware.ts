@@ -91,7 +91,10 @@ function buildCsp(nonce: string): string {
     // hosts are deliberately NOT allowed — wildcard SaaS namespaces are
     // attacker-provisionable exfiltration channels.
     "img-src 'self' blob: data:",
-    "connect-src 'self' https://cdn.jsdelivr.net https://storage.googleapis.com",
+    // jsdelivr + googleapis: MediaPipe WASM/model. huggingface + hf.co:
+    // in-browser VLM weights (Tier 1.5 "browser" mode; LFS downloads
+    // redirect to *.hf.co CDN hosts).
+    "connect-src 'self' https://cdn.jsdelivr.net https://storage.googleapis.com https://huggingface.co https://*.huggingface.co https://*.hf.co",
     "media-src 'self' blob:",
     "worker-src 'self' blob:",
     "frame-ancestors 'none'",

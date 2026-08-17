@@ -46,8 +46,10 @@ import {
   cropTrackToDataUrl,
   cropContainsFace,
   getVlmMode,
+  DEFAULT_BROWSER_VLM_MODEL,
   type VlmJudgment,
 } from "@/lib/vlm-client";
+import type { BrowserVlmProgress } from "@/lib/vlm-browser";
 import { buildClassificationResult } from "@/lib/waste-rules-core";
 import CameraFeed, { type CameraFeedHandle } from "./CameraFeed";
 import IdleScreen from "./IdleScreen";
@@ -311,6 +313,8 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
   const vlmJudgedRef = useRef<Set<number>>(new Set());
   /** Single-concurrency latch for local VLM judgments. */
   const vlmInFlightRef = useRef(false);
+  /** Browser-mode VLM download/load progress — drives the gauge. */
+  const [vlmProgress, setVlmProgress] = useState<BrowserVlmProgress | null>(null);
 
   // ── Voice guidance (site-config driven — end-users cannot toggle) ──
   const [voiceEnabled, setVoiceEnabled] = useState(false);
@@ -489,6 +493,20 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           setContinuousMode(detectionModeRef.current === "continuous");
           setShowOverlay(data.showDetectionOverlay ?? false);
           setShowBinMap(data.showBinMap ?? false);
+          // Browser-mode VLM: start the model download IMMEDIATELY — it
+          // overlaps camera aiming and YOLO warmup, so the wait is mostly
+          // invisible, and the browser cache makes later launches instant.
+          if (getVlmMode(data.localVlm) === "browser") {
+            import("@/lib/vlm-browser")
+              .then((m) => {
+                m.subscribeBrowserVlm((p) => setVlmProgress({ ...p }));
+                m.initBrowserVlm(
+                  data.localVlm?.model ?? DEFAULT_BROWSER_VLM_MODEL,
+                  data.localVlm?.dtype,
+                );
+              })
+              .catch((err) => console.warn("[vlm-browser] init import failed:", err));
+          }
         })
         .catch(() => {
           if (cancelled) return;
@@ -2470,6 +2488,30 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
             />
           )}
         </>
+      )}
+
+      {/* Browser-VLM preparation gauge — a determinate bar with real MB
+          numbers feels far shorter than a spinner. Download starts at page
+          load, overlapping camera aiming; weights are cached, so this card
+          only ever appears on the first launch. */}
+      {continuousMode && vlmProgress?.state === "preparing" && (
+        <div className="absolute top-5 right-5 z-30 w-72 bg-neutral-900/85 backdrop-blur-md rounded-xl px-4 py-3 pointer-events-none select-none">
+          <p className="text-neutral-100 text-sm font-semibold">
+            {vlmProgress.fraction < 0.995 ? T("vlmPreparing") : T("vlmLoadingGpu")}
+          </p>
+          <div className="mt-2 h-2 rounded-full bg-neutral-700 overflow-hidden">
+            <div
+              className="h-full bg-emerald-400 rounded-full transition-[width] duration-300"
+              style={{ width: `${Math.round(vlmProgress.fraction * 100)}%` }}
+            />
+          </div>
+          <p className="mt-1.5 text-neutral-400 text-xs tabular-nums">
+            {Math.round(vlmProgress.fraction * 100)}%
+            {vlmProgress.totalBytes > 0 &&
+              ` ・ ${Math.round(vlmProgress.loadedBytes / 1048576)} / ${Math.round(vlmProgress.totalBytes / 1048576)} MB`}
+          </p>
+          <p className="text-neutral-500 text-[11px] mt-0.5">{T("vlmFirstRunNote")}</p>
+        </div>
       )}
 
       {/* System status badge — hidden during result screen to avoid overlap,

@@ -21,12 +21,12 @@
 - YOLO26m FP16 (ONNX Runtime Web) — browser object detection, 15 custom waste classes (`15class_v1.onnx`, 39 MB)
 - OpenAI `gpt-5.4-mini` — legacy cloud fallback, OFF by default; only used when `NEXT_PUBLIC_CLOUD_FALLBACK=1` (pilot experiments). Default kiosk path resolves low-confidence items as `needs_review` on-device
 - Upstash Redis (REST) / Vercel Blob / Vercel Serverless + Cron
-- Zod v4 / Jest v30 (577 tests, 30 suites) / EN+JA i18n (178 keys/locale)
+- Zod v4 / Jest v30 (584 tests, 30 suites) / EN+JA i18n (181 keys/locale)
 
 ## Commands
     npm run dev      # Dev server (Turbopack)
     npm run build    # Production build
-    npm test         # 577 Jest tests, 30 suites
+    npm test         # 584 Jest tests, 30 suites
     npm run lint     # ESLint
 
 ## Routes
@@ -45,7 +45,7 @@
 - `lib/vlm-shadow.ts` — Cloud-vs-local shadow comparison (pilot mechanism, off by default). When `LOCAL_VLM_ENDPOINT` is set, `/api/classify` also runs a local/candidate VLM on each escalated frame (server-side, non-blocking, inside the existing background logging) and records `localModel` on the pilot-log entry; aggregated by `computeModelComparison()` and shown on `/insights`. Offline benchmarking harness lives in `lib/benchmark/` (+ `scripts/bench/`)
 - `lib/detection-tracker.ts` — 常時検出モードの時間方向トラッカー(IoU追跡、N-of-M確定、ヒステリシス、遮蔽コースティング、すり替え投票、置きっぱなし抑制)。site config `detectionMode: "continuous"` で有効化、`showDetectionOverlay` でアノテーション表示(`components/LiveDetectionView.tsx` が1画面構成のライブビューを描画)
 - `lib/unknown-object.ts` — 語彙外フォールバック: 低確信度YOLO枠(主・カメラ移動に強い)+CVブロブ(副・固定カメラ時のみ、全画面変動時は自動停止)を `unknown_object` 合成検出としてトラッカーに注入 → needs_review行き。背景ベースライン・顔ベト・静止ゲートで誤発火を抑制
-- `lib/vlm-client.ts` — Tier 1.5 VLMクライアント(site config `localVlm`)。endpoint はループバックURL(完全端末内)か `"server"`(同一オリジン `/api/vlm` プロキシ経由 — 実エンドポイントはサーバーenv `VLM_ENDPOINT`/`VLM_MODEL`、送信前に顔ゲート+サーバー側再チェック)のみ許可。needs_reviewトラックの切り出しを判定し、既存の昇格経路でカードを確定に更新
+- `lib/vlm-client.ts` — Tier 1.5 VLMクライアント(site config `localVlm`)。endpoint は `"browser"`(transformers.js+WebGPUでページ内実行、`lib/vlm-browser.ts`+Worker、既定モデル onnx-community/Qwen3.5-0.8B-ONNX)、ループバックURL(ローカルランタイム)、`"server"`(同一オリジン `/api/vlm` プロキシ経由 — 実エンドポイントはサーバーenv `VLM_ENDPOINT`/`VLM_MODEL`、送信前に顔ゲート+サーバー側再チェック)のみ許可。needs_reviewトラックの切り出しを判定し、既存の昇格経路でカードを確定に更新
 - `lib/waste-rules-core.ts` — Word-boundary pattern matching + override engine (browser-safe)
 - `lib/waste-rules.ts` — Site config loader + GPT prompt builder (5-min cache)
 - `components/KioskDisplay.tsx` — State machine: loading → idle → object_detected → classifying → result → cooldown; multi-item blob-to-detection matching (up to 4), three-way routing (YOLO match above threshold → instant result, YOLO match below threshold → on-device `needs_review`, unmatched+object → on-device `needs_review`, unmatched+noise → discard). With `NEXT_PUBLIC_CLOUD_FALLBACK=1` the two `needs_review` branches call GPT-5.4 mini instead (legacy pilot mode; also re-enables the result-state API sweep)

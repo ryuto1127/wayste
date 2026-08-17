@@ -10,6 +10,8 @@ import {
   parseVlmResponse,
   buildVlmPrompt,
   modelBboxToVideoRect,
+  aggregateProgress,
+  extractGeneratedText,
 } from "@/lib/vlm-client";
 import type { StreamDefinition } from "@/lib/types";
 
@@ -48,6 +50,56 @@ describe("getVlmMode", () => {
     expect(getVlmMode(undefined)).toBeNull();
     expect(getVlmMode({ endpoint: "http://localhost:11434/v1" })).toBeNull();
     expect(getVlmMode({ endpoint: "https://evil.example.com/v1", model: "x" })).toBeNull();
+  });
+
+  it("resolves browser mode for the literal \"browser\" endpoint", () => {
+    expect(getVlmMode({ endpoint: "browser" })).toBe("browser");
+  });
+});
+
+describe("aggregateProgress", () => {
+  it("sums files into one fraction", () => {
+    const agg = aggregateProgress([
+      { loaded: 50, total: 100 },
+      { loaded: 100, total: 100 },
+    ]);
+    expect(agg.fraction).toBeCloseTo(0.75);
+    expect(agg.loadedBytes).toBe(150);
+    expect(agg.totalBytes).toBe(200);
+  });
+
+  it("reports 0 before any totals are known", () => {
+    expect(aggregateProgress([]).fraction).toBe(0);
+  });
+});
+
+describe("extractGeneratedText", () => {
+  it("handles plain string generated_text", () => {
+    expect(extractGeneratedText([{ generated_text: '{"item":"can"}' }])).toBe('{"item":"can"}');
+  });
+
+  it("handles conversation-form output (assistant last, string content)", () => {
+    const out = [{
+      generated_text: [
+        { role: "user", content: "..." },
+        { role: "assistant", content: '{"item":"cup"}' },
+      ],
+    }];
+    expect(extractGeneratedText(out)).toBe('{"item":"cup"}');
+  });
+
+  it("handles content-part arrays", () => {
+    const out = [{
+      generated_text: [
+        { role: "assistant", content: [{ type: "text", text: '{"item":' }, { type: "text", text: '"bag"}' }] },
+      ],
+    }];
+    expect(extractGeneratedText(out)).toBe('{"item":"bag"}');
+  });
+
+  it("returns null for unusable shapes", () => {
+    expect(extractGeneratedText(undefined)).toBeNull();
+    expect(extractGeneratedText([{}])).toBeNull();
   });
 });
 

@@ -8,7 +8,7 @@
   "detectionMode": "continuous",
   "showDetectionOverlay": true,
   "showBinMap": true,
-  "localVlm": { "endpoint": "http://localhost:11434/v1", "model": "qwen2.5vl:3b" },
+  "localVlm": { "endpoint": "browser" },
   "streams": [
     { "id": "burnable", "label": "可燃ゴミ", "color": "#EF4444", "description": "生ゴミ、汚れた紙、ティッシュ、使い捨て紙コップ、割り箸、食品包装フィルム", "position": "far-left" },
     { "id": "recyclable", "label": "資源ゴミ", "color": "#3B82F6", "description": "ペットボトル（中を洗浄）、アルミ缶、スチール缶、新聞紙、段ボール、雑誌、びん", "position": "left" },

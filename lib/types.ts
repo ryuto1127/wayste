@@ -346,17 +346,23 @@ export interface SiteConfig {
   trackerTuning?: TrackerTuning;
   /**
    * Tier 1.5 — VLM for items YOLO can't resolve (continuous mode).
-   * `endpoint` is either a LOOPBACK OpenAI-compatible base URL (fully
-   * on-device: Ollama `/v1`, LM Studio, llama.cpp server — `model`
-   * required) or the literal "server" (crops go to this deployment's own
-   * `/api/vlm` proxy; the real endpoint lives in server env vars, crops are
-   * face-gated client-side and re-checked server-side). Any other URL is
-   * refused so a planted config cannot exfiltrate frames. Omit to disable —
-   * needs_review stays the answer.
+   * `endpoint` selects where inference runs:
+   *  - "browser": fully IN-PAGE via WebGPU (transformers.js worker) — no
+   *    installs, nothing ever leaves the device; `model` is a HuggingFace
+   *    ONNX id (default onnx-community/Qwen3.5-0.8B-ONNX)
+   *  - a LOOPBACK OpenAI-compatible base URL (Ollama `/v1`, LM Studio,
+   *    llama.cpp server — `model` required): on-device via local runtime
+   *  - "server": crops go to this deployment's own `/api/vlm` proxy; the
+   *    real endpoint lives in server env vars, crops are face-gated
+   *    client-side and re-checked server-side
+   * Any other URL is refused so a planted config cannot exfiltrate frames.
+   * Omit to disable — needs_review stays the answer.
    */
   localVlm?: {
     endpoint: string;
     model?: string;
+    /** Browser mode only: transformers.js dtype override (e.g. "q4f16"). */
+    dtype?: string;
     timeoutMs?: number;
   };
 }

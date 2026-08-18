@@ -385,5 +385,6 @@
     "plastic wine glass"
   ],
   "defaultStream": "burnable",
-  "yoloModel": "coco80"
+  "yoloModel": "coco80",
+  "unknownObjectFallback": false
 }

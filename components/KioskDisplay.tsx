@@ -1526,7 +1526,12 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
 
       const faceZones =
         now - faceZonesRef.current.at < FACE_ZONE_TTL_MS ? faceZonesRef.current.boxes : [];
-      let synthetic = hasAspect
+      // The out-of-vocabulary net is a site choice. With a broad model
+      // (coco80) most demo items already have a named class, and the
+      // occasional 不明 card is noise that also keeps the VLM busy — sites
+      // can turn the net off and only annotate classes the model knows.
+      const unknownEnabled = siteConfigRef.current?.unknownObjectFallback !== false;
+      let synthetic = hasAspect && unknownEnabled
         ? buildUnknownDetections({
             lowConfDetections,
             blobs: analysisForBlobs?.isSettled ? analysisForBlobs.blobs : [],

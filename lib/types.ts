@@ -373,6 +373,14 @@ export interface SiteConfig {
    * Default: "demo5".
    */
   yoloModel?: "demo5" | "coco80";
+  /**
+   * Continuous mode: track out-of-vocabulary objects as 不明 via the
+   * unknown-object net (low-confidence YOLO boxes × background novelty).
+   * Off = only classes the model can name get boxes/cards — cleaner for
+   * demos on a broad model, at the cost of silence on unknown items.
+   * Default: true.
+   */
+  unknownObjectFallback?: boolean;
 }
 
 /** Optional per-site tracker overrides — mirrors lib/detection-tracker.ts

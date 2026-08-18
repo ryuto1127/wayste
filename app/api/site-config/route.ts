@@ -33,6 +33,9 @@ export async function GET() {
     ...(config.trackerTuning && { trackerTuning: config.trackerTuning }),
     ...(config.localVlm && { localVlm: config.localVlm }),
     ...(config.yoloModel && { yoloModel: config.yoloModel }),
+    ...(typeof config.unknownObjectFallback === "boolean" && {
+      unknownObjectFallback: config.unknownObjectFallback,
+    }),
     sensitivity: config.sensitivity,
     reviewThreshold: config.reviewThreshold,
     defaultStream: config.defaultStream,

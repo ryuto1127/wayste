@@ -347,6 +347,10 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
   const vlmJudgedRef = useRef<Set<number>>(new Set());
   /** Single-concurrency latch for local VLM judgments. */
   const vlmInFlightRef = useRef(false);
+  /** Out-of-vocabulary net: site-config default, operator-togglable from
+   *  the demo panel. Ref for the loop, state for the button. */
+  const unknownNetRef = useRef(true);
+  const [unknownNetOn, setUnknownNetOn] = useState(true);
   /** Browser-mode VLM download/load progress — drives the gauge. */
   const [vlmProgress, setVlmProgress] = useState<BrowserVlmProgress | null>(null);
   /** Loaded vlm-browser module — lets the judge loop check readiness
@@ -505,6 +509,17 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
     setLiveTracks([]);
   }, []);
 
+  /** Operator toggle: track objects the model can't name (不明) or annotate
+   *  only nameable classes. Flipping it clears any 不明 leftovers via a
+   *  fresh background learn — cheaper than reasoning about half-alive
+   *  unknown tracks. */
+  const handleToggleUnknownNet = useCallback(() => {
+    const next = !unknownNetRef.current;
+    unknownNetRef.current = next;
+    setUnknownNetOn(next);
+    console.log(`[continuous] unknown-object net ${next ? "ON" : "OFF"}`);
+  }, []);
+
   /** Re-learn what counts as background WITHOUT leaving the live view.
    *  Same wipe as start (pixel background model, learned scenery zones,
    *  tracks, cards), then the startup baseline re-runs against the scene as
@@ -598,6 +613,8 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           setContinuousMode(detectionModeRef.current === "continuous");
           setShowOverlay(data.showDetectionOverlay ?? false);
           setShowBinMap(data.showBinMap ?? false);
+          unknownNetRef.current = data.unknownObjectFallback !== false;
+          setUnknownNetOn(unknownNetRef.current);
           // Model choice is site-config driven and the ONNX session loads
           // once per page — select BEFORE the backend's first init. The
           // backend deliberately waits for site config (config is already a
@@ -1357,7 +1374,16 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           // ── Face sweep (~1fps): veto zones for the unknown fallback ──
           // The kiosk must never box a face, and clothing near a face is a
           // person, not presented waste. Fully on-device; nothing stored.
-          if (Date.now() - faceZonesRef.current.at >= FACE_SWEEP_INTERVAL_MS) {
+          // Only consumers: the unknown net's suppress zones and the
+          // server-mode VLM face gate — skip the BlazeFace work (main-thread
+          // fps budget) when neither is active.
+          const faceSweepNeeded =
+            unknownNetRef.current ||
+            getVlmMode(siteConfigRef.current?.localVlm) === "server";
+          if (
+            faceSweepNeeded &&
+            Date.now() - faceZonesRef.current.at >= FACE_SWEEP_INTERVAL_MS
+          ) {
             try {
               await sweepFaceZones(video);
             } catch {
@@ -1438,6 +1464,16 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           ] as Bbox;
         }),
       };
+    }
+
+    /** True when a bbox mostly sits on a remembered scenery region. */
+    function overlapsScenery(bbox: Bbox): boolean {
+      return backgroundZonesRef.current.some((z) => {
+        const ix = Math.max(0, Math.min(bbox[0] + bbox[2], z[0] + z[2]) - Math.max(bbox[0], z[0]));
+        const iy = Math.max(0, Math.min(bbox[1] + bbox[3], z[1] + z[3]) - Math.max(bbox[1], z[1]));
+        const minArea = Math.min(bbox[2] * bbox[3], z[2] * z[3]);
+        return minArea > 0 && (ix * iy) / minArea > 0.35;
+      });
     }
 
     /** Remember a region as scenery (FIFO-capped, overlap-deduped). */
@@ -1526,11 +1562,11 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
 
       const faceZones =
         now - faceZonesRef.current.at < FACE_ZONE_TTL_MS ? faceZonesRef.current.boxes : [];
-      // The out-of-vocabulary net is a site choice. With a broad model
-      // (coco80) most demo items already have a named class, and the
-      // occasional 不明 card is noise that also keeps the VLM busy — sites
-      // can turn the net off and only annotate classes the model knows.
-      const unknownEnabled = siteConfigRef.current?.unknownObjectFallback !== false;
+      // The out-of-vocabulary net is a site choice (config default) with an
+      // operator toggle in the demo panel. With a broad model (coco80) most
+      // demo items already have a named class, and the occasional 不明 card
+      // is noise that also keeps the VLM busy.
+      const unknownEnabled = unknownNetRef.current;
       let synthetic = hasAspect && unknownEnabled
         ? buildUnknownDetections({
             lowConfDetections,
@@ -1556,6 +1592,22 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       if (now < baselineUntilRef.current) {
         for (const cand of synthetic) addBackgroundZone(cand.bbox as Bbox);
         synthetic = [];
+        // NAMED scenery too: a teddy bear on a shelf or a poster is a real
+        // COCO class, so the unknown net's zones never covered it — a small
+        // camera shake later re-detects it and a needs_review card pops on
+        // furniture. Anything visible during the baseline that would NOT
+        // resolve instantly (unmapped class or sub-resolve confidence) is
+        // scenery; remember its region and refuse needs_review cards there.
+        // Instant-resolving classes (a bottle already on the desk) are left
+        // alone — parked-suppression owns that case.
+        for (const d of confidentDetections) {
+          if (
+            d.confidence < th.TRACK_RESOLVE_THRESHOLD ||
+            !resolveYoloDetection(d, siteConfigRef.current!, localeRef.current)
+          ) {
+            addBackgroundZone(d.bbox as Bbox);
+          }
+        }
       }
 
       // Content bounds let the tracker clear edge-exited items fast while
@@ -1602,8 +1654,11 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           instantConfidence: th.TRACK_RESOLVE_THRESHOLD,
           needsReviewMs: CONTINUOUS_NEEDS_REVIEW_MS,
           // Only steadily-presented tracks earn a needs_review card —
-          // patterns riding on moving clothing/hands never surface.
-          needsReviewGate: (t) => t.travelEma <= STEADY_MAX_TRAVEL_PX,
+          // patterns riding on moving clothing/hands never surface, and
+          // neither do detections sitting on remembered scenery (the shelf
+          // teddy bear revealed by a camera shake).
+          needsReviewGate: (t) =>
+            t.travelEma <= STEADY_MAX_TRAVEL_PX && !overlapsScenery(t.bbox),
         },
         now,
         {
@@ -2782,6 +2837,18 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
             title="R"
           >
             {T("resetBackground")}
+          </button>
+          <span className="text-neutral-600">|</span>
+          <button
+            type="button"
+            onClick={handleToggleUnknownNet}
+            className={`pointer-events-auto rounded-md px-2.5 py-1 font-sans active:scale-95 transition focus-visible:outline-2 focus-visible:outline-emerald-400 ${
+              unknownNetOn
+                ? "bg-emerald-700 hover:bg-emerald-600 text-emerald-50"
+                : "bg-neutral-700 hover:bg-neutral-600 text-neutral-300"
+            }`}
+          >
+            {T("unknownNet")} {unknownNetOn ? "ON" : "OFF"}
           </button>
           <span className="text-neutral-600">|</span>
           <span>

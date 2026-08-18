@@ -161,6 +161,12 @@ const CONTINUOUS_BASELINE_MS = 1_500;
  *  healthy machine; below this absolute cost the load is trivial no matter
  *  what the ratio says. Real heat also builds over tens of seconds — an
  *  elevation must last this long before the ladder escalates. */
+/** Movement bound (model px) for demoting a track to permanent scenery.
+ *  Much tighter than STEADY_MAX_TRAVEL_PX: that one asks "steady enough to
+ *  judge", this one asks "bolted to the room". A held item breathes several
+ *  px even when the person tries to hold still, so it never qualifies —
+ *  which matters, because demotion silences that spot for good. */
+const SCENERY_MAX_TRAVEL_PX = 3;
 const THERMAL_MIN_AVG_MS = 8;
 const THERMAL_SUSTAIN_MS = 8_000;
 /** An unknown track that has sat still this long is background that slipped
@@ -329,9 +335,12 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
   /** Whether an unknown-object (blob-backed) track is currently displayed —
    *  freezes BG adaptation so the blob sustaining it isn't absorbed. */
   const hasUnknownTrackRef = useRef(false);
-  /** Regions (model space) that must not spawn unknown candidates: startup
-   *  scenery + demoted long-static unknowns. FIFO-capped. */
-  const backgroundZonesRef = useRef<Bbox[]>([]);
+  /** Remembered scenery (model space): startup furniture + demoted
+   *  long-static tracks. FIFO-capped. `className` records what the model
+   *  called the thing when it was learned (null = unknown-net candidate),
+   *  so a DIFFERENT item presented over the same spot still detects — only
+   *  the scenery itself is silenced. */
+  const backgroundZonesRef = useRef<{ bbox: Bbox; className: string | null }[]>([]);
   /** End of the startup baseline-learning window (0 = not started). */
   const baselineUntilRef = useRef(0);
   /** When sustained whole-scene instability began (0 = scene stable). */
@@ -1466,27 +1475,35 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       };
     }
 
-    /** True when a bbox mostly sits on a remembered scenery region. */
-    function overlapsScenery(bbox: Bbox): boolean {
-      return backgroundZonesRef.current.some((z) => {
-        const ix = Math.max(0, Math.min(bbox[0] + bbox[2], z[0] + z[2]) - Math.max(bbox[0], z[0]));
-        const iy = Math.max(0, Math.min(bbox[1] + bbox[3], z[1] + z[3]) - Math.max(bbox[1], z[1]));
-        const minArea = Math.min(bbox[2] * bbox[3], z[2] * z[3]);
-        return minArea > 0 && (ix * iy) / minArea > 0.35;
-      });
+    function overlapRatio(a: Bbox, b: Bbox): number {
+      const ix = Math.max(0, Math.min(a[0] + a[2], b[0] + b[2]) - Math.max(a[0], b[0]));
+      const iy = Math.max(0, Math.min(a[1] + a[3], b[1] + b[3]) - Math.max(a[1], b[1]));
+      const minArea = Math.min(a[2] * a[3], b[2] * b[3]);
+      return minArea > 0 ? (ix * iy) / minArea : 0;
+    }
+
+    /** True when this detection IS remembered scenery: same spot AND the
+     *  same thing the model saw there when the region was learned. A bottle
+     *  held up in front of the shelf is a different class → still detected. */
+    function isScenery(bbox: Bbox, className: string): boolean {
+      return backgroundZonesRef.current.some(
+        (z) =>
+          (z.className === null || z.className === className) &&
+          overlapRatio(bbox, z.bbox) > 0.35,
+      );
     }
 
     /** Remember a region as scenery (FIFO-capped, overlap-deduped). */
-    function addBackgroundZone(bbox: Bbox) {
+    function addBackgroundZone(bbox: Bbox, className: string | null = null) {
       const zones = backgroundZonesRef.current;
-      const overlaps = (a: Bbox, b: Bbox) => {
-        const ix = Math.max(0, Math.min(a[0] + a[2], b[0] + b[2]) - Math.max(a[0], b[0]));
-        const iy = Math.max(0, Math.min(a[1] + a[3], b[1] + b[3]) - Math.max(a[1], b[1]));
-        const minArea = Math.min(a[2] * a[3], b[2] * b[3]);
-        return minArea > 0 && (ix * iy) / minArea > 0.5;
-      };
-      if (zones.some((z) => overlaps(z, bbox))) return;
-      zones.push([...bbox] as Bbox);
+      const existing = zones.find((z) => overlapRatio(z.bbox, bbox) > 0.5);
+      if (existing) {
+        // Re-learning the same spot: keep the narrower rule (a named zone
+        // silences one class; a null zone silences everything there).
+        if (existing.className !== className) existing.className = null;
+        return;
+      }
+      zones.push({ bbox: [...bbox] as Bbox, className });
       if (zones.length > BACKGROUND_ZONE_CAP) zones.shift();
     }
 
@@ -1510,7 +1527,13 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
         setVideoAspect((prev) => (Math.abs(prev - aspect) < 0.01 ? prev : aspect));
       }
 
-      const wasteDetections = detections.filter((d) => !isYoloClassNotWaste(d.className));
+      // Remembered scenery is dropped HERE, at the source: suppressing it
+      // later (at card creation) still leaves a track, and a track still
+      // draws an annotation box — the shelf keeps flickering boxes even
+      // though no card appears. Nothing downstream should ever see it.
+      const wasteDetections = detections.filter(
+        (d) => !isYoloClassNotWaste(d.className) && !isScenery(d.bbox as Bbox, d.className),
+      );
       // Split at the keep threshold: below it YOLO's class guess is
       // unreliable — those boxes become class-agnostic unknown evidence.
       const confidentDetections = wasteDetections.filter(
@@ -1577,7 +1600,10 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
               .getTracks()
               .filter((t) => t.classId !== UNKNOWN_OBJECT_CLASS_ID)
               .map((t) => t.bbox),
-            suppressZones: [...backgroundZonesRef.current, ...faceZones],
+            suppressZones: [
+              ...backgroundZonesRef.current.map((z) => z.bbox),
+              ...faceZones,
+            ],
             videoAspect: aspect,
             confidence: th.TRACK_APPEAR_THRESHOLD,
           })
@@ -1605,7 +1631,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
             d.confidence < th.TRACK_RESOLVE_THRESHOLD ||
             !resolveYoloDetection(d, siteConfigRef.current!, localeRef.current)
           ) {
-            addBackgroundZone(d.bbox as Bbox);
+            addBackgroundZone(d.bbox as Bbox, d.className);
           }
         }
       }
@@ -1628,19 +1654,26 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
         (t) => t.classId === UNKNOWN_OBJECT_CLASS_ID && DetectionTracker.isDisplayable(t),
       );
 
-      // ── Demote long-static unknowns to scenery ──
+      // ── Demote long-static, unresolvable tracks to scenery ──
       // Background that slipped past the startup baseline (revealed by a
-      // lighting change, or present before a watchdog restart) will sit
-      // still indefinitely — a real presented item doesn't. Zone it; the
-      // candidate feed then starves and the track coasts out.
+      // lighting change, a camera nudge, or present before a watchdog
+      // restart) sits still indefinitely — a presented item never does.
+      // Zone it; the detection filter above then silences it for good.
+      // Applies to NAMED tracks too (the shelf teddy bear is a real COCO
+      // class), but only while they can't resolve to a bin: an item that
+      // firmly resolves is answered, and parked-suppression owns the
+      // "left on the counter" case.
       for (const t of tracks) {
         if (
-          t.classId === UNKNOWN_OBJECT_CLASS_ID &&
           now - t.firstSeenAt >= UNKNOWN_STATIC_TO_ZONE_MS &&
-          t.travelEma <= STEADY_MAX_TRAVEL_PX
+          t.travelEma <= SCENERY_MAX_TRAVEL_PX &&
+          t.confidence < th.TRACK_RESOLVE_THRESHOLD
         ) {
-          console.log(`[continuous] static unknown track ${t.id} → background zone`);
-          addBackgroundZone(t.bbox);
+          console.log(`[continuous] static track ${t.id} (${t.className}) → scenery`);
+          addBackgroundZone(
+            t.bbox,
+            t.classId === UNKNOWN_OBJECT_CLASS_ID ? null : t.className,
+          );
         }
       }
 
@@ -1654,11 +1687,9 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           instantConfidence: th.TRACK_RESOLVE_THRESHOLD,
           needsReviewMs: CONTINUOUS_NEEDS_REVIEW_MS,
           // Only steadily-presented tracks earn a needs_review card —
-          // patterns riding on moving clothing/hands never surface, and
-          // neither do detections sitting on remembered scenery (the shelf
-          // teddy bear revealed by a camera shake).
-          needsReviewGate: (t) =>
-            t.travelEma <= STEADY_MAX_TRAVEL_PX && !overlapsScenery(t.bbox),
+          // patterns riding on moving clothing/hands never surface.
+          // (Scenery is already gone: filtered out at the detection source.)
+          needsReviewGate: (t) => t.travelEma <= STEADY_MAX_TRAVEL_PX,
         },
         now,
         {

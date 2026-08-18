@@ -360,6 +360,17 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
    *  the demo panel. Ref for the loop, state for the button. */
   const unknownNetRef = useRef(true);
   const [unknownNetOn, setUnknownNetOn] = useState(true);
+  /** Tier 1.5 VLM judgments: site config supplies the default, the operator
+   *  can flip it live. OFF only stops NEW judgments — the model stays loaded,
+   *  so flipping back on is instant. With nothing in flight the loop drops
+   *  its ×2 pacing brake and stops sharing the GPU with YOLO, which is the
+   *  point: it buys live-view fps at the cost of leaving unnameable items
+   *  on their honest needs_review answer. */
+  const vlmEnabledRef = useRef(true);
+  const [vlmOn, setVlmOn] = useState(true);
+  /** Whether this site configures a usable VLM at all — decides whether the
+   *  demo panel offers a toggle or just a status readout. */
+  const [vlmAvailable, setVlmAvailable] = useState(false);
   /** Browser-mode VLM download/load progress — drives the gauge. */
   const [vlmProgress, setVlmProgress] = useState<BrowserVlmProgress | null>(null);
   /** Loaded vlm-browser module — lets the judge loop check readiness
@@ -529,6 +540,17 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
     console.log(`[continuous] unknown-object net ${next ? "ON" : "OFF"}`);
   }, []);
 
+  /** Operator toggle: Tier 1.5 VLM judgments on/off. Only dispatched
+   *  judgments are marked on a track, so cards left unresolved while it was
+   *  off are picked up on the next cycle after it comes back on — no reset
+   *  needed. */
+  const handleToggleVlm = useCallback(() => {
+    const next = !vlmEnabledRef.current;
+    vlmEnabledRef.current = next;
+    setVlmOn(next);
+    console.log(`[continuous] local VLM ${next ? "ON" : "OFF"}`);
+  }, []);
+
   /** Re-learn what counts as background WITHOUT leaving the live view.
    *  Same wipe as start (pixel background model, learned scenery zones,
    *  tracks, cards), then the startup baseline re-runs against the scene as
@@ -624,6 +646,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           setShowBinMap(data.showBinMap ?? false);
           unknownNetRef.current = data.unknownObjectFallback !== false;
           setUnknownNetOn(unknownNetRef.current);
+          setVlmAvailable(getVlmMode(data.localVlm) !== null);
           // Model choice is site-config driven and the ONNX session loads
           // once per page — select BEFORE the backend's first init. The
           // backend deliberately waits for site config (config is already a
@@ -1388,7 +1411,8 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           // fps budget) when neither is active.
           const faceSweepNeeded =
             unknownNetRef.current ||
-            getVlmMode(siteConfigRef.current?.localVlm) === "server";
+            (vlmEnabledRef.current &&
+              getVlmMode(siteConfigRef.current?.localVlm) === "server");
           if (
             faceSweepNeeded &&
             Date.now() - faceZonesRef.current.at >= FACE_SWEEP_INTERVAL_MS
@@ -1779,6 +1803,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       const vlmCfg = siteConfigRef.current?.localVlm;
       const vlmMode = getVlmMode(vlmCfg);
       if (!vlmMode) return;
+      if (!vlmEnabledRef.current) return; // operator switched Tier 1.5 off
       if (vlmInFlightRef.current) return;
       // Browser mode: readiness is checked BEFORE any track is marked as
       // judged — cards created while the model is still downloading must be
@@ -2882,18 +2907,32 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
             {T("unknownNet")} {unknownNetOn ? "ON" : "OFF"}
           </button>
           <span className="text-neutral-600">|</span>
-          <span>
-            VLM{" "}
-            {vlmProgress?.state === "preparing"
-              ? `${T("sysVlmPreparing")} ${Math.round(vlmProgress.fraction * 100)}%`
-              : vlmProgress?.state === "ready"
-                ? sysStats.level >= 2
-                  ? T("sysVlmPaused")
-                  : vlmInFlightRef.current
-                    ? T("sysVlmJudging")
-                    : T("sysVlmIdle")
-                : T("sysVlmOff")}
-          </span>
+          {vlmAvailable ? (
+            <button
+              type="button"
+              onClick={handleToggleVlm}
+              className={`pointer-events-auto rounded-md px-2.5 py-1 font-sans active:scale-95 transition focus-visible:outline-2 focus-visible:outline-emerald-400 ${
+                vlmOn
+                  ? "bg-emerald-700 hover:bg-emerald-600 text-emerald-50"
+                  : "bg-neutral-700 hover:bg-neutral-600 text-neutral-300"
+              }`}
+            >
+              VLM{" "}
+              {!vlmOn
+                ? "OFF"
+                : vlmProgress?.state === "preparing"
+                  ? `${T("sysVlmPreparing")} ${Math.round(vlmProgress.fraction * 100)}%`
+                  : vlmProgress?.state === "ready"
+                    ? sysStats.level >= 2
+                      ? T("sysVlmPaused")
+                      : vlmInFlightRef.current
+                        ? T("sysVlmJudging")
+                        : T("sysVlmIdle")
+                    : T("sysVlmOff")}
+            </button>
+          ) : (
+            <span>VLM {T("sysVlmOff")}</span>
+          )}
         </div>
       )}
 

@@ -1,62 +1,216 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo, Suspense } from "react";
+/**
+ * /review — Sorting dashboard.
+ *
+ * The single source of truth for "was the AI right?" (see CLAUDE.md: no
+ * end-user feedback loop at the kiosk). Everything here is built around one
+ * measured bottleneck: **labeling throughput**. Collecting frames is cheap and
+ * automatic; a human deciding correct/wrong is the slow step that gates every
+ * downstream fine-tune. So the primary view is a keyboard-driven triage queue
+ * that shows one item at a time and advances on a single keypress — not a
+ * grid the operator has to hunt through.
+ *
+ * Three views:
+ *   triage — one item, big image + boxes, 1/2/3 to judge, auto-advance
+ *   grid   — filterable overview, click to jump into triage at that item
+ *   stats  — where the model is weak (by item name, by certainty) + ZIP export
+ */
+
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { AdminNav } from "@/components/AdminNav";
-import { PerformancePanel } from "@/components/PerformancePanel";
 import type { PilotLogEntry } from "@/lib/types";
 import type { Locale } from "@/lib/i18n";
 import { t } from "@/lib/i18n";
 
-// ── Constants ──
-
-const NOT_WASTE = new Set(["person","bicycle","car","motorcycle","airplane","bus","train","truck","boat","traffic light","fire hydrant","stop sign","parking meter","bench","bird","cat","dog","horse","sheep","cow","elephant","bear","zebra","giraffe","chair","couch","potted plant","bed","dining table","toilet","sink","refrigerator"]);
-
 // ── Types ──
 
-type ReviewEntry = PilotLogEntry & {
-  verdict: "correct" | "wrong" | "false_detection" | null;
-};
-
 type Verdict = "correct" | "wrong" | "false_detection";
+type ReviewEntry = PilotLogEntry & { verdict: Verdict | null };
+type Tab = "triage" | "grid" | "stats";
 
-export default function ReviewPage() {
+/** Mirrors the export route's selection rule (app/api/review/export/route.ts)
+ *  so the count shown here matches what the ZIP will actually contain. */
+const CORRECT_CONFIDENCE_THRESHOLD = 0.8;
+function isExportable(e: ReviewEntry): boolean {
+  if (!e.requestId || !e.imageUrl || !e.verdict) return false;
   return (
-    <Suspense fallback={<div className="h-full bg-neutral-950 text-white flex items-center justify-center"><p className="text-neutral-400">Loading...</p></div>}>
-      <ImageReviewPage />
-    </Suspense>
+    e.verdict === "wrong" ||
+    (e.verdict === "correct" &&
+      (e.confidence <= CORRECT_CONFIDENCE_THRESHOLD || e.modelUsed !== "T1"))
   );
 }
 
-function ImageReviewPage() {
+const CONFIDENCE_BUCKETS: { label: string; min: number; max: number }[] = [
+  { label: "0–30%", min: 0, max: 0.3 },
+  { label: "30–50%", min: 0.3, max: 0.5 },
+  { label: "50–70%", min: 0.5, max: 0.7 },
+  { label: "70–85%", min: 0.7, max: 0.85 },
+  { label: "85–100%", min: 0.85, max: 1.01 },
+];
+
+// ── Small shared pieces ──
+
+function accuracyColor(acc: number | null): string {
+  if (acc === null) return "text-neutral-500";
+  if (acc >= 0.8) return "text-emerald-400";
+  if (acc >= 0.5) return "text-amber-400";
+  return "text-rose-400";
+}
+
+function Bar({ value, tone }: { value: number; tone: string }) {
+  return (
+    <div className="h-1.5 w-full rounded-full bg-neutral-800 overflow-hidden">
+      <div
+        className={`h-full rounded-full ${tone} transition-[width] duration-300`}
+        style={{ width: `${Math.round(value * 100)}%` }}
+      />
+    </div>
+  );
+}
+
+function Kpi({
+  label,
+  value,
+  hint,
+  tone = "text-white",
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+  tone?: string;
+}) {
+  return (
+    <div className="rounded-xl bg-neutral-900 border border-neutral-800 px-4 py-3">
+      <p className="text-[11px] uppercase tracking-wide text-neutral-500">{label}</p>
+      <p className={`text-2xl font-semibold tabular-nums leading-tight mt-0.5 ${tone}`}>{value}</p>
+      {hint ? <p className="text-[11px] text-neutral-500 mt-0.5">{hint}</p> : null}
+    </div>
+  );
+}
+
+/** Image with the frame's YOLO boxes drawn on top.
+ *
+ *  `bboxNorm` is [cx, cy, w, h] normalized to the stored capture square, so it
+ *  maps to percentage offsets directly. Entries written before `captureSpace`
+ *  existed may not line up — those get a visible warning rather than silently
+ *  misleading boxes. */
+function BoxedImage({
+  entry,
+  showBoxes,
+  T,
+}: {
+  entry: ReviewEntry;
+  showBoxes: boolean;
+  T: (k: Parameters<typeof t>[1]) => string;
+}) {
+  const boxes = entry.yoloDetections ?? [];
+  const unaligned = boxes.length > 0 && !entry.captureSpace;
+
+  if (!entry.imageUrl) {
+    return (
+      <div className="aspect-square w-full rounded-xl bg-neutral-900 border border-neutral-800 grid place-items-center">
+        <p className="text-sm text-neutral-500">
+          {entry.faceBlocked || entry.blobUploadFailed ? T("imageUnavailable") : T("noImage")}
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="relative aspect-square w-full rounded-xl overflow-hidden bg-black border border-neutral-800">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={`/api/pilot-image?url=${encodeURIComponent(entry.imageUrl)}`}
+          alt={entry.itemName}
+          className="w-full h-full object-contain"
+        />
+        {showBoxes &&
+          boxes.map((d, i) => {
+            const [cx, cy, w, h] = d.bboxNorm;
+            return (
+              <div
+                key={i}
+                className="absolute border-2 border-amber-400/90 rounded-sm"
+                style={{
+                  left: `${(cx - w / 2) * 100}%`,
+                  top: `${(cy - h / 2) * 100}%`,
+                  width: `${w * 100}%`,
+                  height: `${h * 100}%`,
+                }}
+              >
+                <span className="absolute -top-6 left-0 whitespace-nowrap rounded bg-amber-400 px-1.5 py-0.5 text-[10px] font-medium text-black">
+                  {d.className} {Math.round(d.confidence * 100)}%
+                </span>
+              </div>
+            );
+          })}
+      </div>
+      {unaligned ? (
+        <p className="text-[11px] text-amber-400/80">{T("rvBboxWarn")}</p>
+      ) : null}
+    </div>
+  );
+}
+
+// ── Page ──
+
+export default function ReviewPage() {
   const [entries, setEntries] = useState<ReviewEntry[]>([]);
   const [loading, setLoading] = useState(true);
-  const [locale, setLocale] = useState<Locale>("en");
-  const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "correct" | "wrong" | "false_detection">("all");
-  const [streamFilter, setStreamFilter] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [locale, setLocale] = useState<Locale>("ja");
+  const [tab, setTab] = useState<Tab>("triage");
+
+  // Triage queue is a SNAPSHOT of ids, not a live filter: an item judged at
+  // position 5 must stay at position 5 so "back" can re-open and re-judge it.
+  // A live filter would make items vanish under the cursor mid-session.
+  const [queueIds, setQueueIds] = useState<string[]>([]);
+  const [cursor, setCursor] = useState(0);
+  const [queueMode, setQueueMode] = useState<"unreviewed" | "all">("unreviewed");
+
+  // Mirrors of cursor/queue/entries read by event handlers (see the triage
+  // navigation block for why the render closure cannot be trusted there).
+  const cursorRef = useRef(0);
+  const queueIdsRef = useRef<string[]>([]);
+  const entriesRef = useRef<ReviewEntry[]>([]);
+
+  const [sessionJudged, setSessionJudged] = useState(0);
+  const sessionStart = useRef<number>(Date.now());
+  const [showBoxes, setShowBoxes] = useState(true);
+
+  // Grid filters
+  const [statusFilter, setStatusFilter] = useState<"all" | "pending" | Verdict>("all");
   const [modelFilter, setModelFilter] = useState("");
-  const [searchQuery, setSearchQuery] = useState("");
-  const [saving, setSaving] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+
   const [exporting, setExporting] = useState(false);
 
-  const T = useCallback((key: Parameters<typeof t>[1]) => t(locale, key), [locale]);
+  const T = useCallback(
+    (key: Parameters<typeof t>[1]) => t(locale, key),
+    [locale],
+  );
 
+  // ── Load ──
   const load = useCallback(async () => {
     try {
       const res = await fetch("/api/review");
-      if (res.ok) {
-        const data = await res.json();
-        setEntries(Array.isArray(data.entries) ? data.entries : []);
-      }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setEntries(Array.isArray(data.entries) ? data.entries : []);
+      setError(null);
     } catch {
-      // silent
+      setError("読み込みに失敗しました / Failed to load");
     } finally {
       setLoading(false);
     }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    load();
+  }, [load]);
 
-  // Refetch when tab becomes visible (e.g., after deleting data on dashboard)
   useEffect(() => {
     const onVisible = () => {
       if (document.visibilityState === "visible") load();
@@ -65,953 +219,765 @@ function ImageReviewPage() {
     return () => document.removeEventListener("visibilitychange", onVisible);
   }, [load]);
 
-  const submitVerdict = useCallback(async (requestId: string, verdict: Verdict) => {
-    setSaving(requestId);
-    try {
-      await fetch("/api/review", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ requestId, verdict }),
-      });
+  useEffect(() => {
+    cursorRef.current = cursor;
+  }, [cursor]);
+  useEffect(() => {
+    queueIdsRef.current = queueIds;
+  }, [queueIds]);
+  useEffect(() => {
+    entriesRef.current = entries;
+  }, [entries]);
+
+  const byId = useMemo(() => {
+    const m = new Map<string, ReviewEntry>();
+    for (const e of entries) if (e.requestId) m.set(e.requestId, e);
+    return m;
+  }, [entries]);
+
+  // Build the queue once entries arrive (and whenever the operator resets it).
+  const rebuildQueue = useCallback(
+    (mode: "unreviewed" | "all") => {
+      const ids = entries
+        .filter((e) => e.requestId && (mode === "all" || e.verdict === null))
+        .map((e) => e.requestId as string);
+      queueIdsRef.current = ids;
+      cursorRef.current = 0;
+      setQueueIds(ids);
+      setCursor(0);
+      setQueueMode(mode);
+    },
+    [entries],
+  );
+
+  const queueInitialized = useRef(false);
+  useEffect(() => {
+    if (queueInitialized.current || entries.length === 0) return;
+    queueInitialized.current = true;
+    const ids = entries
+      .filter((e) => e.requestId && e.verdict === null)
+      .map((e) => e.requestId as string);
+    // Nothing left unjudged → open the full list so the view isn't just empty.
+    setQueueIds(ids.length > 0 ? ids : entries.filter((e) => e.requestId).map((e) => e.requestId as string));
+    if (ids.length === 0) setQueueMode("all");
+  }, [entries]);
+
+  // ── Counts ──
+  const stats = useMemo(() => {
+    const total = entries.length;
+    const judged = entries.filter((e) => e.verdict !== null).length;
+    const correct = entries.filter((e) => e.verdict === "correct").length;
+    const wrong = entries.filter((e) => e.verdict === "wrong").length;
+    const falseDet = entries.filter((e) => e.verdict === "false_detection").length;
+    const exportable = entries.filter(isExportable).length;
+    // Accuracy answers "when the AI named something, was it right?", so
+    // false_detection (there was no item at all) is excluded from the base.
+    const namedJudged = correct + wrong;
+    return {
+      total,
+      judged,
+      unreviewed: total - judged,
+      correct,
+      wrong,
+      falseDet,
+      exportable,
+      accuracy: namedJudged > 0 ? correct / namedJudged : null,
+    };
+  }, [entries]);
+
+  // ── Save a verdict (optimistic) ──
+  const saveVerdict = useCallback(
+    async (requestId: string, verdict: Verdict) => {
+      const before =
+        entriesRef.current.find((e) => e.requestId === requestId)?.verdict ?? null;
       setEntries((prev) =>
-        prev.map((e) =>
-          e.requestId === requestId ? { ...e, verdict } : e,
-        ),
+        prev.map((e) => (e.requestId === requestId ? { ...e, verdict } : e)),
       );
-    } catch {
-      // silent
-    } finally {
-      setSaving(null);
-    }
-  }, []);
-
-  const deleteEntry = useCallback(async (requestId: string) => {
-    setSaving(requestId);
-    try {
-      const res = await fetch(`/api/review?requestId=${encodeURIComponent(requestId)}`, {
-        method: "DELETE",
-      });
-      if (res.ok) {
-        setEntries((prev) => prev.filter((e) => e.requestId !== requestId));
+      if (before === null) setSessionJudged((n) => n + 1);
+      try {
+        const res = await fetch("/api/review", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ requestId, verdict }),
+        });
+        if (!res.ok) throw new Error();
+        setError(null);
+      } catch {
+        // Roll back so the screen never claims a save that didn't happen.
+        setEntries((prev) =>
+          prev.map((e) => (e.requestId === requestId ? { ...e, verdict: before } : e)),
+        );
+        if (before === null) setSessionJudged((n) => Math.max(0, n - 1));
+        setError("保存に失敗しました / Failed to save");
       }
-    } catch {
-      // silent
-    } finally {
-      setSaving(null);
-    }
+    },
+    [],
+  );
+
+  const removeEntry = useCallback(
+    async (requestId: string) => {
+      if (!window.confirm(T("rvConfirmDelete"))) return;
+      const snapshot = entries;
+      setEntries((prev) => prev.filter((e) => e.requestId !== requestId));
+      setQueueIds((prev) => prev.filter((id) => id !== requestId));
+      try {
+        const res = await fetch(`/api/review?requestId=${encodeURIComponent(requestId)}`, {
+          method: "DELETE",
+        });
+        if (!res.ok) throw new Error();
+      } catch {
+        setEntries(snapshot);
+        setError("削除に失敗しました / Failed to delete");
+      }
+    },
+    [entries, T],
+  );
+
+  // ── Triage navigation ──
+  //
+  // Judging advances the cursor in the SAME tick as the keypress, so reading
+  // `cursor`/`queueIds` out of the render closure is unsafe: three fast
+  // keypresses all resolve to the same entry — the first receives three
+  // verdicts and the next two are skipped without ever being saved (the
+  // counter still moves, so the loss is silent). These refs advance
+  // synchronously so every press lands on its own entry.
+  const current = queueIds[cursor] ? byId.get(queueIds[cursor]) ?? null : null;
+
+  const goNext = useCallback(() => {
+    const next = Math.min(
+      cursorRef.current + 1,
+      Math.max(0, queueIdsRef.current.length - 1),
+    );
+    cursorRef.current = next;
+    setCursor(next);
   }, []);
 
-  const bulkDelete = useCallback(async (params: URLSearchParams) => {
-    const res = await fetch(`/api/review?${params.toString()}`, { method: "DELETE" });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error((err as { error?: string }).error ?? `Delete failed: ${res.status}`);
-    }
-    const data = await res.json();
-    await load();
-    return (data as { deleted: number }).deleted;
-  }, [load]);
+  const goPrev = useCallback(() => {
+    const prev = Math.max(0, cursorRef.current - 1);
+    cursorRef.current = prev;
+    setCursor(prev);
+  }, []);
 
-  const handleExport = useCallback(async () => {
+  const judgeAndAdvance = useCallback(
+    (verdict: Verdict) => {
+      const id = queueIdsRef.current[cursorRef.current];
+      if (!id) return;
+      saveVerdict(id, verdict);
+      goNext();
+    },
+    [saveVerdict, goNext],
+  );
+
+  // ── Keyboard ──
+  useEffect(() => {
+    if (tab !== "triage") return;
+    const onKey = (ev: KeyboardEvent) => {
+      const el = ev.target as HTMLElement | null;
+      if (el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) return;
+      if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
+      switch (ev.key) {
+        case "1":
+          ev.preventDefault();
+          judgeAndAdvance("correct");
+          break;
+        case "2":
+          ev.preventDefault();
+          judgeAndAdvance("wrong");
+          break;
+        case "3":
+          ev.preventDefault();
+          judgeAndAdvance("false_detection");
+          break;
+        case " ":
+        case "ArrowRight":
+          ev.preventDefault();
+          goNext();
+          break;
+        case "ArrowLeft":
+        case "u":
+        case "U":
+          ev.preventDefault();
+          goPrev();
+          break;
+        case "b":
+        case "B":
+          ev.preventDefault();
+          setShowBoxes((v) => !v);
+          break;
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [tab, judgeAndAdvance, goNext, goPrev]);
+
+  // ── Export ──
+  const downloadZip = useCallback(async () => {
     setExporting(true);
     try {
       const res = await fetch("/api/review/download");
       if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        alert((err as { error?: string }).error ?? `Export failed: ${res.status}`);
+        const body = await res.json().catch(() => ({}));
+        setError(body.error ?? "書き出しに失敗しました / Export failed");
         return;
       }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `review-images-${new Date().toISOString().slice(0, 10)}.zip`;
+      a.download = `wayste-training-${new Date().toISOString().slice(0, 10)}.zip`;
       a.click();
       URL.revokeObjectURL(url);
     } catch {
-      alert("Export failed");
+      setError("書き出しに失敗しました / Export failed");
     } finally {
       setExporting(false);
     }
   }, []);
 
-  const reviewed = entries.filter((e) => e.verdict !== null).length;
-  const pending = entries.length - reviewed;
+  // ── Derived: grid ──
+  const gridEntries = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return entries.filter((e) => {
+      if (statusFilter === "pending" && e.verdict !== null) return false;
+      if (statusFilter !== "all" && statusFilter !== "pending" && e.verdict !== statusFilter)
+        return false;
+      if (modelFilter && e.modelUsed !== modelFilter) return false;
+      if (q && !e.itemName.toLowerCase().includes(q)) return false;
+      return true;
+    });
+  }, [entries, statusFilter, modelFilter, search]);
 
-  // Build sibling map: base requestId → all item names classified together
-  const siblingMap = useMemo(() => {
-    const map = new Map<string, string[]>();
+  // ── Derived: stats ──
+  const byClass = useMemo(() => {
+    const m = new Map<string, { total: number; correct: number; wrong: number }>();
     for (const e of entries) {
-      if (!e.requestId) continue;
-      const base = e.requestId.replace(/-\d+$/, "");
-      const arr = map.get(base) ?? [];
-      arr.push(e.itemName);
-      map.set(base, arr);
+      const row = m.get(e.itemName) ?? { total: 0, correct: 0, wrong: 0 };
+      row.total++;
+      if (e.verdict === "correct") row.correct++;
+      if (e.verdict === "wrong") row.wrong++;
+      m.set(e.itemName, row);
     }
-    return map;
+    return [...m.entries()]
+      .map(([name, r]) => ({
+        name,
+        ...r,
+        judged: r.correct + r.wrong,
+        acc: r.correct + r.wrong > 0 ? r.correct / (r.correct + r.wrong) : null,
+      }))
+      .sort((a, b) => b.total - a.total);
   }, [entries]);
 
-  const filtered = entries.filter((e) => {
-    if (statusFilter === "pending" && e.verdict !== null) return false;
-    if (statusFilter === "correct" && e.verdict !== "correct") return false;
-    if (statusFilter === "wrong" && e.verdict !== "wrong") return false;
-    if (statusFilter === "false_detection" && e.verdict !== "false_detection") return false;
-    if (streamFilter && e.wasteStream !== streamFilter) return false;
-    if (modelFilter && e.modelUsed !== modelFilter) return false;
-    if (searchQuery && !e.itemName.toLowerCase().includes(searchQuery.toLowerCase())) return false;
-    return true;
-  });
+  const byConfidence = useMemo(
+    () =>
+      CONFIDENCE_BUCKETS.map((b) => {
+        const inB = entries.filter(
+          (e) => e.confidence >= b.min && e.confidence < b.max,
+        );
+        const correct = inB.filter((e) => e.verdict === "correct").length;
+        const wrong = inB.filter((e) => e.verdict === "wrong").length;
+        return {
+          label: b.label,
+          total: inB.length,
+          judged: correct + wrong,
+          acc: correct + wrong > 0 ? correct / (correct + wrong) : null,
+        };
+      }),
+    [entries],
+  );
 
-  const uniqueStreams = [...new Set(entries.map((e) => e.wasteStream))].sort();
-  const uniqueModels = [...new Set(entries.map((e) => e.modelUsed))].sort();
-  const hasActiveFilters = statusFilter !== "all" || streamFilter !== "" || modelFilter !== "" || searchQuery !== "";
+  const byModel = useMemo(() => {
+    const ids: PilotLogEntry["modelUsed"][] = ["T1", "vlm", "t2"];
+    const labelFor = (m: PilotLogEntry["modelUsed"]) =>
+      m === "T1" ? T("rvModelT1") : m === "vlm" ? T("rvModelVlm") : T("rvModelT2");
+    return ids
+      .map((m) => {
+        const inM = entries.filter((e) => e.modelUsed === m);
+        const correct = inM.filter((e) => e.verdict === "correct").length;
+        const wrong = inM.filter((e) => e.verdict === "wrong").length;
+        return {
+          id: m,
+          label: labelFor(m),
+          total: inM.length,
+          judged: correct + wrong,
+          acc: correct + wrong > 0 ? correct / (correct + wrong) : null,
+        };
+      })
+      .filter((r) => r.total > 0);
+  }, [entries, T]);
 
-  // Accuracy = correct / (correct + wrong), excluding false detections
-  const correctCount = entries.filter((e) => e.verdict === "correct").length;
-  const wrongCount = entries.filter((e) => e.verdict === "wrong").length;
-  const falseCount = entries.filter((e) => e.verdict === "false_detection").length;
-  const classifiable = correctCount + wrongCount;
-  const accuracy = classifiable > 0 ? correctCount / classifiable : null;
+  const perMin = useMemo(() => {
+    const mins = (Date.now() - sessionStart.current) / 60000;
+    return mins > 0.2 ? sessionJudged / mins : 0;
+  }, [sessionJudged]);
 
-  // Count exportable images for button label
-  const exportableCount = entries.filter((e) =>
-    e.verdict === "wrong" ||
-    (e.verdict === "correct" && e.confidence <= 0.80),
-  ).filter((e) => e.imageUrl).length;
+  const modelLabel = useCallback(
+    (m: PilotLogEntry["modelUsed"]) =>
+      m === "T1" ? T("rvModelT1") : m === "vlm" ? T("rvModelVlm") : T("rvModelT2"),
+    [T],
+  );
 
+  // ── Render ──
   if (loading) {
     return (
-      <div className="h-full bg-neutral-950 text-white flex items-center justify-center">
-        <p className="text-neutral-400">Loading...</p>
+      <div className="min-h-screen bg-neutral-950 text-white grid place-items-center">
+        <p className="text-neutral-400 text-sm">…</p>
       </div>
     );
   }
 
+  const progress = queueIds.length > 0 ? (cursor + 1) / queueIds.length : 0;
+
   return (
-    <div className="h-full bg-neutral-950 text-white p-8 overflow-y-auto">
-      <div className="max-w-7xl mx-auto">
+    <div className="min-h-screen bg-neutral-950 text-white">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 space-y-6">
         {/* Header */}
-        <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
+        <header className="flex items-start justify-between gap-4 flex-wrap">
           <div>
-            <h1 className="text-3xl font-bold">{T("imageReview")}</h1>
-            <p className="text-neutral-400 text-sm mt-1">{T("imageReviewSubtitle")}</p>
+            <h1 className="text-xl font-semibold">{T("rvTitle")}</h1>
+            <p className="text-sm text-neutral-400 mt-0.5">{T("rvSubtitle")}</p>
           </div>
-          <AdminNav locale={locale} onToggleLocale={() => setLocale(locale === "en" ? "ja" : "en")} />
+          <AdminNav
+            locale={locale}
+            onToggleLocale={() => setLocale((l) => (l === "ja" ? "en" : "ja"))}
+          />
+        </header>
+
+        {error ? (
+          <div className="rounded-lg border border-rose-800 bg-rose-950/50 px-4 py-2.5 text-sm text-rose-200">
+            {error}
+          </div>
+        ) : null}
+
+        {/* KPIs */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <Kpi
+            label={T("rvUnreviewed")}
+            value={String(stats.unreviewed)}
+            tone={stats.unreviewed > 0 ? "text-amber-400" : "text-emerald-400"}
+            hint={`${T("rvTotalCount")} ${stats.total}`}
+          />
+          <Kpi
+            label={T("rvAccuracy")}
+            value={stats.accuracy === null ? "—" : `${Math.round(stats.accuracy * 100)}%`}
+            tone={accuracyColor(stats.accuracy)}
+            hint={`${T("rvCorrect")} ${stats.correct} / ${T("rvWrong")} ${stats.wrong}`}
+          />
+          <Kpi
+            label={T("rvExportable")}
+            value={String(stats.exportable)}
+            hint={T("rvFalseDetection") + ` ${stats.falseDet}`}
+          />
+          <Kpi
+            label={T("rvSessionRate")}
+            value={String(sessionJudged)}
+            hint={perMin > 0 ? `${perMin.toFixed(1)} ${T("rvPerMin")}` : undefined}
+          />
         </div>
-        {/* Stats bar */}
-        <div className="flex items-center gap-4 mb-6 flex-wrap">
-          <div className="bg-neutral-900 rounded-xl px-4 py-2">
-            <span className="text-neutral-400 text-sm">{T("allEntries")}: </span>
-            <span className="text-white font-bold">{entries.length}</span>
-          </div>
-          <div className="bg-neutral-900 rounded-xl px-4 py-2">
-            <span className="text-emerald-400 text-sm">{reviewed} {T("reviewed")}</span>
-          </div>
-          <div className="bg-neutral-900 rounded-xl px-4 py-2">
-            <span className="text-orange-400 text-sm">{pending} {T("pendingReview")}</span>
-          </div>
-          {falseCount > 0 && (
-            <div className="bg-neutral-900 rounded-xl px-4 py-2">
-              <span className="text-neutral-500 text-sm">{falseCount} {T("falseDetection")}</span>
-            </div>
-          )}
-          {accuracy !== null && (
-            <div className="bg-neutral-900 rounded-xl px-4 py-2">
-              <span className="text-neutral-400 text-sm">{T("accuracyRate")}: </span>
-              <span className={`font-bold ${accuracy >= 0.8 ? "text-emerald-400" : accuracy >= 0.6 ? "text-amber-400" : "text-red-400"}`}>
-                {Math.round(accuracy * 100)}%
-              </span>
-              <span className="text-neutral-600 text-xs ml-1">
-                ({correctCount}/{classifiable})
-              </span>
-            </div>
-          )}
-          {exportableCount > 0 && (
+
+        {/* Tabs */}
+        <div className="flex gap-1 border-b border-neutral-800">
+          {(
+            [
+              ["triage", T("rvTabTriage")],
+              ["grid", T("rvTabGrid")],
+              ["stats", T("rvTabStats")],
+            ] as [Tab, string][]
+          ).map(([id, label]) => (
             <button
-              onClick={handleExport}
-              disabled={exporting}
-              className="px-4 py-2 rounded-lg bg-purple-700 hover:bg-purple-600 text-sm font-medium transition-colors disabled:opacity-50"
+              key={id}
+              onClick={() => setTab(id)}
+              className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                tab === id
+                  ? "border-white text-white"
+                  : "border-transparent text-neutral-500 hover:text-neutral-300"
+              }`}
             >
-              {exporting
-                ? (locale === "ja" ? "エクスポート中..." : "Exporting...")
-                : (locale === "ja" ? `画像ZIP (${exportableCount}枚)` : `Export ZIP (${exportableCount} images)`)}
+              {label}
             </button>
-          )}
+          ))}
         </div>
 
-        {/* Performance monitoring */}
-        <PerformancePanel />
-
-        {/* Analysis export */}
-        <AnalysisExportPanel locale={locale} availableStreams={uniqueStreams} />
-
-        {/* Bulk delete */}
-        <BulkDeletePanel onDelete={bulkDelete} locale={locale} />
-
-        {/* Filters */}
-        <div className="flex flex-col gap-3 mb-6">
-          {/* Status pills */}
-          <div className="flex gap-2 flex-wrap">
-            {([
-              { value: "all" as const, label: T("allEntries") },
-              { value: "pending" as const, label: T("pendingReview") },
-              { value: "correct" as const, label: T("verdictCorrect"), dot: "bg-emerald-400" },
-              { value: "wrong" as const, label: T("verdictWrong"), dot: "bg-red-400" },
-              { value: "false_detection" as const, label: T("verdictFalse"), dot: "bg-neutral-400" },
-            ]).map((f) => (
+        {/* ── TRIAGE ── */}
+        {tab === "triage" ? (
+          queueIds.length === 0 || !current ? (
+            <div className="rounded-xl border border-neutral-800 bg-neutral-900 py-16 text-center">
+              <p className="text-lg font-medium">{T("rvAllDone")}</p>
+              <p className="text-sm text-neutral-400 mt-1">{T("rvAllDoneHint")}</p>
               <button
-                key={f.value}
-                onClick={() => setStatusFilter(f.value)}
-                className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 ${
-                  statusFilter === f.value
-                    ? "bg-neutral-700 text-white"
-                    : "bg-neutral-900 text-neutral-400 hover:bg-neutral-800"
-                }`}
+                onClick={() => rebuildQueue("all")}
+                className="mt-4 px-4 py-2 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-sm"
               >
-                {"dot" in f && <span className={`w-2 h-2 rounded-full ${f.dot}`} />}
-                {f.label}
+                {T("rvShowAll")}
               </button>
-            ))}
-          </div>
-
-          {/* Additional filters */}
-          <div className="flex items-center gap-3 flex-wrap">
-            <select
-              value={streamFilter}
-              onChange={(e) => setStreamFilter(e.target.value)}
-              className="bg-neutral-900 text-sm text-neutral-300 rounded-lg px-3 py-1.5 border border-neutral-800 focus:outline-none focus:border-neutral-600"
-            >
-              <option value="">{locale === "ja" ? "種類: すべて" : "Stream: All"}</option>
-              {uniqueStreams.map((s) => (
-                <option key={s} value={s}>{s}</option>
-              ))}
-            </select>
-
-            <select
-              value={modelFilter}
-              onChange={(e) => setModelFilter(e.target.value)}
-              className="bg-neutral-900 text-sm text-neutral-300 rounded-lg px-3 py-1.5 border border-neutral-800 focus:outline-none focus:border-neutral-600"
-            >
-              <option value="">{locale === "ja" ? "モデル: すべて" : "Model: All"}</option>
-              {uniqueModels.map((m) => (
-                <option key={m} value={m}>{m}</option>
-              ))}
-            </select>
-
-            <input
-              type="text"
-              placeholder={locale === "ja" ? "アイテム名で検索..." : "Search items..."}
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="bg-neutral-900 text-sm text-neutral-300 rounded-lg px-3 py-1.5 border border-neutral-800 focus:outline-none focus:border-neutral-600 w-48"
-            />
-
-            {hasActiveFilters && (
-              <button
-                onClick={() => { setStatusFilter("all"); setStreamFilter(""); setModelFilter(""); setSearchQuery(""); }}
-                className="text-xs text-neutral-500 hover:text-neutral-300 transition-colors"
-              >
-                {locale === "ja" ? "クリア" : "Clear filters"}
-              </button>
-            )}
-
-            <span className="text-xs text-neutral-500 ml-auto">
-              {filtered.length}/{entries.length}
-            </span>
-          </div>
-        </div>
-
-        {/* Entries grid */}
-        {filtered.length === 0 ? (
-          <div className="bg-neutral-900 rounded-2xl p-12 text-center">
-            <p className="text-neutral-400 text-lg">
-              {statusFilter === "pending"
-                ? (locale === "ja" ? "すべてのエントリーがレビュー済みです！" : "All entries have been reviewed!")
-                : (locale === "ja" ? "該当するエントリーがありません。" : "No entries match the filters.")}
-            </p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filtered.map((entry) => (
-              <EntryCard
-                key={entry.requestId ?? entry.timestamp}
-                entry={entry}
-                saving={saving === entry.requestId}
-                onVerdict={submitVerdict}
-                onDelete={deleteEntry}
-                locale={locale}
-                T={T}
-                siblingNames={entry.requestId ? siblingMap.get(entry.requestId.replace(/-\d+$/, "")) : undefined}
-              />
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function EntryCard({
-  entry,
-  saving,
-  onVerdict,
-  onDelete,
-  locale,
-  T,
-  siblingNames,
-}: {
-  entry: ReviewEntry;
-  saving: boolean;
-  onVerdict: (requestId: string, verdict: Verdict) => void;
-  onDelete: (requestId: string) => void;
-  locale: Locale;
-  T: (key: Parameters<typeof t>[1]) => string;
-  siblingNames?: string[];
-}) {
-  const [confirmingDelete, setConfirmingDelete] = useState(false);
-
-  const date = new Date(entry.timestamp).toLocaleString(
-    locale === "ja" ? "ja-JP" : "en-US",
-    { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" },
-  );
-
-  const verdictBorder =
-    entry.verdict === "correct" ? "border-emerald-700/60 bg-emerald-950/20"
-    : entry.verdict === "wrong" ? "border-red-700/60 bg-red-950/20"
-    : entry.verdict === "false_detection" ? "border-neutral-600 bg-neutral-900/50"
-    : "border-neutral-800 bg-neutral-800/40";
-
-  const verdictBadge =
-    entry.verdict === "correct" ? { text: T("verdictCorrect"), color: "text-emerald-400" }
-    : entry.verdict === "wrong" ? { text: T("verdictWrong"), color: "text-red-400" }
-    : entry.verdict === "false_detection" ? { text: T("verdictFalse"), color: "text-neutral-400" }
-    : null;
-
-  // Model display name
-  const modelLabel = entry.modelUsed ?? "unknown";
-
-  // Sharpness score from CV metadata
-  const sharpness = entry.meta?.sharpnessScore;
-
-  return (
-    <div className={`rounded-xl border p-4 flex flex-col gap-3 ${verdictBorder}`}>
-      {/* Image */}
-      {entry.blobUploadFailed ? (
-        <div className="w-full rounded-lg bg-neutral-700 flex items-center justify-center text-neutral-400 text-sm text-center px-4 py-8">
-          {T("imageUnavailable")}
-        </div>
-      ) : entry.imageUrl ? (
-        <img
-          src={`/api/pilot-image?url=${encodeURIComponent(entry.imageUrl)}`}
-          alt={entry.itemName}
-          className="w-full max-h-48 object-contain rounded-lg bg-neutral-800"
-        />
-      ) : (
-        <div className="w-full rounded-lg bg-neutral-700 flex items-center justify-center text-neutral-500 text-sm py-8">
-          {T("noImage")}
-        </div>
-      )}
-
-      {/* Info */}
-      <div>
-        <p className="font-semibold text-white truncate">
-          {(() => {
-            // 1) allItems: canonical source for multi-item display
-            if (entry.allItems && entry.allItems.length > 1) {
-              return entry.allItems.map(r => r.itemName).join(", ");
-            }
-            // 2) T1: use YOLO tier1 names sorted left→right by x (legacy)
-            const t1 = entry.tierResults?.tier1?.filter(r => !NOT_WASTE.has(r.itemName));
-            if (t1 && t1.length > 1) {
-              const sorted = [...t1].sort((a, b) =>
-                a.x != null && b.x != null ? a.x - b.x : b.confidence - a.confidence
-              );
-              return sorted.map(r => r.itemName).join(", ");
-            }
-            // 3) T2 siblings: API-classified items from the same frame
-            if (siblingNames && siblingNames.length > 1) {
-              return siblingNames.join(", ");
-            }
-            // 4) Single item
-            return entry.itemName;
-          })()}
-        </p>
-        <p className="text-xs text-neutral-500 mt-0.5">{date}</p>
-      </div>
-
-      {/* Prediction details */}
-      <div className="flex flex-wrap items-center gap-2 text-sm">
-        <StreamPill stream={entry.wasteStream} />
-        <span className="text-neutral-600 text-xs">
-          {Math.round(entry.confidence * 100)}%
-        </span>
-      </div>
-
-      {/* Model & sharpness metadata */}
-      <div className="flex items-center gap-3 text-xs text-neutral-500">
-        <span className="bg-neutral-800 px-2 py-0.5 rounded">{modelLabel}</span>
-        {sharpness !== undefined && (
-          <span className="bg-neutral-800 px-2 py-0.5 rounded">
-            {locale === "ja" ? "鮮明度" : "sharpness"}: {Math.round(sharpness)}
-          </span>
-        )}
-      </div>
-
-      {/* Blob vs YOLO detection count — diagnostic for multi-item issues */}
-      {entry.blobCount != null && entry.yoloDetectionCount != null && (
-        <div className="flex items-center gap-1.5 text-[11px]">
-          <span className={`bg-neutral-800/80 px-1.5 py-0.5 rounded ${entry.blobCount > entry.yoloDetectionCount ? "text-amber-400" : "text-neutral-400"}`}>
-            blobs: {entry.blobCount} → yolo: {entry.yoloDetectionCount}
-          </span>
-        </div>
-      )}
-
-      {/* Tier 1 results (YOLO detections) */}
-      {(() => {
-        // Use tierResults if available; fallback to yoloDetections for older entries
-        // Show top 3, sorted by confidence descending
-        const top3 = (arr?: { itemName: string; confidence: number }[]) =>
-          arr?.filter(r => !NOT_WASTE.has(r.itemName)).sort((a, b) => b.confidence - a.confidence).slice(0, 3);
-        const rawT1 = entry.tierResults?.tier1
-          ?? (entry.modelUsed !== "T1" && entry.yoloDetections?.length
-            ? entry.yoloDetections.map(d => ({ itemName: d.className, confidence: d.confidence }))
-            : undefined);
-        const t1 = top3(rawT1);
-        const hasTierData = entry.tierResults !== undefined || rawT1 !== undefined;
-        if (!hasTierData) return null;
-        const t1RanNoWaste = rawT1 && rawT1.length > 0 && (!t1 || t1.length === 0);
-        return (
-          <div className="flex items-center gap-1.5 flex-wrap text-[11px]">
-            <span className="text-neutral-600 font-medium shrink-0">YOLO:</span>
-            {t1 && t1.length > 0 ? t1.map((r, i) => (
-              <span key={i} className="bg-neutral-800/80 text-neutral-400 px-1.5 py-0.5 rounded">
-                {r.itemName} <span className="text-neutral-600">{Math.round(r.confidence * 100)}%</span>
-              </span>
-            )) : (
-              <span className="text-neutral-700 italic">
-                {t1RanNoWaste ? "non-waste only" : "no detections"}
-              </span>
-            )}
-          </div>
-        );
-      })()}
-
-      {/* Verdict badge */}
-      {verdictBadge && (
-        <p className={`text-xs font-medium ${verdictBadge.color}`}>
-          {verdictBadge.text}
-        </p>
-      )}
-
-      {/* Verdict buttons — simple 3-way toggle */}
-      <div className="flex gap-2 mt-1">
-        <button
-          onClick={() => entry.requestId && onVerdict(entry.requestId, "correct")}
-          disabled={saving || !entry.requestId}
-          className={`flex-1 py-2 rounded-lg text-xs font-medium transition-all ${
-            entry.verdict === "correct"
-              ? "bg-emerald-700 text-white ring-2 ring-emerald-400"
-              : "bg-neutral-800/60 hover:bg-emerald-800 text-neutral-300"
-          } disabled:opacity-40`}
-        >
-          ✓ {T("markCorrect")}
-        </button>
-        <button
-          onClick={() => entry.requestId && onVerdict(entry.requestId, "wrong")}
-          disabled={saving || !entry.requestId}
-          className={`flex-1 py-2 rounded-lg text-xs font-medium transition-all ${
-            entry.verdict === "wrong"
-              ? "bg-red-700 text-white ring-2 ring-red-400"
-              : "bg-neutral-800/60 hover:bg-red-800 text-neutral-300"
-          } disabled:opacity-40`}
-        >
-          ✗ {T("markWrong")}
-        </button>
-        <button
-          onClick={() => entry.requestId && onVerdict(entry.requestId, "false_detection")}
-          disabled={saving || !entry.requestId}
-          className={`flex-1 py-2 rounded-lg text-xs font-medium transition-all ${
-            entry.verdict === "false_detection"
-              ? "bg-neutral-600 text-white ring-2 ring-neutral-400"
-              : "bg-neutral-800/60 hover:bg-neutral-700 text-neutral-400"
-          } disabled:opacity-40`}
-        >
-          ∅ {T("falseDetection")}
-        </button>
-      </div>
-
-      {/* Delete button */}
-      {entry.requestId && (
-        confirmingDelete ? (
-          <div className="flex items-center gap-2 mt-1">
-            <span className="text-xs text-red-400">{T("confirmDelete")}</span>
-            <button
-              onClick={() => { onDelete(entry.requestId!); setConfirmingDelete(false); }}
-              disabled={saving}
-              className="px-3 py-1 rounded-lg text-xs font-medium bg-red-700 hover:bg-red-600 text-white disabled:opacity-40"
-            >
-              {T("deleteEntry")}
-            </button>
-            <button
-              onClick={() => setConfirmingDelete(false)}
-              className="px-3 py-1 rounded-lg text-xs font-medium bg-neutral-800 hover:bg-neutral-700 text-neutral-400"
-            >
-              {T("cancel")}
-            </button>
-          </div>
-        ) : (
-          <button
-            onClick={() => setConfirmingDelete(true)}
-            disabled={saving}
-            className="self-end text-[11px] text-neutral-600 hover:text-red-400 transition-colors disabled:opacity-40"
-          >
-            {T("deleteEntry")}
-          </button>
-        )
-      )}
-    </div>
-  );
-}
-
-// ── Analysis Export Panel ──
-
-type AnalysisVerdict = "correct" | "wrong" | "false_detection" | "unreviewed";
-type AnalysisModel = "T1" | "t2" | "vlm";
-
-function AnalysisExportPanel({
-  locale,
-  availableStreams,
-}: {
-  locale: Locale;
-  /** Stream ids that actually occur in the loaded entries — the filter must
-   *  offer real values, not a hardcoded US-style list that may not exist. */
-  availableStreams: string[];
-}) {
-  const [open, setOpen] = useState(false);
-  const [downloading, setDownloading] = useState(false);
-  const ja = locale === "ja";
-
-  // Filters
-  const [verdicts, setVerdicts] = useState<Set<AnalysisVerdict>>(new Set());
-  const [models, setModels] = useState<Set<AnalysisModel>>(new Set());
-  const [confidenceMin, setConfidenceMin] = useState("");
-  const [confidenceMax, setConfidenceMax] = useState("");
-  const [fromDate, setFromDate] = useState("");
-  const [toDate, setToDate] = useState("");
-  const [item, setItem] = useState("");
-  const [stream, setStream] = useState("");
-  const [format, setFormat] = useState<"json" | "csv">("json");
-
-  const toggleSet = <T,>(set: Set<T>, value: T): Set<T> => {
-    const next = new Set(set);
-    if (next.has(value)) next.delete(value); else next.add(value);
-    return next;
-  };
-
-  const buildUrl = (): string => {
-    const params = new URLSearchParams();
-    if (verdicts.size > 0) params.set("verdict", [...verdicts].join(","));
-    if (models.size > 0) params.set("model", [...models].join(","));
-    if (confidenceMin) params.set("confidence_min", confidenceMin);
-    if (confidenceMax) params.set("confidence_max", confidenceMax);
-    if (fromDate) params.set("from", fromDate);
-    if (toDate) params.set("to", toDate);
-    if (item.trim()) params.set("item", item.trim());
-    if (stream) params.set("stream", stream);
-    params.set("format", format);
-    return `/api/review/export/analysis?${params.toString()}`;
-  };
-
-  const handleDownload = async () => {
-    setDownloading(true);
-    try {
-      const res = await fetch(buildUrl());
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        alert((err as { error?: string }).error ?? `Export failed: ${res.status}`);
-        return;
-      }
-
-      if (format === "csv") {
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `analysis-${new Date().toISOString().slice(0, 10)}.csv`;
-        a.click();
-        URL.revokeObjectURL(url);
-      } else {
-        const blob = new Blob([JSON.stringify(await res.json(), null, 2)], { type: "application/json" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `analysis-${new Date().toISOString().slice(0, 10)}.json`;
-        a.click();
-        URL.revokeObjectURL(url);
-      }
-    } catch {
-      alert(ja ? "エクスポートに失敗しました" : "Export failed");
-    } finally {
-      setDownloading(false);
-    }
-  };
-
-  const verdictOptions: { value: AnalysisVerdict; label: string; color: string }[] = [
-    { value: "correct", label: ja ? "正解" : "Correct", color: "bg-emerald-800 text-emerald-200" },
-    { value: "wrong", label: ja ? "不正解" : "Wrong", color: "bg-red-800 text-red-200" },
-    { value: "false_detection", label: ja ? "誤検出" : "False", color: "bg-neutral-700 text-neutral-300" },
-    { value: "unreviewed", label: ja ? "未レビュー" : "Unreviewed", color: "bg-amber-800 text-amber-200" },
-  ];
-
-  const modelOptions: { value: AnalysisModel; label: string }[] = [
-    { value: "T1", label: "YOLO" },
-    { value: "vlm", label: "VLM" },
-    { value: "t2", label: "GPT mini" },
-  ];
-
-  const streamOptions = availableStreams.length > 0
-    ? availableStreams
-    : ["recycling", "compost", "landfill", "special", "needs_review"];
-
-  return (
-    <div className="mb-6">
-      <button
-        onClick={() => setOpen((v) => !v)}
-        className="text-xs text-neutral-500 hover:text-cyan-400 transition-colors"
-      >
-        {open
-          ? (ja ? "▲ 分析エクスポートを閉じる" : "▲ Close analysis export")
-          : (ja ? "▼ 分析データエクスポート..." : "▼ Analysis export...")}
-      </button>
-
-      {open && (
-        <div className="mt-3 bg-neutral-900 border border-neutral-800 rounded-xl p-4 flex flex-col gap-4 max-w-2xl">
-          {/* Verdict filter */}
-          <div>
-            <label className="text-xs text-neutral-400 block mb-1.5">{ja ? "判定結果" : "Verdict"}</label>
-            <div className="flex flex-wrap gap-1.5">
-              {verdictOptions.map((v) => (
-                <button
-                  key={v.value}
-                  onClick={() => setVerdicts(toggleSet(verdicts, v.value))}
-                  className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all ${
-                    verdicts.has(v.value)
-                      ? `${v.color} ring-1 ring-white/30`
-                      : "bg-neutral-800 text-neutral-500 hover:bg-neutral-700"
-                  }`}
-                >
-                  {v.label}
-                </button>
-              ))}
-              {verdicts.size > 0 && (
-                <button onClick={() => setVerdicts(new Set())} className="text-[10px] text-neutral-600 hover:text-neutral-400 ml-1">
-                  {ja ? "クリア" : "clear"}
-                </button>
-              )}
             </div>
-          </div>
+          ) : (
+            <div className="space-y-4">
+              {/* Progress */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between text-xs text-neutral-400">
+                  <span>
+                    {T("rvProgress")} {cursor + 1} / {queueIds.length}
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => rebuildQueue(queueMode === "unreviewed" ? "all" : "unreviewed")}
+                      className="px-2 py-1 rounded bg-neutral-800 hover:bg-neutral-700 text-neutral-300"
+                    >
+                      {queueMode === "unreviewed" ? T("rvShowAll") : T("rvUnreviewedOnly")}
+                    </button>
+                    <span>
+                      {T("rvRemaining")} {Math.max(0, queueIds.length - cursor - 1)}
+                    </span>
+                  </div>
+                </div>
+                <Bar value={progress} tone="bg-white" />
+              </div>
 
-          {/* Model filter */}
-          <div>
-            <label className="text-xs text-neutral-400 block mb-1.5">{ja ? "モデル" : "Model"}</label>
-            <div className="flex flex-wrap gap-1.5">
-              {modelOptions.map((m) => (
-                <button
-                  key={m.value}
-                  onClick={() => setModels(toggleSet(models, m.value))}
-                  className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all ${
-                    models.has(m.value)
-                      ? "bg-blue-800 text-blue-200 ring-1 ring-white/30"
-                      : "bg-neutral-800 text-neutral-500 hover:bg-neutral-700"
-                  }`}
-                >
-                  {m.label}
-                </button>
-              ))}
-              {models.size > 0 && (
-                <button onClick={() => setModels(new Set())} className="text-[10px] text-neutral-600 hover:text-neutral-400 ml-1">
-                  {ja ? "クリア" : "clear"}
-                </button>
-              )}
-            </div>
-          </div>
+              <div className="grid lg:grid-cols-[1.1fr_1fr] gap-5 items-start">
+                <BoxedImage entry={current} showBoxes={showBoxes} T={T} />
 
-          {/* Confidence range + date range row */}
-          <div className="flex flex-wrap gap-4">
-            <div>
-              <label className="text-xs text-neutral-400 block mb-1.5">{ja ? "確信度の範囲" : "Confidence range"}</label>
-              <div className="flex items-center gap-1.5">
-                <input
-                  type="number" step="0.05" min="0" max="1" placeholder="0"
-                  value={confidenceMin} onChange={(e) => setConfidenceMin(e.target.value)}
-                  className="w-16 bg-neutral-800 text-white text-xs rounded-lg px-2 py-1.5 border border-neutral-700 focus:outline-none focus:border-neutral-500"
-                />
-                <span className="text-neutral-600 text-xs">–</span>
-                <input
-                  type="number" step="0.05" min="0" max="1" placeholder="1"
-                  value={confidenceMax} onChange={(e) => setConfidenceMax(e.target.value)}
-                  className="w-16 bg-neutral-800 text-white text-xs rounded-lg px-2 py-1.5 border border-neutral-700 focus:outline-none focus:border-neutral-500"
-                />
+                <div className="space-y-4">
+                  {/* Prediction */}
+                  <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-4 space-y-3">
+                    <p className="text-[11px] uppercase tracking-wide text-neutral-500">
+                      {T("rvPredicted")}
+                    </p>
+                    <p className="text-2xl font-semibold">{current.itemName}</p>
+                    <div className="grid grid-cols-2 gap-y-2 gap-x-4 text-sm">
+                      <span className="text-neutral-500">{T("rvBinLabel")}</span>
+                      <span>{current.wasteStream}</span>
+                      <span className="text-neutral-500">{T("rvConfidenceLabel")}</span>
+                      <span className="tabular-nums">
+                        {Math.round(current.confidence * 100)}%
+                      </span>
+                      <span className="text-neutral-500">{T("rvDecidedBy")}</span>
+                      <span>{modelLabel(current.modelUsed)}</span>
+                      <span className="text-neutral-500">{T("rvLatencyLabel")}</span>
+                      <span className="tabular-nums">{current.latencyMs} ms</span>
+                      <span className="text-neutral-500">{T("rvTimeLabel")}</span>
+                      <span className="tabular-nums text-neutral-400">
+                        {new Date(current.timestamp).toLocaleString(locale === "ja" ? "ja-JP" : "en-US")}
+                      </span>
+                    </div>
+                    {current.verdict ? (
+                      <p className="text-xs text-neutral-400 pt-1 border-t border-neutral-800">
+                        {T("rvJudgedBadge")}:{" "}
+                        <span
+                          className={
+                            current.verdict === "correct"
+                              ? "text-emerald-400"
+                              : current.verdict === "wrong"
+                                ? "text-rose-400"
+                                : "text-neutral-300"
+                          }
+                        >
+                          {current.verdict === "correct"
+                            ? T("rvCorrect")
+                            : current.verdict === "wrong"
+                              ? T("rvWrong")
+                              : T("rvFalseDetection")}
+                        </span>
+                      </p>
+                    ) : null}
+                  </div>
+
+                  {/* Verdict buttons */}
+                  <div className="grid grid-cols-3 gap-2">
+                    <button
+                      onClick={() => judgeAndAdvance("correct")}
+                      className="rounded-xl bg-emerald-600 hover:bg-emerald-500 px-3 py-4 font-semibold transition-colors"
+                    >
+                      {T("rvCorrect")}
+                      <span className="block text-[11px] font-normal opacity-70 mt-0.5">1</span>
+                    </button>
+                    <button
+                      onClick={() => judgeAndAdvance("wrong")}
+                      className="rounded-xl bg-rose-600 hover:bg-rose-500 px-3 py-4 font-semibold transition-colors"
+                    >
+                      {T("rvWrong")}
+                      <span className="block text-[11px] font-normal opacity-70 mt-0.5">2</span>
+                    </button>
+                    <button
+                      onClick={() => judgeAndAdvance("false_detection")}
+                      className="rounded-xl bg-neutral-700 hover:bg-neutral-600 px-3 py-4 font-semibold transition-colors"
+                    >
+                      {T("rvFalseDetection")}
+                      <span className="block text-[11px] font-normal opacity-70 mt-0.5">3</span>
+                    </button>
+                  </div>
+
+                  <div className="flex items-center gap-2 flex-wrap text-sm">
+                    <button
+                      onClick={goPrev}
+                      disabled={cursor === 0}
+                      className="px-3 py-2 rounded-lg bg-neutral-800 hover:bg-neutral-700 disabled:opacity-40 transition-colors"
+                    >
+                      ← {T("rvPrev")}
+                    </button>
+                    <button
+                      onClick={goNext}
+                      className="px-3 py-2 rounded-lg bg-neutral-800 hover:bg-neutral-700 transition-colors"
+                    >
+                      {T("rvSkip")} →
+                    </button>
+                    <button
+                      onClick={() => setShowBoxes((v) => !v)}
+                      className={`px-3 py-2 rounded-lg transition-colors ${
+                        showBoxes
+                          ? "bg-amber-500/20 text-amber-300"
+                          : "bg-neutral-800 text-neutral-400 hover:bg-neutral-700"
+                      }`}
+                    >
+                      {showBoxes ? "☑" : "☐"} Box
+                    </button>
+                    <button
+                      onClick={() => current.requestId && removeEntry(current.requestId)}
+                      className="px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-800 text-neutral-500 hover:text-rose-300 hover:border-rose-900 ml-auto transition-colors"
+                    >
+                      {T("rvDelete")}
+                    </button>
+                  </div>
+
+                  <div className="rounded-lg bg-neutral-900/60 border border-neutral-800 px-3 py-2 text-[11px] text-neutral-500">
+                    <span className="text-neutral-400">{T("rvKeyboardHint")}: </span>
+                    1 {T("rvCorrect")} · 2 {T("rvWrong")} · 3 {T("rvFalseDetection")} · Space{" "}
+                    {T("rvSkip")} · ← {T("rvPrev")} · B Box
+                  </div>
+                </div>
               </div>
             </div>
+          )
+        ) : null}
 
-            <div>
-              <label className="text-xs text-neutral-400 block mb-1.5">{ja ? "期間" : "Date range"}</label>
-              <div className="flex items-center gap-1.5">
-                <input
-                  type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)}
-                  className="bg-neutral-800 text-white text-xs rounded-lg px-2 py-1.5 border border-neutral-700 focus:outline-none focus:border-neutral-500"
-                />
-                <span className="text-neutral-600 text-xs">–</span>
-                <input
-                  type="date" value={toDate} onChange={(e) => setToDate(e.target.value)}
-                  className="bg-neutral-800 text-white text-xs rounded-lg px-2 py-1.5 border border-neutral-700 focus:outline-none focus:border-neutral-500"
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* Item + stream row */}
-          <div className="flex flex-wrap gap-4">
-            <div>
-              <label className="text-xs text-neutral-400 block mb-1.5">{ja ? "アイテム名" : "Item name"}</label>
-              <input
-                type="text" placeholder={ja ? "部分一致..." : "substring..."}
-                value={item} onChange={(e) => setItem(e.target.value)}
-                className="w-40 bg-neutral-800 text-white text-xs rounded-lg px-2 py-1.5 border border-neutral-700 focus:outline-none focus:border-neutral-500"
-              />
-            </div>
-            <div>
-              <label className="text-xs text-neutral-400 block mb-1.5">{ja ? "ゴミの種類" : "Waste stream"}</label>
+        {/* ── GRID ── */}
+        {tab === "grid" ? (
+          <div className="space-y-4">
+            <div className="flex gap-2 flex-wrap items-center">
+              {(
+                [
+                  ["all", T("rvFilterAll")],
+                  ["pending", T("rvUnreviewed")],
+                  ["correct", T("rvCorrect")],
+                  ["wrong", T("rvWrong")],
+                  ["false_detection", T("rvFalseDetection")],
+                ] as ["all" | "pending" | Verdict, string][]
+              ).map(([id, label]) => (
+                <button
+                  key={id}
+                  onClick={() => setStatusFilter(id)}
+                  className={`px-3 py-1.5 rounded-lg text-xs transition-colors ${
+                    statusFilter === id
+                      ? "bg-white text-neutral-900 font-medium"
+                      : "bg-neutral-800 text-neutral-300 hover:bg-neutral-700"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
               <select
-                value={stream} onChange={(e) => setStream(e.target.value)}
-                className="bg-neutral-800 text-white text-xs rounded-lg px-2 py-1.5 border border-neutral-700 focus:outline-none focus:border-neutral-500"
+                value={modelFilter}
+                onChange={(e) => setModelFilter(e.target.value)}
+                className="px-3 py-1.5 rounded-lg bg-neutral-800 text-xs text-neutral-300 border border-neutral-700"
               >
-                <option value="">{ja ? "すべて" : "All"}</option>
-                {streamOptions.map((s) => (
-                  <option key={s} value={s}>{s}</option>
-                ))}
+                <option value="">{T("rvDecidedBy")}: {T("rvFilterAll")}</option>
+                <option value="T1">{T("rvModelT1")}</option>
+                <option value="vlm">{T("rvModelVlm")}</option>
+                <option value="t2">{T("rvModelT2")}</option>
               </select>
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder={T("rvSearchPlaceholder")}
+                className="px-3 py-1.5 rounded-lg bg-neutral-800 text-xs border border-neutral-700 placeholder:text-neutral-600 flex-1 min-w-40"
+              />
             </div>
-          </div>
 
-          {/* Format + download */}
-          <div className="flex items-end gap-3 flex-wrap">
-            <div>
-              <label className="text-xs text-neutral-400 block mb-1.5">{ja ? "形式" : "Format"}</label>
-              <div className="flex gap-1.5">
-                {(["json", "csv"] as const).map((f) => (
+            {gridEntries.length === 0 ? (
+              <p className="text-center text-sm text-neutral-500 py-16">{T("rvNoMatch")}</p>
+            ) : (
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+                {gridEntries.map((e) => (
                   <button
-                    key={f}
-                    onClick={() => setFormat(f)}
-                    className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
-                      format === f ? "bg-cyan-800 text-cyan-200" : "bg-neutral-800 text-neutral-500 hover:bg-neutral-700"
-                    }`}
+                    key={e.requestId ?? e.timestamp}
+                    onClick={() => {
+                      if (!e.requestId) return;
+                      const idx = queueIds.indexOf(e.requestId);
+                      if (idx >= 0) {
+                        cursorRef.current = idx;
+                        setCursor(idx);
+                      } else {
+                        queueIdsRef.current = [e.requestId];
+                        cursorRef.current = 0;
+                        setQueueIds([e.requestId]);
+                        setCursor(0);
+                      }
+                      setTab("triage");
+                    }}
+                    className="text-left rounded-xl overflow-hidden bg-neutral-900 border border-neutral-800 hover:border-neutral-600 transition-colors group"
                   >
-                    {f.toUpperCase()}
+                    <div className="aspect-square bg-black relative">
+                      {e.imageUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={`/api/pilot-image?url=${encodeURIComponent(e.imageUrl)}`}
+                          alt={e.itemName}
+                          className="w-full h-full object-cover"
+                          loading="lazy"
+                        />
+                      ) : (
+                        <div className="w-full h-full grid place-items-center text-[11px] text-neutral-600">
+                          {T("noImage")}
+                        </div>
+                      )}
+                      <span
+                        className={`absolute top-1.5 right-1.5 px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                          e.verdict === "correct"
+                            ? "bg-emerald-500 text-black"
+                            : e.verdict === "wrong"
+                              ? "bg-rose-500 text-white"
+                              : e.verdict === "false_detection"
+                                ? "bg-neutral-500 text-white"
+                                : "bg-amber-400 text-black"
+                        }`}
+                      >
+                        {e.verdict === "correct"
+                          ? T("rvCorrect")
+                          : e.verdict === "wrong"
+                            ? T("rvWrong")
+                            : e.verdict === "false_detection"
+                              ? T("rvFalseDetection")
+                              : T("rvUnreviewed")}
+                      </span>
+                    </div>
+                    <div className="px-2.5 py-2">
+                      <p className="text-sm truncate group-hover:text-white">{e.itemName}</p>
+                      <p className="text-[11px] text-neutral-500 tabular-nums">
+                        {Math.round(e.confidence * 100)}% · {modelLabel(e.modelUsed)}
+                      </p>
+                    </div>
                   </button>
                 ))}
               </div>
-            </div>
-            <button
-              onClick={handleDownload}
-              disabled={downloading}
-              className="px-5 py-1.5 rounded-lg text-xs font-medium bg-cyan-700 hover:bg-cyan-600 text-white transition-colors disabled:opacity-50"
-            >
-              {downloading
-                ? (ja ? "ダウンロード中..." : "Downloading...")
-                : (ja ? "ダウンロード" : "Download")}
-            </button>
+            )}
           </div>
-        </div>
-      )}
-    </div>
-  );
-}
+        ) : null}
 
-// ── Bulk Delete Panel ──
+        {/* ── STATS ── */}
+        {tab === "stats" ? (
+          <div className="space-y-5">
+            {/* Export */}
+            <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-4 flex items-center justify-between gap-4 flex-wrap">
+              <div>
+                <p className="font-medium">{T("rvExportTitle")}</p>
+                <p className="text-sm text-neutral-400 mt-0.5 max-w-lg">{T("rvExportDesc")}</p>
+                <p className="text-sm text-neutral-300 mt-2">
+                  {T("rvExportable")}:{" "}
+                  <span className="font-semibold tabular-nums">{stats.exportable}</span>
+                </p>
+              </div>
+              <button
+                onClick={downloadZip}
+                disabled={exporting || stats.exportable === 0}
+                className="px-4 py-2.5 rounded-lg bg-white text-neutral-900 font-medium text-sm hover:bg-neutral-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                {exporting ? T("rvExporting") : T("rvExportBtn")}
+              </button>
+            </div>
 
-type BulkMode = "before" | "date" | "all";
+            {/* By model */}
+            <section className="rounded-xl border border-neutral-800 bg-neutral-900 p-4">
+              <h2 className="font-medium mb-3">{T("rvByModel")}</h2>
+              <div className="space-y-3">
+                {byModel.map((r) => (
+                  <div key={r.id} className="space-y-1">
+                    <div className="flex justify-between text-sm">
+                      <span>{r.label}</span>
+                      <span className="text-neutral-400 tabular-nums">
+                        {r.total} {T("rvCountLabel")} ·{" "}
+                        <span className={accuracyColor(r.acc)}>
+                          {r.acc === null ? "—" : `${Math.round(r.acc * 100)}%`}
+                        </span>
+                      </span>
+                    </div>
+                    <Bar
+                      value={r.total / Math.max(1, stats.total)}
+                      tone="bg-neutral-600"
+                    />
+                  </div>
+                ))}
+              </div>
+            </section>
 
-function BulkDeletePanel({
-  onDelete,
-  locale,
-}: {
-  onDelete: (params: URLSearchParams) => Promise<number>;
-  locale: Locale;
-}) {
-  const [open, setOpen] = useState(false);
-  const [mode, setMode] = useState<BulkMode>("before");
-  const [beforeDate, setBeforeDate] = useState("");
-  const [targetDate, setTargetDate] = useState("");
-  const [confirming, setConfirming] = useState(false);
-  const [deleting, setDeleting] = useState(false);
-  const [lastResult, setLastResult] = useState<number | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const ja = locale === "ja";
+            {/* By confidence — is the model's certainty trustworthy? */}
+            <section className="rounded-xl border border-neutral-800 bg-neutral-900 p-4">
+              <h2 className="font-medium mb-3">{T("rvByConfidence")}</h2>
+              <div className="space-y-2.5">
+                {byConfidence.map((r) => (
+                  <div key={r.label} className="flex items-center gap-3 text-sm">
+                    <span className="w-20 text-neutral-400 tabular-nums shrink-0">{r.label}</span>
+                    <div className="flex-1">
+                      <Bar
+                        value={r.acc ?? 0}
+                        tone={
+                          r.acc === null
+                            ? "bg-neutral-800"
+                            : r.acc >= 0.8
+                              ? "bg-emerald-500"
+                              : r.acc >= 0.5
+                                ? "bg-amber-500"
+                                : "bg-rose-500"
+                        }
+                      />
+                    </div>
+                    <span className={`w-12 text-right tabular-nums ${accuracyColor(r.acc)}`}>
+                      {r.acc === null ? "—" : `${Math.round(r.acc * 100)}%`}
+                    </span>
+                    <span className="w-16 text-right text-neutral-600 tabular-nums text-xs">
+                      {r.judged}/{r.total}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </section>
 
-  const buildParams = (): URLSearchParams | null => {
-    const p = new URLSearchParams();
-    if (mode === "all") {
-      p.set("all", "true");
-    } else if (mode === "before") {
-      if (!beforeDate) return null;
-      // Use local timezone so the selected date matches user's day boundary
-      p.set("before", new Date(`${beforeDate}T23:59:59.999`).toISOString());
-    } else {
-      // date mode: delete all entries from the selected day (local timezone)
-      if (!targetDate) return null;
-      p.set("from", new Date(`${targetDate}T00:00:00.000`).toISOString());
-      p.set("to", new Date(`${targetDate}T23:59:59.999`).toISOString());
-    }
-    return p;
-  };
-
-  const handleConfirm = async () => {
-    const params = buildParams();
-    if (!params) return;
-    setDeleting(true);
-    setError(null);
-    try {
-      const count = await onDelete(params);
-      setLastResult(count);
-      setConfirming(false);
-      setOpen(false);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Delete failed");
-    } finally {
-      setDeleting(false);
-    }
-  };
-
-  const canProceed =
-    mode === "all" ||
-    (mode === "before" && !!beforeDate) ||
-    (mode === "date" && !!targetDate);
-
-  return (
-    <div className="mb-6">
-      <div className="flex items-center gap-3">
-        <button
-          onClick={() => { setOpen((v) => !v); setConfirming(false); setError(null); setLastResult(null); }}
-          className="text-xs text-neutral-500 hover:text-red-400 transition-colors"
-        >
-          {open ? (ja ? "▲ 一括削除を閉じる" : "▲ Close bulk delete") : (ja ? "▼ 一括削除..." : "▼ Bulk delete...")}
-        </button>
-        {lastResult !== null && (
-          <span className="text-xs text-emerald-400">
-            {ja ? `${lastResult} 件削除しました` : `${lastResult} entries deleted`}
-          </span>
-        )}
+            {/* By item name — where more training data is needed */}
+            <section className="rounded-xl border border-neutral-800 bg-neutral-900 p-4">
+              <h2 className="font-medium mb-3">{T("rvByClass")}</h2>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-neutral-500 text-xs">
+                      <th className="text-left font-normal pb-2">{T("rvPredicted")}</th>
+                      <th className="text-right font-normal pb-2">{T("rvCountLabel")}</th>
+                      <th className="text-right font-normal pb-2">{T("rvReviewedCount")}</th>
+                      <th className="text-right font-normal pb-2">{T("rvAccuracy")}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {byClass.slice(0, 30).map((r) => (
+                      <tr key={r.name} className="border-t border-neutral-800/70">
+                        <td className="py-1.5 pr-2">
+                          {r.name}
+                          {r.judged === 0 ? (
+                            <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-neutral-800 text-neutral-500">
+                              {T("rvLowData")}
+                            </span>
+                          ) : null}
+                        </td>
+                        <td className="text-right tabular-nums text-neutral-400">{r.total}</td>
+                        <td className="text-right tabular-nums text-neutral-400">{r.judged}</td>
+                        <td className={`text-right tabular-nums ${accuracyColor(r.acc)}`}>
+                          {r.acc === null ? "—" : `${Math.round(r.acc * 100)}%`}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+        ) : null}
       </div>
-
-      {open && (
-        <div className="mt-3 bg-neutral-900 border border-neutral-800 rounded-xl p-4 flex flex-col gap-4 max-w-lg">
-          {/* Mode selector */}
-          <div className="flex gap-2">
-            {(["before", "date", "all"] as BulkMode[]).map((m) => (
-              <button
-                key={m}
-                onClick={() => { setMode(m); setConfirming(false); }}
-                className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors ${
-                  mode === m ? "bg-neutral-700 text-white" : "bg-neutral-800 text-neutral-400 hover:bg-neutral-700"
-                }`}
-              >
-                {m === "before" ? (ja ? "日付より前" : "Before date")
-                  : m === "date" ? (ja ? "日付を指定" : "Specific date")
-                  : (ja ? "すべて" : "All")}
-              </button>
-            ))}
-          </div>
-
-          {/* Inputs */}
-          {mode === "before" && (
-            <div className="flex items-center gap-2">
-              <label className="text-xs text-neutral-400 whitespace-nowrap">
-                {ja ? "この日付より前:" : "Before:"}
-              </label>
-              <input
-                type="date"
-                value={beforeDate}
-                onChange={(e) => { setBeforeDate(e.target.value); setConfirming(false); }}
-                className="bg-neutral-800 text-white text-xs rounded-lg px-3 py-1.5 border border-neutral-700 focus:outline-none focus:border-neutral-500"
-              />
-            </div>
-          )}
-
-          {mode === "date" && (
-            <div className="flex items-center gap-2">
-              <label className="text-xs text-neutral-400 whitespace-nowrap">
-                {ja ? "削除する日付:" : "Date:"}
-              </label>
-              <input
-                type="date"
-                value={targetDate}
-                onChange={(e) => { setTargetDate(e.target.value); setConfirming(false); }}
-                className="bg-neutral-800 text-white text-xs rounded-lg px-3 py-1.5 border border-neutral-700 focus:outline-none focus:border-neutral-500"
-              />
-            </div>
-          )}
-
-          {mode === "all" && (
-            <p className="text-xs text-red-400">
-              {ja ? "ログに記録されたすべてのエントリを削除します。" : "This will delete every entry in the log."}
-            </p>
-          )}
-
-          {error && <p className="text-xs text-red-400">{error}</p>}
-
-          {/* Action */}
-          {!confirming ? (
-            <button
-              onClick={() => setConfirming(true)}
-              disabled={!canProceed}
-              className="self-start px-4 py-1.5 rounded-lg text-xs font-medium bg-red-900 hover:bg-red-800 text-red-300 transition-colors disabled:opacity-40"
-            >
-              {ja ? "削除する..." : "Delete..."}
-            </button>
-          ) : (
-            <div className="flex items-center gap-3">
-              <span className="text-xs text-red-400 font-medium">
-                {ja ? "本当に削除しますか？" : "Are you sure?"}
-              </span>
-              <button
-                onClick={handleConfirm}
-                disabled={deleting}
-                className="px-3 py-1 rounded-lg text-xs font-medium bg-red-700 hover:bg-red-600 text-white disabled:opacity-40"
-              >
-                {deleting ? (ja ? "削除中..." : "Deleting...") : (ja ? "はい、削除" : "Yes, delete")}
-              </button>
-              <button
-                onClick={() => setConfirming(false)}
-                className="px-3 py-1 rounded-lg text-xs font-medium bg-neutral-800 hover:bg-neutral-700 text-neutral-400"
-              >
-                {ja ? "キャンセル" : "Cancel"}
-              </button>
-            </div>
-          )}
-        </div>
-      )}
     </div>
-  );
-}
-
-function StreamPill({ stream }: { stream: string }) {
-  const colorMap: Record<string, string> = {
-    recycling: "bg-blue-600",
-    compost: "bg-green-600",
-    landfill: "bg-neutral-600",
-    special: "bg-orange-600",
-    needs_review: "bg-purple-600",
-    // Japan-style streams (japan-office / pilot presets)
-    burnable: "bg-red-600",
-    recyclable: "bg-blue-600",
-    plastic: "bg-amber-600",
-    "non-burnable": "bg-gray-600",
-  };
-  return (
-    <span className={`${colorMap[stream] ?? "bg-neutral-600"} text-white text-[10px] font-bold uppercase px-2 py-0.5 rounded-md`}>
-      {stream}
-    </span>
   );
 }

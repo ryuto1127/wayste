@@ -1645,16 +1645,16 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
         // NAMED scenery too: a teddy bear on a shelf or a poster is a real
         // COCO class, so the unknown net's zones never covered it — a small
         // camera shake later re-detects it and a needs_review card pops on
-        // furniture. Anything visible during the baseline that would NOT
-        // resolve instantly (unmapped class or sub-resolve confidence) is
-        // scenery; remember its region and refuse needs_review cards there.
-        // Instant-resolving classes (a bottle already on the desk) are left
-        // alone — parked-suppression owns that case.
+        // furniture. Only UNMAPPED classes qualify as scenery. Judging by
+        // momentary confidence here silenced the demo itself: a bottle
+        // presented during the baseline window catches one blurry
+        // sub-resolve frame, its spot is remembered as a "bottle" zone, and
+        // every later presentation there starves to nothing within a coast
+        // (~2s) — permanently, until a camera move clears the zones.
+        // Rule-mapped classes are answered or parked-suppressed, never
+        // zoned; a bottle already on the desk at start is parked's case.
         for (const d of confidentDetections) {
-          if (
-            d.confidence < th.TRACK_RESOLVE_THRESHOLD ||
-            !resolveYoloDetection(d, siteConfigRef.current!, localeRef.current)
-          ) {
+          if (!resolveYoloDetection(d, siteConfigRef.current!, localeRef.current)) {
             addBackgroundZone(d.bbox as Bbox, d.className);
           }
         }
@@ -1684,14 +1684,23 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
       // restart) sits still indefinitely — a presented item never does.
       // Zone it; the detection filter above then silences it for good.
       // Applies to NAMED tracks too (the shelf teddy bear is a real COCO
-      // class), but only while they can't resolve to a bin: an item that
-      // firmly resolves is answered, and parked-suppression owns the
-      // "left on the counter" case.
+      // class), but ONLY for classes with no rule mapping. The class is the
+      // gate, not momentary confidence: a bottle set down on the table sits
+      // <3px still and its EMA can sag below the resolve bar — zoning that
+      // spot kills the very item being demoed. Rule-mapped classes stay
+      // live cards until they leave; "left on the counter" belongs to
+      // parked-suppression (30s), which is reversible.
       for (const t of tracks) {
         if (
           now - t.firstSeenAt >= UNKNOWN_STATIC_TO_ZONE_MS &&
           t.travelEma <= SCENERY_MAX_TRAVEL_PX &&
-          t.confidence < th.TRACK_RESOLVE_THRESHOLD
+          t.confidence < th.TRACK_RESOLVE_THRESHOLD &&
+          (t.classId === UNKNOWN_OBJECT_CLASS_ID ||
+            !resolveYoloDetection(
+              { classId: t.classId, className: t.className, confidence: t.confidence, bbox: [...t.bbox] },
+              siteConfigRef.current!,
+              localeRef.current,
+            ))
         ) {
           console.log(`[continuous] static track ${t.id} (${t.className}) → scenery`);
           addBackgroundZone(

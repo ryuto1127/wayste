@@ -2809,6 +2809,43 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           />
         ) : (
           <div className="absolute inset-0 z-10 select-none">
+            {/* Pre-flight operator switches — the same two the running demo
+                panel carries, available BEFORE the loop starts so the first
+                pass never runs under a configuration the operator was about
+                to change (and no VLM judgment is queued before they decide).
+                Annotation mode only: the production kiosk face still shows
+                end users no settings. */}
+            {showOverlay && (
+              <div className="absolute top-5 left-5 flex items-center gap-3 bg-neutral-900/80 backdrop-blur-md rounded-xl px-4 py-2 text-xs font-mono text-neutral-300">
+                <button
+                  type="button"
+                  onClick={handleToggleUnknownNet}
+                  className={`rounded-md px-2.5 py-1 font-sans active:scale-95 transition focus-visible:outline-2 focus-visible:outline-emerald-400 ${
+                    unknownNetOn
+                      ? "bg-emerald-700 hover:bg-emerald-600 text-emerald-50"
+                      : "bg-neutral-700 hover:bg-neutral-600 text-neutral-300"
+                  }`}
+                >
+                  {T("unknownNet")} {unknownNetOn ? "ON" : "OFF"}
+                </button>
+                {vlmAvailable && (
+                  <>
+                    <span className="text-neutral-600">|</span>
+                    <button
+                      type="button"
+                      onClick={handleToggleVlm}
+                      className={`rounded-md px-2.5 py-1 font-sans active:scale-95 transition focus-visible:outline-2 focus-visible:outline-emerald-400 ${
+                        vlmOn
+                          ? "bg-emerald-700 hover:bg-emerald-600 text-emerald-50"
+                          : "bg-neutral-700 hover:bg-neutral-600 text-neutral-300"
+                      }`}
+                    >
+                      VLM {vlmOn ? "ON" : "OFF"}
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
             <div className="absolute top-8 left-1/2 -translate-x-1/2 pointer-events-none">
               <div className="bg-neutral-900/70 backdrop-blur-sm rounded-2xl px-6 py-3">
                 <p className="text-neutral-100 text-lg font-medium">{T("setupHint")}</p>

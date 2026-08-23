@@ -55,9 +55,14 @@ export default function Page() {
               </a>
             </div>
             {process.env.NEXT_PUBLIC_KIOSK_PUBLIC === "1" && (
-              <p className="text-sm text-neutral-500 mt-4">
-                カメラの映像はお使いの端末の中だけで処理され、どこにも送信されません
-              </p>
+              <div className="text-sm text-neutral-500 mt-4 space-y-1">
+                <p>カメラの映像はお使いの端末の中だけで処理され、どこにも送信されません</p>
+                <p>
+                  開発中のため、判別できるものと正確さは学習データによって変わります。
+                  まずは<span className="text-neutral-700 font-medium">ペットボトル・りんご・バナナ・オレンジ</span>など、
+                  しっかり判別できるものからお試しください
+                </p>
+              </div>
             )}
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6 max-w-5xl mx-auto">

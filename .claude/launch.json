@@ -4,15 +4,30 @@
     {
       "name": "Next.js Dev Server",
       "runtimeExecutable": "/bin/zsh",
-      "runtimeArgs": ["-c", "export PATH=/Users/ryuto/.local/share/fnm/node-versions/v22.22.0/installation/bin:$PATH && npm run dev"],
+      "runtimeArgs": [
+        "-c",
+        "export PATH=/Users/ryuto/.local/share/fnm/node-versions/v22.22.0/installation/bin:$PATH && npm run dev"
+      ],
       "port": 3000,
       "autoPort": true
     },
     {
       "name": "Next.js Production Server",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "start"],
+      "runtimeArgs": [
+        "run",
+        "start"
+      ],
       "port": 3000
+    },
+    {
+      "name": "Public Demo (dev)",
+      "runtimeExecutable": "/bin/zsh",
+      "runtimeArgs": [
+        "-c",
+        "export PATH=/Users/ryuto/.local/share/fnm/node-versions/v22.22.0/installation/bin:$PATH && NEXT_PUBLIC_KIOSK_PUBLIC=1 npm run dev -- -p 3100"
+      ],
+      "port": 3100
     }
   ]
 }

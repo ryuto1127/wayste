@@ -36,13 +36,29 @@ export default function Page() {
               <span className="sm:inline-block">AIが判断する。</span>
               <span className="sm:inline-block">あなたは普段通りに捨てるだけ。</span>
             </p>
-            <a
-              href="#cta"
-              className="inline-flex items-center gap-2 px-8 py-4 bg-neutral-900 text-white rounded-full font-medium hover:bg-emerald-600 transition-colors"
-            >
-              導入・協業のご相談
-              <span aria-hidden>→</span>
-            </a>
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+              {process.env.NEXT_PUBLIC_KIOSK_PUBLIC === "1" && (
+                <a
+                  href="/kiosk"
+                  className="inline-flex items-center gap-2 px-8 py-4 bg-emerald-600 text-white rounded-full font-medium hover:bg-emerald-700 transition-colors"
+                >
+                  ブラウザで今すぐ試す
+                  <span aria-hidden>→</span>
+                </a>
+              )}
+              <a
+                href="#cta"
+                className="inline-flex items-center gap-2 px-8 py-4 bg-neutral-900 text-white rounded-full font-medium hover:bg-emerald-600 transition-colors"
+              >
+                導入・協業のご相談
+                <span aria-hidden>→</span>
+              </a>
+            </div>
+            {process.env.NEXT_PUBLIC_KIOSK_PUBLIC === "1" && (
+              <p className="text-sm text-neutral-500 mt-4">
+                カメラの映像はお使いの端末の中だけで処理され、どこにも送信されません
+              </p>
+            )}
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6 max-w-5xl mx-auto">
             {[

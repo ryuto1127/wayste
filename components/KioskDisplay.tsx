@@ -208,6 +208,17 @@ const VIEW_CHANGE_UNSTABLE_MS = 700;
  *  via LOCAL_VLM_ENDPOINT on the server). */
 const CLOUD_FALLBACK_ENABLED = process.env.NEXT_PUBLIC_CLOUD_FALLBACK === "1";
 
+/** Public-demo mode (NEXT_PUBLIC_KIOSK_PUBLIC=1): the kiosk is open to
+ *  anyone, so nothing is logged to the server — no frames, no metadata.
+ *  Visitors' photos must never land in the pilot dataset or Blob storage. */
+const KIOSK_PUBLIC = process.env.NEXT_PUBLIC_KIOSK_PUBLIC === "1";
+
+/** Fire-and-forget pilot-log POST; a no-op in public-demo mode. */
+function postPilotLog(body: unknown): void {
+  if (KIOSK_PUBLIC) return;
+  postPilotLog(body);
+}
+
 // ── Background adaptation rates (passed to FrameAnalyzer per pipeline state) ──
 // idle / cooldown: full rate — continuously absorb drift and persistent leftovers
 const BG_RATE_IDLE = 0.025; // matches BG_LEARN_RATE in frame-analyzer
@@ -771,13 +782,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
           ...(tierResults && { tierResults }),
           allItems: [{ itemName: result.itemName, wasteStream: result.wasteStream, confidence: LOCAL_FALLBACK_CONFIDENCE, modelUsed: "T1" }],
         };
-        fetch("/api/pilot-log", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(
-            faceDetected ? { faceDetected: true, entry } : { image: frame, faceDetected: false, entry }
-          ),
-        }).catch(() => {});
+        postPilotLog(faceDetected ? { faceDetected: true, entry } : { image: frame, faceDetected: false, entry });
         return result;
       }
 
@@ -1928,10 +1933,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
     /** Fire-and-forget pilot-log for a VLM verdict (metadata only — the
      *  crop never leaves the machine). */
     function logVlmVerdict(judgment: VlmJudgment, latencyMs: number, applied: boolean) {
-      fetch("/api/pilot-log", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      postPilotLog({
           entry: {
             modelUsed: "vlm",
             escalated: true,
@@ -1941,8 +1943,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
             requiresVerification: !applied,
             latencyMs,
           },
-        }),
-      }).catch(() => {});
+        });
     }
 
     /** Throttled pilot-log for continuous mode — reuses the gated path's
@@ -2138,10 +2139,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
               ...existing.map(e => ({ itemName: e.itemName, wasteStream: e.wasteStream, confidence: e.confidence ?? 1, modelUsed: "T1" as const })),
               ...newItems.map(ni => ({ itemName: ni.itemName, wasteStream: ni.wasteStream, confidence: ni.confidence, modelUsed: "t2" as const })),
             ];
-            fetch("/api/pilot-log", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
+            postPilotLog({
                 entry: {
                   modelUsed: "t2",
                   escalated: true,
@@ -2153,8 +2151,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
                   meta: lastAnalysisRef.current ? { sharpnessScore: lastAnalysisRef.current.sharpnessScore, imageQuality: imageQualityBand(lastAnalysisRef.current) } : undefined,
                   allItems: sweepAllItems,
                 },
-              }),
-            }).catch(() => {});
+              });
           } else {
             console.log(`[result-sweep] no new items found`);
           }
@@ -2515,11 +2512,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
 
       // Face present → skip image capture entirely, log metadata only.
       if (faceDetected) {
-        fetch("/api/pilot-log", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ faceDetected: true, entry }),
-        }).catch(() => {});
+        postPilotLog({ faceDetected: true, entry });
         return;
       }
 
@@ -2543,11 +2536,7 @@ export default function KioskDisplay({ defaultLocale }: KioskDisplayProps) {
         });
         const frame = dataUrl.split(",")[1];
         if (!frame) return;
-        fetch("/api/pilot-log", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ image: frame, faceDetected: false, entry }),
-        }).catch(() => {});
+        postPilotLog({ image: frame, faceDetected: false, entry });
       } catch {
         // best-effort
       }

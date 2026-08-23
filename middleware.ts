@@ -164,6 +164,13 @@ export async function middleware(request: NextRequest) {
 
   // ── Kiosk session gate (HTML routes only) ──
   if (pathname === "/kiosk" || pathname === "/kiosk/unlock") {
+    // Public-demo mode: anyone can open /kiosk (classification is fully
+    // on-device, so this costs nothing). The API routes behind it keep
+    // their own kiosk auth, and the page skips pilot logging in this mode.
+    if (process.env.NEXT_PUBLIC_KIOSK_PUBLIC === "1") {
+      if (pathname === "/kiosk/unlock") return redirectWithCsp(request, "/kiosk", csp);
+      return passThrough(request, nonce, csp);
+    }
     const kioskAuthed = await hasValidKioskSession(request);
     if (pathname === "/kiosk" && !kioskAuthed) {
       return redirectWithCsp(request, "/kiosk/unlock", csp);

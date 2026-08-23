@@ -171,6 +171,7 @@ vercel env pull
 | `NEXT_PUBLIC_MIRROR_CAMERA` | No | Set to `true` for front-facing / selfie cameras. Omit or set `false` for outward-facing kiosk cameras. |
 | `RATE_LIMIT_MAX` | No | Max classifications per IP per minute (default: `15`) |
 | `OPENAI_DAILY_BUDGET` | No | Hard cap on OpenAI classification calls per UTC day. Recommended: `500` for pilot, `5000` for production. Unset = no cap. |
+| `NEXT_PUBLIC_KIOSK_PUBLIC` | Optional | Set to `1` to open `/kiosk` to anyone (public demo). Classification is fully on-device, so this costs nothing; in this mode the kiosk sends **no** pilot logs or frames to the server, and the landing page shows a "try it in your browser" button. API routes keep their kiosk auth. |
 | `KIOSK_API_TOKEN` | Production | **Server-only** bearer token required by kiosk endpoints (`/api/classify`, `/api/pilot-log` POST). Omit on localhost to skip auth in dev. Never expose via `NEXT_PUBLIC_*`. Unlock a new kiosk device at `/kiosk/unlock`. |
 | `BLOB_STORE_HOST` | Production | Your Vercel Blob store's full hostname (e.g. `abc123.public.blob.vercel-storage.com`). Prevents the blob bearer token from being sent to an attacker-controlled store. |
 | `ADMIN_API_KEY` | No | Password required by admin pages (`/insights`, `/review`) via HTTP Basic Auth → 4-hour session cookie. Omit to skip auth in dev. Rotate to invalidate every issued session. |

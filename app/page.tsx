@@ -58,6 +58,7 @@ export default function Page() {
               <div className="text-sm text-neutral-500 mt-4 space-y-1">
                 <p>カメラの映像はお使いの端末の中だけで処理され、どこにも送信されません</p>
                 <p>
+                  現在この公開デモは、一般的な物体を見分けるAIモデル（COCO80）を使っています。
                   開発中のため、判別できるものと正確さは学習データによって変わります。
                   まずは<span className="text-neutral-700 font-medium">ペットボトル・りんご・バナナ・オレンジ</span>など、
                   しっかり判別できるものからお試しください
